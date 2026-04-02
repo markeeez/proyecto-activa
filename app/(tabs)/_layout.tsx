@@ -1,34 +1,48 @@
+/**
+ * TABS LAYOUT — App principal
+ *
+ * Barra de navegación inferior con 5 tabs:
+ *
+ *   1. Nutrición     → log diario de comidas
+ *   2. Entrenamiento → sesiones de gym
+ *   3. Progreso      → métricas corporales y gráficos
+ *   4. IA            → chat general con el asistente
+ *   5. Perfil        → datos de usuario, plan y ajustes
+ *
+ * Cada tab tiene su propio Stack interno para gestionar
+ * pantallas de detalle sin perder el contexto del tab.
+ */
+
 import { Tabs } from 'expo-router';
-import React from 'react';
 
-import { HapticTab } from '@/components/haptic-tab';
-import { IconSymbol } from '@/components/ui/icon-symbol';
-import { Colors } from '@/constants/theme';
-import { useColorScheme } from '@/hooks/use-color-scheme';
-
-export default function TabLayout() {
-  const colorScheme = useColorScheme();
-
+export default function TabsLayout() {
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
         headerShown: false,
-        tabBarButton: HapticTab,
-      }}>
+        // TODO: personalizar colores con constantes/colores.ts
+        // TODO: añadir iconos SVG/Ionicons por tab
+      }}
+    >
       <Tabs.Screen
-        name="index"
-        options={{
-          title: 'Home',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="house.fill" color={color} />,
-        }}
+        name="(nutricion)"
+        options={{ title: 'Nutrición' }}
       />
       <Tabs.Screen
-        name="explore"
-        options={{
-          title: 'Explore',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="paperplane.fill" color={color} />,
-        }}
+        name="(entrenamiento)"
+        options={{ title: 'Entreno' }}
+      />
+      <Tabs.Screen
+        name="(progreso)"
+        options={{ title: 'Progreso' }}
+      />
+      <Tabs.Screen
+        name="(ia)"
+        options={{ title: 'IA' }}
+      />
+      <Tabs.Screen
+        name="(perfil)"
+        options={{ title: 'Perfil' }}
       />
     </Tabs>
   );

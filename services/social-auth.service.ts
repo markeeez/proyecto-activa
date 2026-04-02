@@ -1,0 +1,145 @@
+/**
+ * SERVICIO DE AUTENTICACIÓN SOCIAL
+ *
+ * Google Sign-In y Apple Sign-In via Supabase signInWithIdToken.
+ * El flujo nativo obtiene el idToken en el dispositivo y lo pasa
+ * a Supabase, que gestiona la sesión desde ahí.
+ *
+ * Requiere dev build (no funciona en Expo Go):
+ *   npx expo run:ios / npx expo run:android
+ */
+
+import { Platform } from 'react-native';
+import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
+import * as AppleAuthentication from 'expo-apple-authentication';
+import { supabase } from '@/lib/supabase';
+import { GOOGLE_WEB_CLIENT_ID } from '@/constants/config';
+
+// ─── Google ───────────────────────────────────────────────────────────────────
+
+/**
+ * Configura el SDK de Google. Llamar una vez al arrancar la app (_layout.tsx).
+ */
+export function configurarGoogle() {
+  GoogleSignin.configure({
+    // El Web Client ID es el que Supabase usa para verificar el token.
+    // Obténlo en: console.cloud.google.com → Credentials → OAuth 2.0 → Web Client
+    webClientId: GOOGLE_WEB_CLIENT_ID,
+    scopes: ['profile', 'email'],
+  });
+}
+
+export type SocialAuthError =
+  | 'CANCELLED'
+  | 'IN_PROGRESS'
+  | 'PLAY_SERVICES_NOT_AVAILABLE'
+  | 'UNKNOWN'
+  | 'NOT_CONFIGURED';
+
+export interface SocialAuthResult {
+  ok: boolean;
+  error?: SocialAuthError;
+  message?: string;
+}
+
+/**
+ * Inicia sesión con Google.
+ * 1. Abre el selector de cuenta de Google (nativo).
+ * 2. Obtiene el idToken.
+ * 3. Pasa el idToken a Supabase para crear/recuperar la sesión.
+ */
+export async function loginConGoogle(): Promise<SocialAuthResult> {
+  if (!GOOGLE_WEB_CLIENT_ID || GOOGLE_WEB_CLIENT_ID.startsWith('REEMPLAZAR')) {
+    return { ok: false, error: 'NOT_CONFIGURED', message: 'Google Web Client ID no configurado.' };
+  }
+
+  try {
+    await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+
+    const response = await GoogleSignin.signIn();
+
+    if (!response.data?.idToken) {
+      return { ok: false, error: 'UNKNOWN', message: 'No se recibió idToken de Google.' };
+    }
+
+    const { error } = await supabase.auth.signInWithIdToken({
+      provider: 'google',
+      token: response.data.idToken,
+    });
+
+    if (error) {
+      return { ok: false, error: 'UNKNOWN', message: error.message };
+    }
+
+    // Éxito: AuthProvider detecta el cambio de sesión automáticamente.
+    return { ok: true };
+
+  } catch (error: any) {
+    if (error.code === statusCodes.SIGN_IN_CANCELLED) {
+      return { ok: false, error: 'CANCELLED' };
+    }
+    if (error.code === statusCodes.IN_PROGRESS) {
+      return { ok: false, error: 'IN_PROGRESS' };
+    }
+    if (error.code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
+      return { ok: false, error: 'PLAY_SERVICES_NOT_AVAILABLE' };
+    }
+    return { ok: false, error: 'UNKNOWN', message: error.message };
+  }
+}
+
+// ─── Apple ────────────────────────────────────────────────────────────────────
+
+/**
+ * Comprueba si Apple Sign-In está disponible en el dispositivo.
+ * Solo disponible en iOS 13+.
+ */
+export async function appleDisponible(): Promise<boolean> {
+  if (Platform.OS !== 'ios') return false;
+  return AppleAuthentication.isAvailableAsync();
+}
+
+/**
+ * Inicia sesión con Apple.
+ * 1. Abre el sheet nativo de Apple.
+ * 2. Obtiene el identityToken.
+ * 3. Pasa el token a Supabase.
+ *
+ * REQUISITO: Tener Apple Developer account y configurado en Supabase.
+ * Mientras no esté configurado, el botón se muestra deshabilitado.
+ */
+export async function loginConApple(): Promise<SocialAuthResult> {
+  if (Platform.OS !== 'ios') {
+    return { ok: false, error: 'UNKNOWN', message: 'Apple Sign-In solo disponible en iOS.' };
+  }
+
+  try {
+    const credential = await AppleAuthentication.signInAsync({
+      requestedScopes: [
+        AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+        AppleAuthentication.AppleAuthenticationScope.EMAIL,
+      ],
+    });
+
+    if (!credential.identityToken) {
+      return { ok: false, error: 'UNKNOWN', message: 'No se recibió identityToken de Apple.' };
+    }
+
+    const { error } = await supabase.auth.signInWithIdToken({
+      provider: 'apple',
+      token: credential.identityToken,
+    });
+
+    if (error) {
+      return { ok: false, error: 'UNKNOWN', message: error.message };
+    }
+
+    return { ok: true };
+
+  } catch (error: any) {
+    if (error.code === 'ERR_REQUEST_CANCELED') {
+      return { ok: false, error: 'CANCELLED' };
+    }
+    return { ok: false, error: 'UNKNOWN', message: error.message };
+  }
+}

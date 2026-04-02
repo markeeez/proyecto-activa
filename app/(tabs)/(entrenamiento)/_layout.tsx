@@ -1,0 +1,23 @@
+/**
+ * ENTRENAMIENTO — Stack layout
+ *
+ * Pantallas dentro del tab de entrenamiento:
+ *
+ *   index              → pantalla principal: sesiones del día + acceso al historial
+ *   nueva-sesion       → modal para iniciar una nueva sesión
+ *   sesion/[id]        → sesión activa o pasada con sus ejercicios y series
+ *   ejercicio/[id]     → detalle de un ejercicio (músculos, descripción, historial)
+ */
+
+import { Stack } from 'expo-router';
+
+export default function EntrenamientoLayout() {
+  return (
+    <Stack>
+      <Stack.Screen name="index" options={{ title: 'Entrenamiento' }} />
+      <Stack.Screen name="nueva-sesion" options={{ title: 'Nueva sesión', presentation: 'modal' }} />
+      <Stack.Screen name="sesion/[id]" options={{ title: 'Sesión' }} />
+      <Stack.Screen name="ejercicio/[id]" options={{ title: 'Ejercicio' }} />
+    </Stack>
+  );
+}

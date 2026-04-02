@@ -1,0 +1,1031 @@
+/**
+ * SERVICIO DE ALIMENTOS
+ *
+ * Flujo de búsqueda:
+ *   1. Capa maestra: ALIMENTOS_BASICOS → `food_tier=master` (prioridad máxima)
+ *   2. Caché local `foods` + USDA FoodData Central (tipado por `dataType`: Foundation / SR / FNDDS)
+ *   3. Ranking: capa + texto + foco en sustantivo − platos compuestos + popularidad (`food_search_popularity`)
+ *   4. Limpieza de consulta (muletillas tipo «sabor a», «congelado») antes de matchear
+ *
+ * Open Food Facts no está integrado en la búsqueda; si se añade, usar `source_kind=openfoodfacts`
+ * y `food_tier=brand` para el badge «Marca».
+ *
+ * Escritura de filas globales (builtin / caché USDA): Edge Function `foods-upsert-global`
+ * con service_role (RLS modelo B). Los custom siguen siendo INSERT directo del cliente.
+ */
+
+import { supabase } from '@/lib/supabase';
+import { USDA_API_SOURCE, USDA_API_KEY, FOOD_API_SOURCE } from '@/constants/config';
+import type {
+  Food,
+  FoodSourceKind,
+  FoodTier,
+} from '@/types/database.types';
+
+// ---------------------------------------------------------------------------
+// DICCIONARIO DE ALIMENTOS BÁSICOS
+// Valores por 100g según USDA FoodData Central (Foundation / SR Legacy).
+// Estos alimentos siempre aparecen primero cuando coinciden con la búsqueda.
+// ---------------------------------------------------------------------------
+interface AlimentoBasico {
+  nombre: string;
+  keywords: string[]; // términos que activan este alimento (ES y EN)
+  calorias: number;
+  proteinas: number;
+  carbohidratos: number;
+  grasas: number;
+  fibra?: number;
+  azucar?: number;
+}
+
+const ALIMENTOS_BASICOS: AlimentoBasico[] = [
+  // ── Aves ──────────────────────────────────────────────────────────────────
+  { nombre: 'Pechuga de pollo (cruda)', keywords: ['pollo', 'chicken', 'pechuga pollo', 'pechuga de pollo', 'chicken breast'], calorias: 120, proteinas: 22.5, carbohidratos: 0, grasas: 2.6 },
+  { nombre: 'Pechuga de pollo (cocida)', keywords: ['pollo cocido', 'pollo asado', 'chicken cooked', 'pechuga cocida'], calorias: 165, proteinas: 31, carbohidratos: 0, grasas: 3.6 },
+  { nombre: 'Muslo de pollo (crudo)', keywords: ['muslo pollo', 'muslo de pollo', 'chicken thigh'], calorias: 177, proteinas: 17.5, carbohidratos: 0, grasas: 12 },
+  { nombre: 'Pechuga de pavo (cruda)', keywords: ['pavo', 'turkey', 'pechuga pavo', 'turkey breast'], calorias: 104, proteinas: 22, carbohidratos: 0, grasas: 1.7 },
+
+  // ── Res y cerdo ───────────────────────────────────────────────────────────
+  { nombre: 'Carne molida de res 80/20 (cruda)', keywords: ['carne molida', 'carne res', 'res', 'beef', 'ground beef', 'carne picada'], calorias: 254, proteinas: 17, carbohidratos: 0, grasas: 20 },
+  { nombre: 'Filete de res (crudo)', keywords: ['filete', 'steak', 'sirloin', 'lomo res'], calorias: 158, proteinas: 26, carbohidratos: 0, grasas: 5.4 },
+  { nombre: 'Lomo de cerdo (crudo)', keywords: ['cerdo', 'pork', 'lomo cerdo', 'lomo de cerdo', 'pork loin'], calorias: 143, proteinas: 21, carbohidratos: 0, grasas: 6 },
+  { nombre: 'Tocino (cocido)', keywords: ['tocino', 'bacon'], calorias: 458, proteinas: 35, carbohidratos: 0, grasas: 35 },
+
+  // ── Pescados y mariscos ───────────────────────────────────────────────────
+  { nombre: 'Salmón (crudo)', keywords: ['salmon', 'salmón'], calorias: 208, proteinas: 20, carbohidratos: 0, grasas: 13, fibra: 0 },
+  { nombre: 'Atún en agua', keywords: ['atun', 'atún', 'tuna', 'atun en agua'], calorias: 84, proteinas: 20, carbohidratos: 0, grasas: 0.5 },
+  { nombre: 'Tilapia (cruda)', keywords: ['tilapia'], calorias: 96, proteinas: 20, carbohidratos: 0, grasas: 1.7 },
+  { nombre: 'Camarones (crudos)', keywords: ['camaron', 'camarón', 'camarones', 'shrimp'], calorias: 85, proteinas: 20, carbohidratos: 0, grasas: 0.9 },
+
+  // ── Huevo ─────────────────────────────────────────────────────────────────
+  { nombre: 'Huevo entero', keywords: ['huevo', 'egg', 'huevos', 'eggs'], calorias: 143, proteinas: 13, carbohidratos: 0.7, grasas: 9.5 },
+  { nombre: 'Clara de huevo', keywords: ['clara', 'clara de huevo', 'egg white'], calorias: 52, proteinas: 11, carbohidratos: 0.7, grasas: 0.2 },
+  { nombre: 'Yema de huevo', keywords: ['yema', 'yema de huevo', 'egg yolk'], calorias: 322, proteinas: 16, carbohidratos: 3.6, grasas: 27 },
+
+  // ── Lácteos ───────────────────────────────────────────────────────────────
+  { nombre: 'Leche entera', keywords: ['leche', 'milk', 'leche entera', 'whole milk'], calorias: 61, proteinas: 3.2, carbohidratos: 4.8, grasas: 3.3, azucar: 5.1 },
+  { nombre: 'Leche descremada', keywords: ['leche descremada', 'leche light', 'skim milk'], calorias: 34, proteinas: 3.4, carbohidratos: 5, grasas: 0.1 },
+  { nombre: 'Yogur natural', keywords: ['yogur', 'yogurt', 'yogur natural'], calorias: 59, proteinas: 3.5, carbohidratos: 4.7, grasas: 3.3, azucar: 4.7 },
+  { nombre: 'Queso cottage', keywords: ['queso cottage', 'cottage cheese', 'cottage'], calorias: 98, proteinas: 11, carbohidratos: 3.4, grasas: 4.3 },
+  { nombre: 'Queso cheddar', keywords: ['queso cheddar', 'cheddar', 'queso'], calorias: 403, proteinas: 25, carbohidratos: 1.3, grasas: 33 },
+  { nombre: 'Mantequilla', keywords: ['mantequilla', 'butter'], calorias: 717, proteinas: 0.9, carbohidratos: 0.1, grasas: 81 },
+
+  // ── Granos y cereales ─────────────────────────────────────────────────────
+  { nombre: 'Arroz blanco (cocido)', keywords: ['arroz', 'rice', 'arroz blanco', 'white rice', 'arroz cocido'], calorias: 130, proteinas: 2.7, carbohidratos: 28, grasas: 0.3, fibra: 0.4 },
+  { nombre: 'Arroz integral (cocido)', keywords: ['arroz integral', 'brown rice'], calorias: 123, proteinas: 2.7, carbohidratos: 26, grasas: 1, fibra: 1.8 },
+  { nombre: 'Avena (seca)', keywords: ['avena', 'oatmeal', 'oats', 'avena cocida'], calorias: 389, proteinas: 17, carbohidratos: 66, grasas: 7, fibra: 10.6, azucar: 0 },
+  { nombre: 'Pan integral', keywords: ['pan integral', 'pan', 'bread', 'whole wheat bread'], calorias: 247, proteinas: 13, carbohidratos: 41, grasas: 4.2, fibra: 6 },
+  { nombre: 'Pan blanco', keywords: ['pan blanco', 'white bread'], calorias: 267, proteinas: 9, carbohidratos: 51, grasas: 3.2, fibra: 2.3 },
+  { nombre: 'Pasta (cocida)', keywords: ['pasta', 'espagueti', 'fideos', 'spaghetti', 'macarron'], calorias: 158, proteinas: 5.8, carbohidratos: 31, grasas: 0.9, fibra: 1.8 },
+  { nombre: 'Quinoa (cocida)', keywords: ['quinoa', 'quinua'], calorias: 120, proteinas: 4.4, carbohidratos: 21, grasas: 1.9, fibra: 2.8 },
+  { nombre: 'Tortilla de maíz', keywords: ['tortilla', 'tortilla maiz', 'corn tortilla'], calorias: 218, proteinas: 5.7, carbohidratos: 45, grasas: 2.9, fibra: 6.3 },
+
+  // ── Verduras ──────────────────────────────────────────────────────────────
+  { nombre: 'Brócoli (crudo)', keywords: ['brocoli', 'brócoli', 'broccoli'], calorias: 34, proteinas: 2.8, carbohidratos: 7, grasas: 0.4, fibra: 2.6 },
+  { nombre: 'Espinaca (cruda)', keywords: ['espinaca', 'spinach'], calorias: 23, proteinas: 2.9, carbohidratos: 3.6, grasas: 0.4, fibra: 2.2 },
+  { nombre: 'Zanahoria (cruda)', keywords: ['zanahoria', 'carrot'], calorias: 41, proteinas: 0.9, carbohidratos: 10, grasas: 0.2, fibra: 2.8 },
+  { nombre: 'Papa / Patata (cocida)', keywords: ['papa', 'patata', 'potato', 'papas'], calorias: 87, proteinas: 1.9, carbohidratos: 20, grasas: 0.1, fibra: 1.8 },
+  { nombre: 'Camote / Batata (cocido)', keywords: ['camote', 'batata', 'sweet potato'], calorias: 86, proteinas: 1.6, carbohidratos: 20, grasas: 0.1, fibra: 3 },
+  { nombre: 'Aguacate', keywords: ['aguacate', 'palta', 'avocado'], calorias: 160, proteinas: 2, carbohidratos: 9, grasas: 15, fibra: 6.7 },
+  { nombre: 'Tomate (crudo)', keywords: ['tomate', 'jitomate', 'tomato'], calorias: 18, proteinas: 0.9, carbohidratos: 3.9, grasas: 0.2, fibra: 1.2 },
+
+  // ── Frutas ────────────────────────────────────────────────────────────────
+  { nombre: 'Plátano / Banana', keywords: ['platano', 'plátano', 'banana', 'banano'], calorias: 89, proteinas: 1.1, carbohidratos: 23, grasas: 0.3, fibra: 2.6, azucar: 12 },
+  { nombre: 'Manzana', keywords: ['manzana', 'apple'], calorias: 52, proteinas: 0.3, carbohidratos: 14, grasas: 0.2, fibra: 2.4, azucar: 10 },
+  { nombre: 'Fresa', keywords: ['fresa', 'fresas', 'strawberry', 'strawberries'], calorias: 32, proteinas: 0.7, carbohidratos: 7.7, grasas: 0.3, fibra: 2, azucar: 4.9 },
+  { nombre: 'Naranja', keywords: ['naranja', 'orange'], calorias: 47, proteinas: 0.9, carbohidratos: 12, grasas: 0.1, fibra: 2.4, azucar: 9.4 },
+  { nombre: 'Mango', keywords: ['mango'], calorias: 60, proteinas: 0.8, carbohidratos: 15, grasas: 0.4, fibra: 1.6, azucar: 13.7 },
+
+  // ── Leguminosas ───────────────────────────────────────────────────────────
+  { nombre: 'Frijoles negros (cocidos)', keywords: ['frijol', 'frijoles', 'frijoles negros', 'black beans'], calorias: 132, proteinas: 8.9, carbohidratos: 24, grasas: 0.5, fibra: 8.7 },
+  { nombre: 'Lentejas (cocidas)', keywords: ['lenteja', 'lentejas', 'lentils'], calorias: 116, proteinas: 9, carbohidratos: 20, grasas: 0.4, fibra: 7.9 },
+  { nombre: 'Garbanzos (cocidos)', keywords: ['garbanzo', 'garbanzos', 'chickpea', 'chickpeas'], calorias: 164, proteinas: 8.9, carbohidratos: 27, grasas: 2.6, fibra: 7.6 },
+  { nombre: 'Tofu', keywords: ['tofu'], calorias: 76, proteinas: 8, carbohidratos: 1.9, grasas: 4.8 },
+
+  // ── Nueces y semillas ──────────────────────────────────────────────────────
+  { nombre: 'Almendras', keywords: ['almendra', 'almendras', 'almond', 'almonds'], calorias: 579, proteinas: 21, carbohidratos: 22, grasas: 50, fibra: 12.5 },
+  { nombre: 'Mantequilla de maní', keywords: ['mantequilla mani', 'mantequilla de mani', 'mantequilla cacahuate', 'peanut butter'], calorias: 588, proteinas: 25, carbohidratos: 20, grasas: 50, fibra: 6 },
+  { nombre: 'Maní / Cacahuate', keywords: ['mani', 'maní', 'cacahuate', 'peanut', 'peanuts'], calorias: 567, proteinas: 26, carbohidratos: 16, grasas: 49, fibra: 8.5 },
+  { nombre: 'Semillas de chía', keywords: ['chia', 'chía', 'chia seeds'], calorias: 486, proteinas: 17, carbohidratos: 42, grasas: 31, fibra: 34 },
+
+  // ── Aceites ───────────────────────────────────────────────────────────────
+  { nombre: 'Aceite de oliva', keywords: ['aceite oliva', 'aceite de oliva', 'olive oil'], calorias: 884, proteinas: 0, carbohidratos: 0, grasas: 100 },
+  { nombre: 'Aceite de coco', keywords: ['aceite coco', 'aceite de coco', 'coconut oil'], calorias: 862, proteinas: 0, carbohidratos: 0, grasas: 100 },
+
+  // ── Proteína en polvo ─────────────────────────────────────────────────────
+  { nombre: 'Proteína whey (suero)', keywords: ['proteina', 'proteína', 'whey', 'suero', 'protein powder'], calorias: 400, proteinas: 80, carbohidratos: 8, grasas: 7 },
+];
+
+const EDGE_FUNCTION_UPSERT_GLOBAL = 'foods-upsert-global';
+
+type PayloadUpsertGlobal = {
+  nombre: string;
+  api_source: 'builtin' | 'usda_fdc';
+  api_id: string;
+  calorias: number;
+  proteinas: number;
+  carbohidratos: number;
+  grasas: number;
+  fibra: number | null;
+  azucar: number | null;
+  food_tier?: FoodTier | null;
+  source_kind?: FoodSourceKind | null;
+  verified_basic?: boolean | null;
+};
+
+/**
+ * Insert/update filas globales vía Edge Function (service_role). Necesario con RLS modelo B.
+ */
+async function upsertGlobalFoodsViaEdge(
+  items: PayloadUpsertGlobal[],
+): Promise<(Food | null)[]> {
+  if (items.length === 0) return [];
+  const { data, error } = await supabase.functions.invoke<{
+    results: (Food | null)[];
+  }>(EDGE_FUNCTION_UPSERT_GLOBAL, { body: { items } });
+  if (error) {
+    console.warn('[alimentos] foods-upsert-global:', error.message);
+    return items.map(() => null);
+  }
+  const results = data?.results;
+  if (!Array.isArray(results) || results.length !== items.length) {
+    return items.map(() => null);
+  }
+  return results;
+}
+
+// ---------------------------------------------------------------------------
+
+export const alimentosService = {
+  /**
+   * Suma un uso al alimento al registrarlo en el diario (popularidad en ranking).
+   * Ignora errores si la migración o RPC aún no existen.
+   */
+  async registrarSeleccionPopularity(foodId: string): Promise<void> {
+    if (!esUuidPostgres(foodId)) return;
+    try {
+      await supabase.rpc('increment_food_popularity', { p_food_id: foodId });
+    } catch {
+      /* noop */
+    }
+  },
+
+  async obtenerAlimentosPorIds(ids: string[]): Promise<Food[]> {
+    if (ids.length === 0) return [];
+    const { data, error } = await supabase
+      .from('foods')
+      .select('*')
+      .in('id', ids);
+    if (error) throw error;
+    return (data ?? []) as Food[];
+  },
+
+  async obtenerAlimentosCreados(userId: string, query = ''): Promise<Food[]> {
+    let req = supabase
+      .from('foods')
+      .select('*')
+      .eq('created_by', userId)
+      .order('created_at', { ascending: false })
+      .limit(30);
+
+    if (query.trim()) {
+      req = req.ilike('nombre', `%${query.trim()}%`);
+    }
+
+    const { data, error } = await req;
+    if (error) throw error;
+    return (data ?? []) as Food[];
+  },
+
+  /**
+   * Favoritos en BD (tabla user_favorite_foods). Si la tabla no existe o RLS falla, devuelve [].
+   */
+  async obtenerFavoritosUsuario(userId: string): Promise<Food[]> {
+    const { data, error } = await supabase
+      .from('user_favorite_foods')
+      .select('food_id, foods (*)')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+
+    if (error) return [];
+    return (data ?? [])
+      .map((row: { foods: Food | null }) => row.foods)
+      .filter(Boolean) as Food[];
+  },
+
+  /**
+   * Marca o desmarca favorito. Devuelve false si la tabla no está disponible (usar fallback local).
+   */
+  async setFavoritoUsuario(
+    userId: string,
+    foodId: string,
+    activo: boolean,
+  ): Promise<boolean> {
+    if (!esUuidPostgres(foodId)) return false;
+
+    if (activo) {
+      const { error } = await supabase.from('user_favorite_foods').upsert(
+        { user_id: userId, food_id: foodId },
+        { onConflict: 'user_id,food_id', ignoreDuplicates: true },
+      );
+      return !error;
+    }
+    const { error } = await supabase
+      .from('user_favorite_foods')
+      .delete()
+      .eq('user_id', userId)
+      .eq('food_id', foodId);
+    return !error;
+  },
+
+  async obtenerRecientes(userId: string): Promise<Food[]> {
+    const { data, error } = await supabase
+      .from('nutrition_log_items')
+      .select(`
+        id,
+        meal_id,
+        foods (*),
+        nutrition_log_meals!inner (
+          id,
+          nutrition_logs!inner (user_id, fecha)
+        )
+      `)
+      .eq('nutrition_log_meals.nutrition_logs.user_id', userId)
+      .order('id', { ascending: false })
+      .limit(80);
+
+    if (error) throw error;
+
+    const seen = new Set<string>();
+    const recentFoods: Food[] = [];
+
+    for (const row of data ?? []) {
+      const food = (row as any).foods as Food | null;
+      if (!food || seen.has(food.id)) continue;
+      seen.add(food.id);
+      recentFoods.push(food);
+      if (recentFoods.length >= 20) break;
+    }
+    return recentFoods;
+  },
+
+  /**
+   * Busca alimentos por nombre.
+   * 1. ALIMENTOS_BASICOS (instantáneo).
+   * 2. Filas ya cacheadas en `foods` (no personalizadas).
+   * 3. USDA + caché.
+   * 4. Personalizados del usuario (si `userId`).
+   *
+   * @param userId Opcional: filtra `is_custom` por `created_by`.
+   */
+  async buscarAlimento(query: string, userId?: string | null): Promise<Food[]> {
+    const term = query.trim();
+    if (!term) return [];
+
+    const termLimpio = limpiarRuidoBusqueda(term) || term;
+    const normalizedQuery = normalizeText(termLimpio);
+    const queryTokens = tokensForMatching(normalizedQuery);
+
+    const basicMatches = buscarEnBasicos(normalizedQuery, queryTokens);
+    const basicFoods = await this._upsertBasicos(basicMatches);
+
+    let usdaFoods: Partial<Food>[] = [];
+    try {
+      usdaFoods = await this._buscarEnUSDA(termLimpio);
+    } catch {
+      usdaFoods = [];
+    }
+
+    let cachedUsdaFoods: Food[] = [];
+    try {
+      cachedUsdaFoods = await this._guardarEnCache(usdaFoods);
+    } catch {
+      cachedUsdaFoods = [];
+    }
+
+    if (cachedUsdaFoods.length === 0 && usdaFoods.length > 0) {
+      const apiIds = usdaFoods.map((f) => f.api_id).filter(Boolean) as string[];
+      if (apiIds.length > 0) {
+        const { data } = await supabase
+          .from('foods')
+          .select('*')
+          .eq('api_source', USDA_API_SOURCE)
+          .in('api_id', apiIds.slice(0, 20));
+        cachedUsdaFoods = (data ?? []) as Food[];
+      }
+    }
+
+    const patronLocal = `%${termLimpio}%`;
+    let localesNoCustom: Food[] = [];
+    try {
+      const { data } = await supabase
+        .from('foods')
+        .select('*')
+        .ilike('nombre', patronLocal)
+        .eq('is_custom', false)
+        .limit(24);
+      localesNoCustom = (data ?? []) as Food[];
+    } catch {
+      localesNoCustom = [];
+    }
+
+    let personalizados: Food[] = [];
+    if (userId) {
+      const { data } = await supabase
+        .from('foods')
+        .select('*')
+        .ilike('nombre', patronLocal)
+        .eq('is_custom', true)
+        .eq('created_by', userId)
+        .limit(8);
+      personalizados = (data ?? []) as Food[];
+    }
+
+    const all: (Food & { _score: number })[] = [];
+
+    const pushScored = (f: Food) => {
+      const normalizedName = normalizeText(f.nombre ?? '');
+      const base = tierBoost(f);
+      const textScore = scoreResult(normalizedName, normalizedQuery, queryTokens);
+      const noun = nounFocusBonus(normalizedName, normalizedQuery, queryTokens);
+      const noise = compoundDishPenalty(normalizedName, queryTokens);
+      all.push({
+        ...f,
+        _score: base + textScore + noun - noise,
+      });
+    };
+
+    for (const f of basicFoods) pushScored(f);
+    for (const f of localesNoCustom) pushScored(rellenarMetaFood(f));
+    for (const f of cachedUsdaFoods) pushScored(rellenarMetaFood(f));
+    for (const f of personalizados) pushScored(rellenarMetaFood(f));
+
+    const popularidad = await cargarPopularidadPorIds(
+      all.map((x) => x.id).filter(esUuidPostgres),
+    );
+    for (const row of all) {
+      const c = popularidad.get(row.id) ?? 0;
+      row._score += popularityBoost(c);
+    }
+
+    const unique = new Map<string, Food & { _score: number }>();
+    for (const item of all) {
+      const key = dedupKeyFood(item);
+      const prev = unique.get(key);
+      if (!prev || item._score > prev._score) unique.set(key, item);
+    }
+
+    const dedupNombre = dedupePorNombreNormalizado(Array.from(unique.values()));
+
+    return dedupNombre
+      .sort((a, b) => b._score - a._score)
+      .slice(0, 20)
+      .map(({ _score, ...rest }) => rest as Food);
+  },
+
+  /**
+   * Devuelve un Food con id UUID válido para `nutrition_log_items.food_id`.
+   */
+  async asegurarFoodParaLog(food: Food): Promise<Food> {
+    if (esUuidPostgres(food.id)) return food;
+
+    const src = food.api_source ?? null;
+    const extId = food.api_id ?? null;
+
+    if (src && extId) {
+      const { data, error } = await supabase
+        .from('foods')
+        .select('*')
+        .eq('api_source', src)
+        .eq('api_id', extId)
+        .maybeSingle();
+      if (!error && data) return data as Food;
+    }
+
+    if (src === 'builtin' && extId) {
+      const basico = ALIMENTOS_BASICOS.find((b) => slugify(b.nombre) === extId);
+      if (basico) {
+        const [row] = await this._upsertBasicos([basico]);
+        if (row && esUuidPostgres(row.id)) return row;
+      }
+    }
+
+    throw new Error(
+      'No se pudo guardar el alimento en la base de datos. Revisa conexión y políticas RLS en foods.',
+    );
+  },
+
+  /**
+   * Obtiene un alimento por su ID.
+   */
+  async obtenerAlimento(id: string): Promise<Food | null> {
+    const { data, error } = await supabase
+      .from('foods')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle();
+    if (error) throw error;
+    return (data as Food | null) ?? null;
+  },
+
+  /**
+   * Crea un alimento personalizado del usuario.
+   */
+  async crearAlimentoPersonalizado(
+    userId: string,
+    datos: Omit<Food, 'id' | 'api_source' | 'api_id' | 'is_custom' | 'created_by' | 'created_at'>
+  ) {
+    const { data, error } = await supabase
+      .from('foods')
+      .insert({
+        ...datos,
+        api_source: null,
+        api_id: null,
+        is_custom: true,
+        created_by: userId,
+        food_tier: 'reference',
+        source_kind: 'custom',
+        verified_basic: false,
+      })
+      .select('*')
+      .single();
+
+    if (error) throw error;
+    return data as Food;
+  },
+
+  /**
+   * Guarda (upsert) los alimentos básicos en Supabase para tener IDs reales.
+   * Usa api_source='builtin' y api_id=slug generado del nombre.
+   */
+  async _upsertBasicos(basicos: AlimentoBasico[]): Promise<Food[]> {
+    if (basicos.length === 0) return [];
+
+    const apiIds = basicos.map((b) => slugify(b.nombre));
+    const byApiId = new Map<string, Food>();
+
+    try {
+      const { data: existingRows } = await supabase
+        .from('foods')
+        .select('*')
+        .eq('api_source', 'builtin')
+        .in('api_id', apiIds);
+      for (const row of existingRows ?? []) {
+        if (row.api_id) byApiId.set(row.api_id, row as Food);
+      }
+    } catch {
+      /* seguimos; intentaremos crear vía Edge */
+    }
+
+    const missing = basicos.filter((b) => !byApiId.has(slugify(b.nombre)));
+    if (missing.length > 0) {
+      const items: PayloadUpsertGlobal[] = missing.map((b) => ({
+        nombre: b.nombre,
+        api_source: 'builtin',
+        api_id: slugify(b.nombre),
+        calorias: b.calorias,
+        proteinas: b.proteinas,
+        carbohidratos: b.carbohidratos,
+        grasas: b.grasas,
+        fibra: b.fibra ?? null,
+        azucar: b.azucar ?? null,
+        food_tier: 'master',
+        source_kind: 'builtin',
+        verified_basic: true,
+      }));
+      const upserted = await upsertGlobalFoodsViaEdge(items);
+      for (let i = 0; i < missing.length; i++) {
+        const row = upserted[i];
+        const apiId = slugify(missing[i].nombre);
+        if (row && esUuidPostgres(String(row.id))) {
+          byApiId.set(apiId, row as Food);
+        } else {
+          byApiId.set(apiId, {
+            id: `builtin_${apiId}`,
+            nombre: missing[i].nombre,
+            api_source: 'builtin',
+            api_id: apiId,
+            calorias: missing[i].calorias,
+            proteinas: missing[i].proteinas,
+            carbohidratos: missing[i].carbohidratos,
+            grasas: missing[i].grasas,
+            fibra: missing[i].fibra ?? null,
+            azucar: missing[i].azucar ?? null,
+            is_custom: false,
+            created_by: null,
+            created_at: new Date().toISOString(),
+            food_tier: 'master',
+            source_kind: 'builtin',
+            verified_basic: true,
+          });
+        }
+      }
+    }
+
+    return basicos.map((b) => {
+      const apiId = slugify(b.nombre);
+      const f = byApiId.get(apiId);
+      if (f) return f;
+      return {
+        id: `builtin_${apiId}`,
+        nombre: b.nombre,
+        api_source: 'builtin',
+        api_id: apiId,
+        calorias: b.calorias,
+        proteinas: b.proteinas,
+        carbohidratos: b.carbohidratos,
+        grasas: b.grasas,
+        fibra: b.fibra ?? null,
+        azucar: b.azucar ?? null,
+        is_custom: false,
+        created_by: null,
+        created_at: new Date().toISOString(),
+        food_tier: 'master',
+        source_kind: 'builtin',
+        verified_basic: true,
+      };
+    });
+  },
+
+  /**
+   * USDA FoodData Central — complementa con ingredientes adicionales.
+   * Busca con el término original más la traducción al inglés si difiere.
+   */
+  async _buscarEnUSDA(query: string): Promise<Partial<Food>[]> {
+    const termEN = traducirAlIngles(query);
+    // Añadir "raw" si el término es un ingrediente simple (mejora resultados USDA)
+    const searchQuery = termEN !== query ? termEN : query;
+    const encoded = encodeURIComponent(searchQuery);
+    const normalizedQuery = normalizeText(query);
+    const normalizedEN = normalizeText(termEN);
+    const allTokens = [...new Set([
+      ...normalizedQuery.split(' ').filter(Boolean),
+      ...normalizedEN.split(' ').filter(Boolean),
+    ])];
+
+    const url =
+      `https://api.nal.usda.gov/fdc/v1/foods/search` +
+      `?query=${encoded}` +
+      `&api_key=${USDA_API_KEY}` +
+      `&dataType=Foundation,SR%20Legacy,Survey%20(FNDDS)` +
+      `&pageSize=50`;
+
+    const response = await fetch(url);
+    if (!response.ok) return [];
+
+    const payload = await response.json();
+    const foods: any[] = Array.isArray(payload?.foods) ? payload.foods : [];
+
+    const mapped = foods
+      .map((f: any) => {
+        const nombre = f?.description?.trim();
+        const apiId = f?.fdcId ? String(f.fdcId) : null;
+        if (!nombre || !apiId) return null;
+
+        const normalizedName = normalizeText(nombre);
+        // Filtro suave: al menos un token debe aparecer en el nombre
+        const hasMatch = allTokens.some((t) => normalizedName.includes(t));
+        if (!hasMatch) return null;
+
+        const nutrientMap: Record<number, number> = {};
+        for (const n of f?.foodNutrients ?? []) {
+          if (n?.nutrientId && n?.value !== undefined) {
+            nutrientMap[n.nutrientId] = Number(n.value);
+          }
+        }
+
+        const score = scoreResult(normalizedName, normalizedQuery, allTokens);
+        const usdaMeta = mapUsdaDataType(f?.dataType);
+
+        return {
+          nombre,
+          api_source: USDA_API_SOURCE,
+          api_id: apiId,
+          calorias: sanitizeNumber(nutrientMap[1008] ?? 0),
+          proteinas: sanitizeNumber(nutrientMap[1003] ?? 0),
+          carbohidratos: sanitizeNumber(nutrientMap[1005] ?? 0),
+          grasas: sanitizeNumber(nutrientMap[1004] ?? 0),
+          fibra: nullableNumber(nutrientMap[1079]),
+          azucar: nullableNumber(nutrientMap[2000]),
+          is_custom: false,
+          created_by: null,
+          food_tier: usdaMeta.food_tier,
+          source_kind: usdaMeta.source_kind,
+          verified_basic: usdaMeta.verified_basic,
+          _score: score,
+        } as Partial<Food> & { _score: number };
+      })
+      .filter(Boolean) as (Partial<Food> & { _score: number })[];
+
+    mapped.sort((a, b) => b._score - a._score);
+    return mapped.slice(0, 15).map(({ _score, ...rest }) => rest);
+  },
+
+  /**
+   * Guarda alimentos en Supabase. Resiliente: cada item en try/catch individual.
+   */
+  async _guardarEnCache(alimentos: Partial<Food>[]) {
+    if (alimentos.length === 0) return [];
+
+    const payload = alimentos.filter(
+      (a) =>
+        !!a.api_id &&
+        !!a.nombre &&
+        (a.api_source === 'builtin' || a.api_source === USDA_API_SOURCE),
+    );
+    if (payload.length === 0) return [];
+
+    const items: PayloadUpsertGlobal[] = payload.map((item) => {
+      const meta = {
+        food_tier: item.food_tier ?? inferTierFromPartial(item),
+        source_kind: item.source_kind ?? inferSourceKindFromPartial(item),
+        verified_basic: item.verified_basic ?? false,
+      };
+      return {
+        nombre: item.nombre!,
+        api_source:
+          item.api_source === 'builtin' ? 'builtin' : ('usda_fdc' as const),
+        api_id: item.api_id!,
+        calorias: item.calorias ?? 0,
+        proteinas: item.proteinas ?? 0,
+        carbohidratos: item.carbohidratos ?? 0,
+        grasas: item.grasas ?? 0,
+        fibra: item.fibra ?? null,
+        azucar: item.azucar ?? null,
+        ...meta,
+      };
+    });
+
+    const results = await upsertGlobalFoodsViaEdge(items);
+    const guardados: Food[] = [];
+    for (let i = 0; i < results.length; i++) {
+      const row = results[i];
+      if (row) guardados.push(row as Food);
+    }
+    return guardados;
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Helpers internos
+// ---------------------------------------------------------------------------
+
+/** UUID v4 (acepta variantes 1–8 que Postgres suele generar). */
+function esUuidPostgres(id: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    id,
+  );
+}
+
+function dedupKeyFood(item: Pick<Food, 'id' | 'api_source' | 'api_id'>): string {
+  if (item.api_source && item.api_id) {
+    return `${item.api_source}:${item.api_id}`;
+  }
+  if (esUuidPostgres(item.id)) {
+    return `id:${item.id}`;
+  }
+  if (item.id?.startsWith('builtin_') && item.api_id) {
+    return `builtin:${item.api_id}`;
+  }
+  return `row:${item.id}`;
+}
+
+/**
+ * Busca en el diccionario ALIMENTOS_BASICOS usando el query normalizado.
+ * Devuelve los básicos que coincidan, ordenados por score.
+ */
+function buscarEnBasicos(
+  normalizedQuery: string,
+  queryTokens: string[],
+): AlimentoBasico[] {
+  const scored = ALIMENTOS_BASICOS.map((a) => {
+    const normalizedName = normalizeText(a.nombre);
+    const keywordsText = a.keywords.map(normalizeText).join(' ');
+
+    let score = 0;
+    // Coincidencia exacta en keywords
+    if (a.keywords.some((k) => normalizeText(k) === normalizedQuery)) score += 150;
+    // Keyword empieza con el query
+    if (a.keywords.some((k) => normalizeText(k).startsWith(normalizedQuery))) score += 80;
+    // Keyword contiene el query
+    if (a.keywords.some((k) => normalizeText(k).includes(normalizedQuery))) score += 50;
+    // Tokens individuales en keywords
+    for (const t of queryTokens) {
+      if (keywordsText.includes(t)) score += 30;
+    }
+    // Nombre también coincide
+    score += scoreResult(normalizedName, normalizedQuery, queryTokens);
+
+    return { alimento: a, score };
+  }).filter((x) => x.score > 0);
+
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, 6).map((x) => x.alimento);
+}
+
+/**
+ * Genera un slug simple para usar como api_id de alimentos builtin.
+ */
+function slugify(text: string): string {
+  return normalizeText(text).replace(/\s+/g, '_').slice(0, 80);
+}
+
+/**
+ * Traduce términos comunes del español al inglés para búsquedas en USDA.
+ */
+function traducirAlIngles(query: string): string {
+  const map: Record<string, string> = {
+    pollo: 'chicken', arroz: 'rice', huevo: 'egg', leche: 'milk',
+    carne: 'beef', res: 'beef', cerdo: 'pork', pavo: 'turkey',
+    salmon: 'salmon', atun: 'tuna', camarones: 'shrimp', camaron: 'shrimp',
+    tilapia: 'tilapia', avena: 'oatmeal', pan: 'bread', pasta: 'pasta',
+    quinoa: 'quinoa', brocoli: 'broccoli', espinaca: 'spinach',
+    zanahoria: 'carrot', papa: 'potato', camote: 'sweet potato',
+    aguacate: 'avocado', palta: 'avocado', platano: 'banana', banano: 'banana',
+    manzana: 'apple', fresa: 'strawberry', naranja: 'orange', mango: 'mango',
+    frijoles: 'beans', lentejas: 'lentils', garbanzos: 'chickpeas',
+    tofu: 'tofu', almendras: 'almonds', mani: 'peanut', cacahuate: 'peanut',
+    proteina: 'protein powder', yogur: 'yogurt', yogurt: 'yogurt',
+    queso: 'cheese', mantequilla: 'butter', aceite: 'oil',
+    'pechuga de pollo': 'chicken breast', 'muslo de pollo': 'chicken thigh',
+    'carne molida': 'ground beef', 'arroz integral': 'brown rice',
+    'pan integral': 'whole wheat bread', 'leche descremada': 'skim milk',
+  };
+  const normalized = normalizeText(query);
+  if (map[normalized]) return map[normalized];
+  for (const [es, en] of Object.entries(map)) {
+    if (normalized.startsWith(es)) return en;
+  }
+  return query;
+}
+
+function sanitizeNumber(value: unknown): number {
+  const n = Number(value ?? 0);
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return Number(n.toFixed(2));
+}
+
+function nullableNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return Number(n.toFixed(2));
+}
+
+function normalizeText(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\w\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function scoreResult(name: string, query: string, tokens: string[]): number {
+  let score = 0;
+  if (name === query) score += 100;
+  else if (name.startsWith(query)) score += 60;
+  else if (name.includes(query)) score += 35;
+  if (hasWholeWord(name, query)) score += 80;
+
+  for (const t of tokens) {
+    if (hasWholeWord(name, t)) score += 35;
+    else if (name.startsWith(t)) score += 18;
+    else if (name.includes(t)) score += 10;
+  }
+
+  // Penalizar nombres muy largos (suelen ser variantes específicas)
+  if (name.length > 60) score -= 8;
+  if (name.length > 40) score -= 4;
+
+  return score;
+}
+
+function hasWholeWord(text: string, token: string): boolean {
+  if (!token) return false;
+  const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?:^|\\s)${escaped}(?:\\s|$)`, 'i').test(text);
+}
+
+const STOPWORDS_BUSQUEDA = new Set([
+  'de',
+  'del',
+  'la',
+  'las',
+  'los',
+  'el',
+  'y',
+  'o',
+  'a',
+  'en',
+  'con',
+  'por',
+  'para',
+  'un',
+  'una',
+  'unos',
+  'unas',
+  'al',
+]);
+
+/** Quita muletillas de empaquetado / marketing de la consulta para matchear mejor el sustantivo. */
+function limpiarRuidoBusqueda(raw: string): string {
+  let s = normalizeText(raw);
+  const frases = [
+    'sabor a ',
+    'sabor de ',
+    'con sabor a ',
+    'sabor ',
+    'tipo ',
+    'estilo ',
+    'imitacion ',
+    'imitación ',
+    'light ',
+    'diet ',
+    'bajo en ',
+    'sin azucar ',
+    'sin azúcar ',
+    'zero ',
+    'deslactosada ',
+    'deslactosado ',
+  ];
+  for (const p of frases) {
+    while (s.includes(p)) s = s.replace(p, ' ');
+  }
+  s = s
+    .replace(/\bcongelad[oa]s?\b/g, ' ')
+    .replace(/\bcongelado\b/g, ' ')
+    .replace(/\bcongelada\b/g, ' ')
+    .replace(/\benlatad[oa]s?\b/g, ' ')
+    .replace(/\bfresco[s]?\b/g, ' ')
+    .replace(/\binstantane[oa]\b/g, ' ')
+    .replace(/\binstantáne[oa]\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return s;
+}
+
+function tokensRelevantes(normalizedQuery: string): string[] {
+  return normalizedQuery
+    .split(' ')
+    .filter((t) => t.length > 1 && !STOPWORDS_BUSQUEDA.has(t));
+}
+
+/** Tokens para scoring; si solo hay stopwords, conserva palabras significativas (>1 carácter). */
+function tokensForMatching(normalizedQuery: string): string[] {
+  const core = tokensRelevantes(normalizedQuery);
+  if (core.length > 0) return core;
+  return normalizedQuery.split(/\s+/).filter((t) => t.length > 1);
+}
+
+function mapUsdaDataType(dataType: string | undefined): {
+  food_tier: FoodTier;
+  source_kind: FoodSourceKind;
+  verified_basic: boolean;
+} {
+  const d = (dataType ?? '').toLowerCase();
+  if (d.includes('foundation')) {
+    return {
+      food_tier: 'reference',
+      source_kind: 'usda_foundation',
+      verified_basic: true,
+    };
+  }
+  if (d.includes('sr legacy') || d === 'legacy') {
+    return {
+      food_tier: 'reference',
+      source_kind: 'usda_sr_legacy',
+      verified_basic: true,
+    };
+  }
+  if (d.includes('fndds') || d.includes('survey')) {
+    return {
+      food_tier: 'brand',
+      source_kind: 'usda_fndds',
+      verified_basic: false,
+    };
+  }
+  return {
+    food_tier: 'reference',
+    source_kind: 'usda_sr_legacy',
+    verified_basic: false,
+  };
+}
+
+function inferTierFromPartial(item: Partial<Food>): FoodTier {
+  if (item.food_tier) return item.food_tier;
+  if (item.api_source === 'builtin') return 'master';
+  if (item.api_source === FOOD_API_SOURCE) return 'brand';
+  return 'reference';
+}
+
+function inferSourceKindFromPartial(item: Partial<Food>): FoodSourceKind {
+  if (item.source_kind) return item.source_kind as FoodSourceKind;
+  if (item.api_source === 'builtin') return 'builtin';
+  if (item.api_source === USDA_API_SOURCE) return 'usda_sr_legacy';
+  if (item.api_source === FOOD_API_SOURCE) return 'openfoodfacts';
+  return 'custom';
+}
+
+function rellenarMetaFood(f: Food): Food {
+  return {
+    ...f,
+    food_tier: f.food_tier ?? inferTierFromPartial(f),
+    source_kind: f.source_kind ?? inferSourceKindFromPartial(f),
+    verified_basic: f.verified_basic ?? f.api_source === 'builtin',
+  };
+}
+
+/** Prioridad fija por capa: maestro (curado) > referencia USDA > producto preparado/marca. */
+function tierBoost(food: Food): number {
+  if (food.is_custom) return 155;
+  if (food.api_source === 'builtin' || food.food_tier === 'master') return 310;
+
+  const sk = food.source_kind;
+  if (sk === 'usda_foundation' || food.verified_basic) return 128;
+  if (sk === 'usda_sr_legacy') return 102;
+  if (sk === 'usda_fndds' || food.food_tier === 'brand') return 48;
+  if (sk === 'openfoodfacts' || food.api_source === FOOD_API_SOURCE) return 36;
+  if (food.api_source === USDA_API_SOURCE) return 88;
+  return 72;
+}
+
+/** Prioriza nombres centrados en el sustantivo buscado (p. ej. «Pollo» sobre «Pizza con pollo»). */
+function nounFocusBonus(
+  normalizedName: string,
+  normalizedQuery: string,
+  tokens: string[],
+): number {
+  const useTokens = tokens.length > 0 ? tokens : normalizedQuery ? [normalizedQuery] : [];
+  let bonus = 0;
+  for (const t of useTokens) {
+    if (!t || t.length < 2) continue;
+    if (normalizedName === t) bonus += 95;
+    else if (normalizedName.startsWith(`${t},`) || normalizedName.startsWith(`${t} `)) {
+      bonus += 72;
+    } else if (hasWholeWord(normalizedName, t)) {
+      const words = normalizedName.split(/\s+/).filter((w) => w.length > 2);
+      if (words.length <= 3) bonus += 38;
+      else bonus += 12;
+    }
+  }
+  return bonus;
+}
+
+/** Penaliza platos compuestos donde el ingrediente es secundario. */
+function compoundDishPenalty(normalizedName: string, tokens: string[]): number {
+  if (tokens.length === 0) return 0;
+  let pen = 0;
+  const hasJunction = /\b(con|with|style|and)\b/.test(normalizedName);
+  if (!hasJunction) return 0;
+
+  for (const t of tokens) {
+    if (t.length < 3) continue;
+    if (!normalizedName.includes(t)) continue;
+    const idx = normalizedName.indexOf(t);
+    const before = normalizedName.slice(0, idx);
+    if (
+      /\b(con|with)\s+\S+\s*$/.test(before.trimEnd()) ||
+      /\S+\s+con\s+$/.test(before) ||
+      /\bpizza\b|\bsandwich\b|\bburger\b|\burrito\b|\btaco\b/.test(before)
+    ) {
+      pen += 52;
+    }
+  }
+  return pen;
+}
+
+function popularityBoost(count: number): number {
+  if (count <= 0) return 0;
+  return Math.min(80, 24 * Math.log10(count + 1));
+}
+
+async function cargarPopularidadPorIds(ids: string[]): Promise<Map<string, number>> {
+  const map = new Map<string, number>();
+  const uniq = [...new Set(ids)];
+  if (uniq.length === 0) return map;
+  const { data, error } = await supabase
+    .from('food_search_popularity')
+    .select('food_id, selection_count')
+    .in('food_id', uniq);
+  if (error) return map;
+  for (const row of data ?? []) {
+    map.set(String(row.food_id), Number(row.selection_count ?? 0));
+  }
+  return map;
+}
+
+/** Fusiona filas con el mismo nombre normalizado (p. ej. duplicados técnicos) conservando el mayor score. */
+function dedupePorNombreNormalizado<T extends { _score: number; nombre: string }>(
+  items: T[],
+): T[] {
+  const byName = new Map<string, T>();
+  for (const it of items) {
+    const k = normalizeText(it.nombre);
+    if (!k) continue;
+    const prev = byName.get(k);
+    if (!prev || it._score > prev._score) byName.set(k, it);
+  }
+  return Array.from(byName.values());
+}
