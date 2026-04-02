@@ -82,6 +82,7 @@ export type FoodTier = 'master' | 'reference' | 'brand';
 /** Origen canónico del registro (para badges y ranking) */
 export type FoodSourceKind =
   | 'builtin'
+  | 'fatsecret'
   | 'usda_foundation'
   | 'usda_sr_legacy'
   | 'usda_fndds'

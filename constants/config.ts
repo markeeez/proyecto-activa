@@ -14,7 +14,9 @@ export const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
 // Google Sign-In — rellenar en .env tras crear credenciales en Google Cloud Console
 export const GOOGLE_WEB_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID ?? '';
 
+/** Open Food Facts — búsqueda de respaldo (sin clave en cliente). */
 export const FOOD_API_SOURCE = 'openfoodfacts';
-export const USDA_API_SOURCE = 'usda_fdc';
-export const USDA_API_KEY = process.env.EXPO_PUBLIC_USDA_API_KEY ?? 'DEMO_KEY';
+/** FatSecret — búsqueda principal vía Edge Function (credenciales en secretos Supabase). */
+export const FATSECRET_API_SOURCE = 'fatsecret';
+
 export const EXERCISE_API_SOURCE = 'api_ninjas';

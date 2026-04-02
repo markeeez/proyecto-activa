@@ -1,5 +1,5 @@
 /**
- * Upsert de filas globales en public.foods (builtin + caché USDA).
+ * Upsert de filas globales en public.foods (builtin, FatSecret, Open Food Facts, legacy USDA).
  * Requiere JWT de usuario válido; escritura con service_role (bypass RLS).
  *
  * Secreto con permisos de escritura (obligatorio). El CLI suele ignorar variables
@@ -11,7 +11,12 @@
  */
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-const ALLOWED_SOURCES = new Set(['builtin', 'usda_fdc']);
+const ALLOWED_SOURCES = new Set([
+  'builtin',
+  'fatsecret',
+  'openfoodfacts',
+  'usda_fdc',
+]);
 const MAX_ITEMS = 30;
 
 type IncomingItem = {
@@ -82,6 +87,7 @@ Deno.serve(async (req) => {
     });
   }
 
+  const token = authHeader.replace(/^Bearer\s+/i, '').trim();
   const userClient = createClient(supabaseUrl, anonKey, {
     global: { headers: { Authorization: authHeader } },
   });
@@ -89,12 +95,19 @@ Deno.serve(async (req) => {
   const {
     data: { user },
     error: userErr,
-  } = await userClient.auth.getUser();
+  } = await userClient.auth.getUser(token);
+  // Evitar que anónimos llenen la caché global: hace falta usuario registrado.
   if (userErr || !user) {
-    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-      status: 401,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return new Response(
+      JSON.stringify({
+        error: 'Unauthorized',
+        detail: userErr?.message ?? 'Se requiere iniciar sesión para guardar alimentos de la API',
+      }),
+      {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    );
   }
 
   let body: { items?: IncomingItem[] };
