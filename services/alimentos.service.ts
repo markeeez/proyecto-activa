@@ -4,16 +4,22 @@
  * Flujo de búsqueda:
  *   1. Capa maestra: ALIMENTOS_BASICOS → `food_tier=master`
  *   2. Caché `foods` (globales: is_custom=false, created_by null) por nombre
- *   3. Si hay pocos resultados en BD: FatSecret (Edge `fatsecret-search`) y respaldo Open Food Facts
- *   4. Los hallazgos de API se upsert-ean vía `foods-upsert-global` (dedupe por api_source + api_id)
- *   5. Ranking: capa + texto + sustantivo − compuestos + popularidad
+ *   3. Si hay pocos en BD: USDA Foundation (query EN vía LibreTranslate + mapa local) → 10 ítems;
+ *      nombres EN→ES con LibreTranslate; luego Open Food Facts ES → 10 ítems (término en español)
+ *   4. Upsert vía `foods-upsert-global` (dedupe por api_source + api_id)
+ *   5. Ranking: capa + texto + sustantivo − compuestos + orden API + popularidad
  *
  * Escritura globales: Edge Functions + service_role (RLS modelo B). Custom: INSERT cliente.
  */
 
 import { FunctionsHttpError } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
-import { FOOD_API_SOURCE, FATSECRET_API_SOURCE } from '@/constants/config';
+import { libreTranslate } from '@/lib/libretranslate';
+import {
+  FOOD_API_SOURCE,
+  FATSECRET_API_SOURCE,
+  USDA_FDC_API_KEY,
+} from '@/constants/config';
 import type {
   Food,
   FoodSourceKind,
@@ -115,10 +121,10 @@ const ALIMENTOS_BASICOS: AlimentoBasico[] = [
 ];
 
 const EDGE_FUNCTION_UPSERT_GLOBAL = 'foods-upsert-global';
-const EDGE_FUNCTION_FATSECRET_SEARCH = 'fatsecret-search';
+const USDA_API_SOURCE = 'usda_fdc';
 
 /**
- * Si hay al menos tantas filas globales para `ilike('%término%')`, no llamamos a FatSecret/OFF.
+ * Si hay al menos tantas filas globales para `ilike('%término%')`, no llamamos a USDA/OFF.
  * Valores altos + nombres tipo "rice" en muchas marcas bloqueaban APIs; 12 equilibra cuota vs frescura.
  */
 const MIN_RESULTADOS_BD_PARA_SALTAR_APIS = 12;
@@ -328,7 +334,7 @@ export const alimentosService = {
    * Busca alimentos por nombre.
    * 1. Opcional: ALIMENTOS_BASICOS (`INCLUIR_BASICOS_EN_BUSQUEDA`).
    * 2. Caché global en `foods` (misma búsqueda).
-   * 3. Si hay pocos en BD: FatSecret y Open Food Facts (término literal, sin mezclar EN en la query API).
+   * 3. Si hay pocos en BD: USDA Foundation (10) + Open Food Facts España (10).
    * 4. Personalizados del usuario (`userId`).
    */
   async buscarAlimento(query: string, userId?: string | null): Promise<Food[]> {
@@ -373,46 +379,38 @@ export const alimentosService = {
       basicos: basicFoods.length,
       bdGlobales: localesNoCustom.length,
       umbralSaltarApis: MIN_RESULTADOS_BD_PARA_SALTAR_APIS,
-      llamarFatSecretYOff: llamarApisExternas,
+      llamarUsdaYOff: llamarApisExternas,
       ...(llamarApisExternas
         ? {}
         : { nota: `APIs omitidas (≥${MIN_RESULTADOS_BD_PARA_SALTAR_APIS} globales ilike en BD)` }),
     });
 
     if (llamarApisExternas) {
-      const exprFat = termLimpio.trim().slice(0, 200);
       try {
-        const fs = await this._buscarFatSecretViaEdge(exprFat);
-        apiCandidates.push(...fs);
-        dbgAlimentos('FatSecret candidatos', fs.length, 'q=', exprFat);
+        const qEn = await terminoInglesParaUsda(termLimpio);
+        dbgAlimentos('USDA query EN', qEn);
+        const usda = await this._buscarUsdaFoundation(qEn);
+        apiCandidates.push(...usda);
+        dbgAlimentos('USDA Foundation candidatos', usda.length);
       } catch (e) {
-        dbgAlimentos('FatSecret excepción', e);
+        dbgAlimentos('USDA excepción', e);
       }
-      if (apiCandidates.length < 12) {
-        try {
-          const off = await this._buscarOpenFoodFacts(termLimpio);
-          apiCandidates.push(...off);
-          dbgAlimentos('OpenFoodFacts candidatos', off.length);
-        } catch (e) {
-          dbgAlimentos('OpenFoodFacts excepción', e);
-        }
+      try {
+        const off = await this._buscarOpenFoodFacts(termLimpio, 10);
+        apiCandidates.push(...off);
+        dbgAlimentos('OpenFoodFacts (ES) candidatos', off.length);
+      } catch (e) {
+        dbgAlimentos('OpenFoodFacts excepción', e);
       }
     }
 
-    /** Orden de aparición en la respuesta FatSecret (solo ítems FS en apiCandidates). */
-    const fatsecretRankByApiId = new Map<string, number>();
-    let fatsecretOrderIdx = 0;
+    /** Conserva el orden devuelto por las APIs (USDA primero, luego OFF). */
+    const apiOrderByKey = new Map<string, number>();
+    let apiOrderIdx = 0;
     for (const c of apiCandidates) {
-      if (
-        c.api_source === FATSECRET_API_SOURCE &&
-        c.api_id != null &&
-        String(c.api_id).length > 0
-      ) {
-        const key = String(c.api_id);
-        if (!fatsecretRankByApiId.has(key)) {
-          fatsecretRankByApiId.set(key, fatsecretOrderIdx++);
-        }
-      }
+      if (!c.api_source || c.api_id == null || String(c.api_id).length === 0) continue;
+      const key = `${c.api_source}:${c.api_id}`;
+      if (!apiOrderByKey.has(key)) apiOrderByKey.set(key, apiOrderIdx++);
     }
 
     let cachedApiFoods: Food[] = [];
@@ -477,11 +475,11 @@ export const alimentosService = {
         singleTokenQuery &&
         queryVariants.some((v) => v && normalizedName === v);
       const bonusNombreMinimo = tituloIgualQuery ? 520 : 0;
-      let fsOrderBoost = 0;
-      if (f.api_source === FATSECRET_API_SOURCE && f.api_id != null) {
-        const rk = fatsecretRankByApiId.get(String(f.api_id));
+      let apiOrderBoost = 0;
+      if (f.api_id != null && f.api_source) {
+        const rk = apiOrderByKey.get(`${f.api_source}:${f.api_id}`);
         if (rk !== undefined) {
-          fsOrderBoost = Math.max(0, 36 - rk) * 11;
+          apiOrderBoost = Math.max(0, 36 - rk) * 11;
         }
       }
       all.push({
@@ -492,7 +490,7 @@ export const alimentosService = {
           noun -
           noise +
           literalBoost +
-          fsOrderBoost +
+          apiOrderBoost +
           bonusNombreMinimo,
       });
     };
@@ -547,12 +545,18 @@ export const alimentosService = {
     }
 
     if (
-      (src === FATSECRET_API_SOURCE || src === FOOD_API_SOURCE) &&
+      (src === FATSECRET_API_SOURCE ||
+        src === FOOD_API_SOURCE ||
+        src === USDA_API_SOURCE) &&
       extId &&
       food.nombre
     ) {
       const apiSrc =
-        src === FATSECRET_API_SOURCE ? 'fatsecret' : ('openfoodfacts' as const);
+        src === FATSECRET_API_SOURCE
+          ? 'fatsecret'
+          : src === USDA_API_SOURCE
+            ? 'usda_fdc'
+            : ('openfoodfacts' as const);
       const [saved] = await upsertGlobalFoodsViaEdge([
         {
           nombre: food.nombre,
@@ -744,97 +748,147 @@ export const alimentosService = {
     return out;
   },
 
-  async _buscarFatSecretViaEdge(searchExpression: string): Promise<Partial<Food>[]> {
-    const q = searchExpression.trim();
-    if (!q) return [];
-    // FatSecret y el relay suelen ir mal con 1–2 letras; evita invocaciones en cascada al teclear.
-    if (q.replace(/\s/g, '').length < 3) {
-      dbgAlimentos('FatSecret omitido (mín. 3 caracteres sin espacios):', q);
+  async _buscarUsdaFoundation(queryEn: string): Promise<Partial<Food>[]> {
+    const key = USDA_FDC_API_KEY.trim();
+    if (!key) {
+      dbgAlimentos('USDA omitido: falta EXPO_PUBLIC_USDA_FDC_API_KEY');
       return [];
     }
-    await refreshSessionIfNeeded();
-    dbgAlimentos('invoke', EDGE_FUNCTION_FATSECRET_SEARCH, { q });
-    const { data, error } = await supabase.functions.invoke<{
-      items: Partial<Food>[];
-    }>(EDGE_FUNCTION_FATSECRET_SEARCH, {
-      body: { q },
-      timeout: 55_000,
+    const q = queryEn.trim().slice(0, 200);
+    if (q.replace(/\s/g, '').length < 2) return [];
+
+    const url =
+      'https://api.nal.usda.gov/fdc/v1/foods/search?' +
+      new URLSearchParams({
+        api_key: key,
+        query: q,
+        dataType: 'Foundation',
+        pageSize: '10',
+      }).toString();
+
+    const res = await fetch(url);
+    if (!res.ok) {
+      dbgAlimentos('USDA search HTTP', res.status);
+      return [];
+    }
+
+    const data = (await res.json()) as { foods?: unknown[] };
+    const foods = Array.isArray(data.foods) ? data.foods : [];
+    type Raw = {
+      fdcId?: number;
+      description?: string;
+      foodNutrients?: unknown[];
+    };
+    const rows: Raw[] = foods
+      .map((f) => f as Raw)
+      .filter((x) => typeof x.fdcId === 'number');
+
+    const enriched = await Promise.all(
+      rows.map(async (row) => {
+        let nutrientRows: unknown[] | undefined = Array.isArray(row.foodNutrients)
+          ? row.foodNutrients
+          : undefined;
+        let macros = macrosFromFdcNutrientRows(nutrientRows);
+        const sinDatosUtiles =
+          macros.calorias <= 0 &&
+          macros.proteinas <= 0 &&
+          macros.carbohidratos <= 0 &&
+          macros.grasas <= 0;
+        if ((macros.calorias <= 0 || sinDatosUtiles) && row.fdcId != null) {
+          const detail = await fetchFdcFoodNutrientRows(row.fdcId, key);
+          if (detail?.length) {
+            nutrientRows = detail;
+            macros = macrosFromFdcNutrientRows(detail);
+          }
+        }
+        return { row, macros };
+      }),
+    );
+
+    const descEn = enriched.map((e) => {
+      const d = String(e.row.description ?? '').trim();
+      return d.length > 0 ? d : `FDC ${e.row.fdcId}`;
     });
-    if (error) {
-      await logEdgeFunctionError('fatsecret-search', error);
-      dbgAlimentos('fatsecret-search error objeto', error);
-      return [];
+    const descEs = await traducirListaEnAEs(descEn);
+
+    const out: Partial<Food>[] = [];
+    for (let i = 0; i < enriched.length; i++) {
+      const { row, macros } = enriched[i];
+      const fdcId = row.fdcId as number;
+      out.push({
+        nombre: descEs[i] ?? descEn[i],
+        api_source: USDA_API_SOURCE,
+        api_id: String(fdcId),
+        calorias: macros.calorias,
+        proteinas: macros.proteinas,
+        carbohidratos: macros.carbohidratos,
+        grasas: macros.grasas,
+        fibra: macros.fibra,
+        azucar: macros.azucar,
+        is_custom: false,
+        created_by: null,
+        food_tier: 'reference',
+        source_kind: 'usda_foundation',
+        verified_basic: false,
+      });
     }
-    const items = data?.items;
-    if (!Array.isArray(items)) {
-      dbgAlimentos('fatsecret-search: data.items no es array', typeof items, data);
-      return [];
-    }
-    const filtered = items.filter((x) => x?.api_id && x?.nombre);
-    if (filtered.length === 0 && items.length > 0) {
-      dbgAlimentos(
-        'fatsecret-search: items descartados (falta api_id o nombre)',
-        items.length,
-      );
-    }
-    if (filtered.length === 0) {
-      dbgAlimentos(
-        'fatsecret-search: cuerpo data (primeros 900 chars)',
-        JSON.stringify(data ?? {}).slice(0, 900),
-      );
-    }
-    return filtered;
+    return out;
   },
 
-  async _buscarOpenFoodFacts(query: string): Promise<Partial<Food>[]> {
+  /**
+   * Open Food Facts — solo productos con país España (tag en search.pl o filtro en v2).
+   */
+  async _buscarOpenFoodFacts(
+    query: string,
+    pageSize = 10,
+  ): Promise<Partial<Food>[]> {
     const t = query.trim();
-    const expr = t.slice(0, 200);
-    const q = encodeURIComponent(expr);
-    const url =
-      `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${q}` +
-      `&search_simple=1&action=process&json=1&page_size=24` +
-      `&fields=code,product_name,nutriments`;
+    if (!t) return [];
+    const termLimpio = limpiarRuidoBusqueda(t) || t;
+    const expr = termLimpio.slice(0, 200);
+    const qEnc = encodeURIComponent(expr);
+    const ps = Math.min(24, Math.max(1, pageSize));
+    const fields = 'code,product_name,product_name_es,nutriments';
 
-    const response = await fetch(url);
-    if (!response.ok) return [];
+    const urlPl =
+      `https://es.openfoodfacts.org/cgi/search.pl?search_terms=${qEnc}` +
+      `&search_simple=1&action=process&json=1&page_size=${ps}` +
+      `&tagtype_0=countries&tag_contains_0=contains&tag_0=Spain` +
+      `&fields=${fields}`;
 
-    const payload = await response.json();
-    const products: Record<string, unknown>[] = Array.isArray(payload?.products)
-      ? payload.products
-      : [];
+    const normalizedQuery = normalizeText(termLimpio);
+    const matchTokens = tokensForMatching(normalizedQuery);
+    if (matchTokens.length === 0) return [];
 
-    const normalizedQuery = normalizeText(query);
-    const normalizedEN = normalizeText(traducirAlIngles(query));
-    const allTokens = [
-      ...new Set([
-        ...normalizedQuery.split(/\s+/).filter(Boolean),
-        ...normalizedEN.split(/\s+/).filter(Boolean),
-      ]),
-    ];
+    let products = await fetchOffSearchPlProducts(urlPl);
+    products = products.filter((p) =>
+      offNombreIncluyeAlgunToken(p as Record<string, unknown>, matchTokens),
+    );
+    if (products.length === 0) {
+      dbgAlimentos(
+        'OFF: sin search.pl o sin nombre acorde; v2 España + token en nombre',
+      );
+      products = await fetchOffV2EspanaConTextoEnNombre(expr, ps, matchTokens);
+    }
+
+    const queryTokens = tokensForMatchingExpanded(normalizedQuery, termLimpio);
 
     const mapped: (Partial<Food> & { _score?: number })[] = [];
 
-    const pushProduct = (
-      p: Record<string, unknown>,
-      tokenFilter: boolean,
-    ): void => {
-      const nombre = String(p?.product_name ?? '').trim();
+    const pushProduct = (p: Record<string, unknown>): void => {
+      const nombreEs = String(p?.product_name_es ?? '').trim();
+      const nombre = (nombreEs || String(p?.product_name ?? '')).trim();
       const code = p?.code != null ? String(p.code) : '';
       if (!nombre || !code) return;
 
       const nName = normalizeText(nombre);
-      if (
-        tokenFilter &&
-        !allTokens.some((tok) => tok.length > 1 && nName.includes(tok))
-      ) {
-        return;
-      }
+      if (!offNombreIncluyeAlgunToken(p, matchTokens)) return;
 
       const nm = (p.nutriments ?? {}) as Record<string, unknown>;
       const kcal = kcalDesdeNutriments(nm);
       if (kcal <= 0) return;
 
-      const score = scoreResult(nName, normalizedQuery, allTokens);
+      const score = scoreResult(nName, normalizedQuery, queryTokens);
       mapped.push({
         nombre,
         api_source: FOOD_API_SOURCE,
@@ -855,17 +909,11 @@ export const alimentosService = {
     };
 
     for (const p of products) {
-      pushProduct(p, true);
-    }
-
-    if (mapped.length === 0 && products.length > 0) {
-      for (const p of products) {
-        pushProduct(p, false);
-      }
+      pushProduct(p as Record<string, unknown>);
     }
 
     mapped.sort((a, b) => (b._score ?? 0) - (a._score ?? 0));
-    return mapped.slice(0, 18).map(({ _score, ...rest }) => rest);
+    return mapped.slice(0, pageSize).map(({ _score, ...rest }) => rest);
   },
 
   /**
@@ -1024,6 +1072,33 @@ function traducirAlIngles(query: string): string {
   return query;
 }
 
+async function terminoInglesParaUsda(termEs: string): Promise<string> {
+  const t = termEs.trim().slice(0, 200);
+  if (!t) return '';
+  const lt = await libreTranslate(t, 'es', 'en');
+  if (lt && lt.length > 0) return lt.slice(0, 200);
+  return traducirAlIngles(t).trim().slice(0, 200);
+}
+
+async function traducirListaEnAEs(textos: string[]): Promise<string[]> {
+  const out = [...textos];
+  const chunk = 3;
+  for (let i = 0; i < textos.length; i += chunk) {
+    const slice = textos.slice(i, i + chunk);
+    const tr = await Promise.all(
+      slice.map(async (s) => {
+        const x = await libreTranslate(s, 'en', 'es');
+        return x && x.length > 0 ? x : s;
+      }),
+    );
+    for (let j = 0; j < tr.length; j++) out[i + j] = tr[j];
+    if (i + chunk < textos.length) {
+      await new Promise((r) => setTimeout(r, 200));
+    }
+  }
+  return out;
+}
+
 /**
  * Inglés → forma ES normalizada (sin acentos) para puntuar nombres en español
  * cuando el usuario escribe en inglés.
@@ -1135,6 +1210,116 @@ function nullableNumber(value: unknown): number | null {
   return Number(n.toFixed(2));
 }
 
+type FdcNutrientRow = {
+  nutrientId?: number;
+  value?: number;
+  amount?: number;
+  nutrient?: { id?: number; number?: string; name?: string; unitName?: string };
+};
+
+function nutrientMapFromFdcRows(rows: unknown[] | undefined): Map<number, number> {
+  const m = new Map<number, number>();
+  if (!Array.isArray(rows)) return m;
+  for (const r of rows) {
+    const row = r as FdcNutrientRow;
+    const id =
+      typeof row.nutrientId === 'number'
+        ? row.nutrientId
+        : typeof row.nutrient?.id === 'number'
+          ? row.nutrient.id
+          : undefined;
+    const val =
+      typeof row.value === 'number'
+        ? row.value
+        : typeof row.amount === 'number'
+          ? row.amount
+          : undefined;
+    if (id != null && val != null && Number.isFinite(val)) m.set(id, val);
+  }
+  return m;
+}
+
+/**
+ * Macros por 100 g desde filas FDC: kcal (1008), kJ→kcal (1062 o fila Energy),
+ * Atwater 4/4/9 si hace falta.
+ */
+function macrosFromFdcNutrientRows(rows: unknown[] | undefined): {
+  calorias: number;
+  proteinas: number;
+  carbohidratos: number;
+  grasas: number;
+  fibra: number | null;
+  azucar: number | null;
+} {
+  const m = nutrientMapFromFdcRows(rows);
+  const proteinas = sanitizeNumber(m.get(1003) ?? 0);
+  const carbohidratos = sanitizeNumber(m.get(1005) ?? 0);
+  const grasas = sanitizeNumber(m.get(1004) ?? 0);
+  let calorias = sanitizeNumber(m.get(1008) ?? 0);
+
+  if (calorias <= 0) {
+    const kj = m.get(1062);
+    if (kj != null && kj > 20) calorias = sanitizeNumber(kj / 4.184);
+  }
+  if (calorias <= 0) {
+    const atw = m.get(2047);
+    if (atw != null && atw > 0) calorias = sanitizeNumber(atw);
+  }
+
+  if (calorias <= 0 && Array.isArray(rows)) {
+    for (const r of rows) {
+      const o = r as Record<string, unknown>;
+      const nut = o.nutrient as Record<string, unknown> | undefined;
+      const name = String(nut?.name ?? '').toLowerCase();
+      const unit = String(nut?.unitName ?? '').toLowerCase();
+      const amt =
+        typeof o.amount === 'number'
+          ? o.amount
+          : typeof o.value === 'number'
+            ? o.value
+            : null;
+      if (amt == null || !Number.isFinite(amt)) continue;
+      if (!name.includes('energy')) continue;
+      if (unit === 'kj') {
+        calorias = sanitizeNumber(amt / 4.184);
+        break;
+      }
+      if (unit === 'kcal') {
+        calorias = sanitizeNumber(amt);
+        break;
+      }
+    }
+  }
+
+  if (calorias <= 0 && (proteinas > 0 || carbohidratos > 0 || grasas > 0)) {
+    calorias = sanitizeNumber(4 * proteinas + 4 * carbohidratos + 9 * grasas);
+  }
+
+  return {
+    calorias,
+    proteinas,
+    carbohidratos,
+    grasas,
+    fibra: nullableNumber(m.get(1079)),
+    azucar: nullableNumber(m.get(2000)),
+  };
+}
+
+async function fetchFdcFoodNutrientRows(
+  fdcId: number,
+  apiKey: string,
+): Promise<unknown[] | undefined> {
+  try {
+    const url = `https://api.nal.usda.gov/fdc/v1/food/${fdcId}?api_key=${encodeURIComponent(apiKey)}`;
+    const res = await fetch(url);
+    if (!res.ok) return undefined;
+    const j = (await res.json()) as { foodNutrients?: unknown[] };
+    return Array.isArray(j.foodNutrients) ? j.foodNutrients : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** kcal explícitos o conversión desde kJ (OFF a veces solo publica energía en kJ). */
 function kcalDesdeNutriments(nm: Record<string, unknown>): number {
   const k100 = nm['energy-kcal_100g'];
@@ -1146,6 +1331,101 @@ function kcalDesdeNutriments(nm: Record<string, unknown>): number {
   const kjs = nm['energy-kj_serving'];
   if (kjs != null && Number(kjs) > 0) return Number(kjs) / 4.184;
   return 0;
+}
+
+/** Producto marcado como vendido en España (API v2 / campos opcionales). */
+function vendeEnEspana(p: Record<string, unknown>): boolean {
+  const tags = p.countries_tags;
+  if (Array.isArray(tags)) {
+    for (const x of tags) {
+      if (x === 'en:spain' || x === 'es:espana' || x === 'es:spain') return true;
+    }
+  }
+  const c = String(p.countries ?? p.country ?? '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+  return c.includes('spain') || c.includes('españa') || c.includes('espana');
+}
+
+/** El nombre comercial (ES preferente) debe contener algún token de búsqueda relevante. */
+function offNombreIncluyeAlgunToken(
+  p: Record<string, unknown>,
+  tokens: string[],
+): boolean {
+  if (tokens.length === 0) return false;
+  const nombreEs = String(p.product_name_es ?? '').trim();
+  const nombre = (nombreEs || String(p.product_name ?? '')).trim();
+  const nName = normalizeText(nombre);
+  return tokens.some((tok) => tok.length > 1 && nName.includes(tok));
+}
+
+async function fetchOffSearchPlProducts(url: string): Promise<Record<string, unknown>[]> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return [];
+    const payload = (await res.json()) as { products?: unknown[] };
+    const arr = Array.isArray(payload?.products) ? payload.products : [];
+    return arr as Record<string, unknown>[];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * v2 paginada: España + el nombre debe contener algún token (evita avena al buscar «pollo»).
+ */
+async function fetchOffV2EspanaConTextoEnNombre(
+  query: string,
+  needCount: number,
+  matchTokens: string[],
+): Promise<Record<string, unknown>[]> {
+  const q = query.trim().slice(0, 200);
+  if (!q || matchTokens.length === 0) return [];
+
+  const fields = encodeURIComponent(
+    'code,product_name,product_name_es,nutriments,countries_tags,countries',
+  );
+  const qEnc = encodeURIComponent(q);
+  const perPage = 40;
+  const maxPages = 10;
+  const targetPool = Math.min(80, Math.max(needCount * 4, 24));
+  const bases = [
+    'https://es.openfoodfacts.org/api/v2/search',
+    'https://world.openfoodfacts.org/api/v2/search',
+  ];
+
+  const collected: Record<string, unknown>[] = [];
+  const seen = new Set<string>();
+
+  for (const base of bases) {
+    for (let page = 1; page <= maxPages && collected.length < targetPool; page++) {
+      const u = `${base}?search_terms=${qEnc}&page=${page}&page_size=${perPage}&fields=${fields}`;
+      try {
+        const res = await fetch(u);
+        if (!res.ok) continue;
+        const j = (await res.json()) as { products?: unknown[] };
+        const raw = Array.isArray(j?.products) ? j.products : [];
+        if (raw.length === 0) break;
+
+        for (const item of raw) {
+          const p = item as Record<string, unknown>;
+          if (!vendeEnEspana(p)) continue;
+          if (!offNombreIncluyeAlgunToken(p, matchTokens)) continue;
+          const code = String(p.code ?? '');
+          if (!code || seen.has(code)) continue;
+          seen.add(code);
+          collected.push(p);
+        }
+        if (raw.length < perPage) break;
+      } catch {
+        continue;
+      }
+    }
+    if (collected.length > 0) break;
+  }
+
+  return collected;
 }
 
 function normalizeText(value: string): string {
@@ -1273,7 +1553,7 @@ function inferSourceKindFromPartial(item: Partial<Food>): FoodSourceKind {
   if (item.api_source === FOOD_API_SOURCE || item.api_source === 'openfoodfacts') {
     return 'openfoodfacts';
   }
-  if (item.api_source === 'usda_fdc') return 'usda_sr_legacy';
+  if (item.api_source === 'usda_fdc') return 'usda_foundation';
   return 'custom';
 }
 
@@ -1286,7 +1566,7 @@ function rellenarMetaFood(f: Food): Food {
   };
 }
 
-/** Prioridad por capa: maestro > FatSecret genérico > marca/OFF. */
+/** Prioridad por capa: maestro > USDA Foundation > FatSecret > marca/OFF. */
 function tierBoost(food: Food): number {
   if (food.is_custom) return 155;
   if (food.api_source === 'builtin' || food.food_tier === 'master') return 310;

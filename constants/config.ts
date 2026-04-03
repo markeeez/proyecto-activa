@@ -16,7 +16,18 @@ export const GOOGLE_WEB_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID
 
 /** Open Food Facts — búsqueda de respaldo (sin clave en cliente). */
 export const FOOD_API_SOURCE = 'openfoodfacts';
-/** FatSecret — búsqueda principal vía Edge Function (credenciales en secretos Supabase). */
+/** FatSecret — legado / asegurarFoodParaLog; la búsqueda usa USDA + OFF. */
 export const FATSECRET_API_SOURCE = 'fatsecret';
+
+/** USDA FoodData Central — clave en https://fdc.nal.usda.gov/api-key-signup.html */
+export const USDA_FDC_API_KEY = process.env.EXPO_PUBLIC_USDA_FDC_API_KEY ?? '';
+
+/** LibreTranslate: instancia por defecto pública (límites bajos); mejor self-host en producción. */
+export const LIBRETRANSLATE_URL =
+  (process.env.EXPO_PUBLIC_LIBRETRANSLATE_URL ?? 'https://libretranslate.com').replace(
+    /\/$/,
+    '',
+  );
+export const LIBRETRANSLATE_API_KEY = process.env.EXPO_PUBLIC_LIBRETRANSLATE_API_KEY ?? '';
 
 export const EXERCISE_API_SOURCE = 'api_ninjas';
