@@ -49,6 +49,14 @@
         {
           "iosUrlScheme": "com.googleusercontent.apps.REEMPLAZAR_CON_IOS_CLIENT_ID"
         }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Activa necesita la cámara para fotografiar etiquetas nutricionales y escanear códigos de barras.",
+          "microphonePermission": "Activa puede usar el micrófono si grabas vídeo con la cámara.",
+          "recordAudioAndroid": true
+        }
       ]
     ],
     "experiments": {

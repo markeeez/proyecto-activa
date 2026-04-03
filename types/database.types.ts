@@ -126,6 +126,8 @@ export interface NutritionLog {
   user_id: string;
   fecha: string; // date ISO
   created_at: string;
+  /** meal_types.id excluidos de este día (no recrear fila en nutrition_log_meals) */
+  excluded_meal_type_ids?: string[] | null;
 }
 
 export interface NutritionLogMeal {

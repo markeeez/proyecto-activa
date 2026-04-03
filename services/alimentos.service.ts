@@ -898,6 +898,52 @@ export const alimentosService = {
   },
 
   /**
+   * Open Food Facts por código de barras → fila en caché global (`foods-upsert-global`).
+   */
+  async resolverProductoPorCodigoBarras(codigo: string): Promise<Food | null> {
+    const clean = String(codigo ?? '').replace(/\D/g, '');
+    if (clean.length < 8 || clean.length > 14) return null;
+    const url = `https://world.openfoodfacts.org/api/v0/product/${encodeURIComponent(clean)}.json`;
+    try {
+      const res = await fetch(url);
+      if (!res.ok) return null;
+      const j = (await res.json()) as {
+        status?: number;
+        product?: Record<string, unknown>;
+      };
+      if (j.status !== 1 || !j.product) return null;
+      const p = j.product;
+      const nombreEs = String(p.product_name_es ?? '').trim();
+      const nombre = (nombreEs || String(p.product_name ?? '')).trim();
+      const code = p.code != null ? String(p.code) : clean;
+      if (!nombre) return null;
+      const nm = (p.nutriments ?? {}) as Record<string, unknown>;
+      const kcal = kcalDesdeNutriments(nm);
+      if (kcal <= 0) return null;
+      const partial: Partial<Food> = {
+        nombre,
+        api_source: FOOD_API_SOURCE,
+        api_id: code,
+        calorias: sanitizeNumber(kcal),
+        proteinas: sanitizeNumber(nm.proteins_100g ?? 0),
+        carbohidratos: sanitizeNumber(nm.carbohydrates_100g ?? 0),
+        grasas: sanitizeNumber(nm.fat_100g ?? 0),
+        fibra: nullableNumber(nm.fiber_100g),
+        azucar: nullableNumber(nm.sugars_100g),
+        is_custom: false,
+        created_by: null,
+        food_tier: 'brand',
+        source_kind: 'openfoodfacts',
+        verified_basic: false,
+      };
+      const saved = await this._guardarEnCache([partial]);
+      return saved[0] ?? null;
+    } catch {
+      return null;
+    }
+  },
+
+  /**
    * Upsert en `foods` vía Edge (dedupe por api_source + api_id).
    */
   async _guardarEnCache(alimentos: Partial<Food>[]) {

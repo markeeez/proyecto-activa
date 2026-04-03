@@ -21,6 +21,13 @@ export interface AlimentoEnLog extends NutritionLogItem {
   food: Food;
 }
 
+/** Línea copiada para pegar en otra comida (macros por 100 g). */
+export interface LineaCopiadaNutricion {
+  foodId: string;
+  gramos: number;
+  food: { calorias: number; proteinas: number; carbohidratos: number; grasas: number };
+}
+
 /** Comida completa con sus alimentos (para mostrar en el log diario) */
 export interface ComidaConAlimentos {
   mealId: string;
@@ -35,6 +42,8 @@ export interface ComidaConAlimentos {
 /** Resumen del día de nutrición */
 export interface ResumenDiarioNutricion {
   fecha: string;
+  /** nutrition_logs.id (crear comidas personalizadas, excluir secciones, etc.) */
+  logId: string;
   totalCalorias: number;
   totalProteinas: number;
   totalCarbos: number;

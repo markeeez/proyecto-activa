@@ -1,31 +1,116 @@
-import { useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { router } from 'expo-router';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Modal,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+import { Gesture, GestureDetector, Swipeable } from 'react-native-gesture-handler';
+import { runOnJS } from 'react-native-reanimated';
+import DraggableFlatList, { ScaleDecorator } from 'react-native-draggable-flatlist';
+
+import { useComidaPortapapeles } from '@/context/ComidaPortapapelesContext';
+import { useAuth } from '@/hooks/useAuth';
 import { useNutricion } from '@/hooks/useNutricion';
 import { useTheme } from '@/hooks/useTheme';
+import { agregarDiasIso, getSemanaMovil, parseFechaLocal } from '@/lib/fechaNutricion';
+import { guardarOrdenComidas, obtenerOrdenComidas } from '@/lib/nutricionLogPreferencias';
+import type { ComidaConAlimentos } from '@/types/app.types';
 
 type MacroKey = 'proteinas' | 'carbos' | 'grasas';
 
+function ordenarComidas(comidas: ComidaConAlimentos[], ordenIds: string[] | null): ComidaConAlimentos[] {
+  if (!ordenIds?.length) {
+    return [...comidas].sort((a, b) => (a.mealType?.orden ?? 0) - (b.mealType?.orden ?? 0));
+  }
+  const map = new Map(comidas.map((c) => [c.mealType.id, c]));
+  const seen = new Set<string>();
+  const out: ComidaConAlimentos[] = [];
+  for (const id of ordenIds) {
+    const c = map.get(id);
+    if (c) {
+      out.push(c);
+      seen.add(id);
+    }
+  }
+  for (const c of comidas) {
+    if (!seen.has(c.mealType.id)) out.push(c);
+  }
+  return out;
+}
+
 export default function NutricionIndex() {
   const { c, f, ts, s, r } = useTheme();
-  const { fecha, cambiarFecha, resumen, objetivos, cargando } = useNutricion();
+  const { user } = useAuth();
+  const {
+    fecha,
+    cambiarFecha,
+    resumen,
+    objetivos,
+    cargando,
+    vaciarComida,
+    eliminarComidaDelLog,
+    crearComidaPersonalizada,
+    pegarAlimentosEnComida,
+    eliminarAlimento,
+  } = useNutricion();
+  const { copiarDesdeComida, tieneCopia, lineas, limpiarPortapapeles } = useComidaPortapapeles();
+
   const styles = useMemo(() => makeStyles(c, f, ts, s, r), [c, f, ts, s, r]);
 
-  const fechaSeleccionada = new Date(`${fecha}T00:00:00`);
-  const fechaLabel = fechaSeleccionada.toLocaleDateString('es-ES', {
-    weekday: 'long',
-    day: '2-digit',
-    month: 'short',
-  });
+  const [ordenIds, setOrdenIds] = useState<string[] | null>(null);
+  const [comidasData, setComidasData] = useState<ComidaConAlimentos[]>([]);
+  const [modalNuevaComida, setModalNuevaComida] = useState(false);
+  const [nombreNuevaComida, setNombreNuevaComida] = useState('');
+  const [menuMealId, setMenuMealId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    void obtenerOrdenComidas(user.id).then(setOrdenIds);
+  }, [user?.id]);
+
+  /** Quitar del orden guardado los meal_type_id que ya no existen en el log (evita “fantasmas” tras borrar en BD). */
+  useEffect(() => {
+    if (!user?.id || !resumen?.comidas) return;
+    setOrdenIds((prev) => {
+      if (prev == null) return prev;
+      const present = new Set(resumen.comidas.map((x) => x.mealType.id));
+      const next = prev.filter((id) => present.has(id));
+      if (next.length === prev.length && next.every((id, i) => id === prev[i])) return prev;
+      void guardarOrdenComidas(user.id, next);
+      return next;
+    });
+  }, [resumen?.comidas, user?.id]);
+
+  const listaOrdenada = useMemo(
+    () => ordenarComidas(resumen?.comidas ?? [], ordenIds),
+    [resumen?.comidas, ordenIds],
+  );
+
+  useEffect(() => {
+    setComidasData(listaOrdenada);
+  }, [listaOrdenada]);
+
+  const fechaLabel = useMemo(() => {
+    const d = parseFechaLocal(fecha);
+    return d.toLocaleDateString('es-ES', {
+      weekday: 'long',
+      day: '2-digit',
+      month: 'short',
+    });
+  }, [fecha]);
+
   const objetivoCalorias = objetivos?.calorias_objetivo ?? 2000;
   const totalCalorias = resumen?.totalCalorias ?? 0;
   const totalProteinas = resumen?.totalProteinas ?? 0;
   const totalCarbos = resumen?.totalCarbos ?? 0;
   const totalGrasas = resumen?.totalGrasas ?? 0;
-  const comidas = resumen?.comidas ?? [];
   const progresoCalorias = Math.min(1, totalCalorias / Math.max(1, objetivoCalorias));
 
-  const semana = getSemanaMovil(fecha);
   const macros = {
     proteinas: {
       label: 'PROTEINAS',
@@ -44,31 +129,80 @@ export default function NutricionIndex() {
     },
   };
 
-  return (
-    <View style={styles.root}>
-      {cargando && (
-        <View style={styles.loadingOverlay}>
-          <ActivityIndicator color={c.primary} />
-        </View>
-      )}
-      <ScrollView
-        contentContainerStyle={styles.scroll}
-        showsVerticalScrollIndicator={false}
-      >
-        <View style={styles.weekCalendar}>
-          {semana.map((d, index) => (
-            <Pressable
-              key={`${d.key}-${d.dia}-${index}`}
-              style={[styles.dayItem, d.activo && styles.dayItemActive]}
-              onPress={() => cambiarFecha(d.fechaIso)}
-            >
-              <Text style={[styles.dayLetter, d.activo && styles.dayLetterActive]}>{d.key}</Text>
-              <Text style={[styles.dayNumber, d.activo && styles.dayNumberActive]}>{d.dia}</Text>
-            </Pressable>
-          ))}
-        </View>
+  const semana = useMemo(() => getSemanaMovil(fecha), [fecha]);
 
-        <View style={styles.summaryCard}>
+  const avanzarDia = useCallback(() => {
+    cambiarFecha(agregarDiasIso(fecha, 1));
+  }, [fecha, cambiarFecha]);
+
+  const retrocederDia = useCallback(() => {
+    cambiarFecha(agregarDiasIso(fecha, -1));
+  }, [fecha, cambiarFecha]);
+
+  const swipeCalendario = useMemo(
+    () =>
+      Gesture.Pan()
+        .activeOffsetX([-24, 24])
+        .failOffsetY([-20, 20])
+        .onEnd((e) => {
+          'worklet';
+          if (e.translationX < -48) {
+            runOnJS(avanzarDia)();
+          } else if (e.translationX > 48) {
+            runOnJS(retrocederDia)();
+          }
+        }),
+    [avanzarDia, retrocederDia],
+  );
+
+  const onDragEnd = useCallback(
+    ({ data }: { data: ComidaConAlimentos[] }) => {
+      setComidasData(data);
+      const ids = data.map((c) => c.mealType.id);
+      setOrdenIds(ids);
+      if (user?.id) void guardarOrdenComidas(user.id, ids);
+    },
+    [user?.id],
+  );
+
+  const cerrarMenu = useCallback(() => setMenuMealId(null), []);
+
+  const mealDelMenu = useMemo(
+    () => comidasData.find((m) => m.mealId === menuMealId) ?? null,
+    [comidasData, menuMealId],
+  );
+
+  const confirmarNuevaComida = useCallback(async () => {
+    const logId = resumen?.logId;
+    if (!logId || !nombreNuevaComida.trim()) return;
+    try {
+      await crearComidaPersonalizada(logId, nombreNuevaComida.trim());
+      setModalNuevaComida(false);
+      setNombreNuevaComida('');
+    } catch {
+      /* silencioso; podría mostrarse toast */
+    }
+  }, [resumen?.logId, nombreNuevaComida, crearComidaPersonalizada]);
+
+  const renderHeader = useCallback(() => {
+    return (
+      <>
+        <GestureDetector gesture={swipeCalendario}>
+          <View style={styles.weekCalendar}>
+            {semana.map((d, index) => (
+              <Pressable
+                key={`${d.key}-${d.fechaIso}-${index}`}
+                style={[styles.dayItem, d.activo && styles.dayItemActive]}
+                onPress={() => cambiarFecha(d.fechaIso)}
+              >
+                <Text style={[styles.dayLetter, d.activo && styles.dayLetterActive]}>{d.key}</Text>
+                <Text style={[styles.dayNumber, d.activo && styles.dayNumberActive]}>{d.dia}</Text>
+              </Pressable>
+            ))}
+          </View>
+        </GestureDetector>
+
+        <View style={[styles.summaryCard, styles.summaryCardBelowCalendar]}>
           <View style={styles.summaryTop}>
             <Text style={styles.summaryValue}>
               {Math.round(totalCalorias)}
@@ -100,31 +234,111 @@ export default function NutricionIndex() {
           })}
         </View>
 
-        <View style={styles.mealsBlock}>
-          <Text style={styles.sectionTitle}>COMIDAS DEL DIA</Text>
-          {comidas.map((meal) => (
-            <View key={meal.mealId} style={styles.mealCard}>
-              <View style={styles.mealHeader}>
-                <Text style={styles.mealTitle}>{meal.mealType?.nombre ?? 'Comida'}</Text>
-                <Text style={styles.mealMeta}>
-                  {Math.round(meal.totalCalorias)} KCAL  -  {Math.round(meal.totalProteinas)}P  |  {Math.round(meal.totalCarbos)}C  |  {Math.round(meal.totalGrasas)}G
-                </Text>
+        <Text style={styles.sectionTitle}>COMIDAS DEL DIA</Text>
+      </>
+    );
+  }, [
+    swipeCalendario,
+    semana,
+    styles,
+    cambiarFecha,
+    totalCalorias,
+    fechaLabel,
+    progresoCalorias,
+    objetivoCalorias,
+    macros,
+  ]);
+
+  const renderItem = useCallback(
+    ({ item: meal, drag, isActive }: { item: ComidaConAlimentos; drag: () => void; isActive: boolean }) => {
+      const logId = resumen?.logId;
+
+      const leftActions = () => (
+        <View style={styles.swipeLeft}>
+          <View style={styles.swipeDeleteInner}>
+            <Text style={styles.swipeDeleteTxt}>Eliminar</Text>
+          </View>
+        </View>
+      );
+
+      return (
+        <ScaleDecorator>
+          <Swipeable
+            renderLeftActions={leftActions}
+            overshootLeft={false}
+            onSwipeableOpen={(direction) => {
+              if (direction !== 'left' || !logId) return;
+              void (async () => {
+                try {
+                  await eliminarComidaDelLog(logId, meal.mealId);
+                } catch (e) {
+                  console.error('[Nutricion] eliminar comida', e);
+                }
+              })();
+            }}
+          >
+            <View style={[styles.mealCard, isActive && styles.mealCardActive]}>
+              <View style={styles.mealHeaderRow}>
+                <Pressable onLongPress={drag} delayLongPress={220} style={styles.dragHandle} hitSlop={8}>
+                  <Text style={styles.dragHandleText}>≡</Text>
+                </Pressable>
+                <View style={styles.mealHeaderText}>
+                  <Text style={styles.mealTitle}>{meal.mealType?.nombre ?? 'Comida'}</Text>
+                  <Text style={styles.mealMeta}>
+                    {Math.round(meal.totalCalorias)} KCAL · {Math.round(meal.totalProteinas)}P |{' '}
+                    {Math.round(meal.totalCarbos)}C | {Math.round(meal.totalGrasas)}G
+                  </Text>
+                </View>
+                <Pressable
+                  style={styles.menuDots}
+                  onPress={() => setMenuMealId(meal.mealId)}
+                  hitSlop={10}
+                >
+                  <Text style={styles.menuDotsText}>⋮</Text>
+                </Pressable>
               </View>
 
               <View style={styles.mealItemsList}>
-                {meal.items.map((item) => (
-                  <View key={item.id} style={styles.foodRow}>
-                    <View style={styles.foodMain}>
-                      <Text style={styles.foodName}>{item.food?.nombre ?? 'Alimento'}</Text>
-                      <Text style={styles.foodMeta}>
-                        {Math.round(item.gramos)}g  -  {Math.round(item.calorias_calculadas)} kcal
-                      </Text>
+                {meal.items.map((item) => {
+                  const rightActionsFood = () => (
+                    <View style={styles.swipeRight}>
+                      <View style={styles.swipeDeleteFoodInner}>
+                        <Text style={styles.swipeDeleteTxt}>Quitar</Text>
+                      </View>
                     </View>
-                    <Text style={styles.foodMacros}>
-                      {Math.round(item.proteinas_calculadas)}P / {Math.round(item.carbos_calculados)}C / {Math.round(item.grasas_calculadas)}G
-                    </Text>
-                  </View>
-                ))}
+                  );
+                  return (
+                    <Swipeable
+                      key={item.id}
+                      renderRightActions={rightActionsFood}
+                      overshootRight={false}
+                      friction={2}
+                      onSwipeableOpen={(direction) => {
+                        if (direction !== 'right') return;
+                        void (async () => {
+                          try {
+                            await eliminarAlimento(item.id);
+                          } catch (e) {
+                            console.error('[Nutricion] eliminar alimento', e);
+                          }
+                        })();
+                      }}
+                    >
+                      <View style={styles.foodRow}>
+                        <View style={styles.foodMain}>
+                          <Text style={styles.foodName}>{item.food?.nombre ?? 'Alimento'}</Text>
+                          <Text style={styles.foodMeta}>
+                            {Math.round(item.gramos)}g · {Math.round(item.calorias_calculadas)} kcal
+                          </Text>
+                        </View>
+                        <Text style={styles.foodMacros}>
+                          {Math.round(item.proteinas_calculadas)}P / {Math.round(item.carbos_calculados)}C /{' '}
+                          {Math.round(item.grasas_calculadas)}G
+                        </Text>
+                      </View>
+                    </Swipeable>
+                  );
+                })}
                 {meal.items.length === 0 && (
                   <Text style={styles.emptyMealText}>Todavia no hay alimentos en esta comida.</Text>
                 )}
@@ -133,10 +347,12 @@ export default function NutricionIndex() {
               <View style={styles.actionsRow}>
                 <Pressable
                   style={styles.addBtn}
-                  onPress={() => router.push({
-                    pathname: '/(tabs)/(nutricion)/agregar',
-                    params: { mealTypeId: meal.mealType?.id, mealId: meal.mealId, fecha },
-                  })}
+                  onPress={() =>
+                    router.push({
+                      pathname: '/(tabs)/(nutricion)/agregar',
+                      params: { mealTypeId: meal.mealType?.id, mealId: meal.mealId, fecha },
+                    })
+                  }
                 >
                   <Text style={styles.addBtnText}>+</Text>
                 </Pressable>
@@ -151,37 +367,125 @@ export default function NutricionIndex() {
                 </View>
               </View>
             </View>
-          ))}
-          {comidas.length === 0 && (
-            <View style={styles.mealCard}>
-              <Text style={styles.emptyMealText}>No hay comidas registradas para este dia.</Text>
-            </View>
-          )}
+          </Swipeable>
+        </ScaleDecorator>
+      );
+    },
+    [styles, resumen?.logId, eliminarComidaDelLog, eliminarAlimento, fecha, c.textMuted],
+  );
+
+  const renderFooter = useCallback(() => {
+    return (
+      <View style={styles.footerBlock}>
+        <Pressable
+          style={[styles.addMealBtn, !resumen?.logId && styles.addMealBtnDisabled]}
+          disabled={!resumen?.logId}
+          onPress={() => setModalNuevaComida(true)}
+        >
+          <Text style={styles.addMealBtnText}>Añadir comida</Text>
+        </Pressable>
+      </View>
+    );
+  }, [styles, resumen?.logId]);
+
+  return (
+    <View style={styles.root}>
+      {cargando && (
+        <View style={styles.loadingOverlay}>
+          <ActivityIndicator color={c.primary} />
         </View>
-      </ScrollView>
+      )}
+
+      <DraggableFlatList
+        data={comidasData}
+        keyExtractor={(item) => item.mealId}
+        onDragEnd={onDragEnd}
+        activationDistance={12}
+        ListHeaderComponent={renderHeader}
+        ListFooterComponent={renderFooter}
+        renderItem={renderItem}
+        contentContainerStyle={styles.listContent}
+        showsVerticalScrollIndicator={false}
+        containerStyle={styles.listContainer}
+      />
+
+      {comidasData.length === 0 && !cargando && (
+        <View style={styles.emptyOverlay} pointerEvents="none">
+          <Text style={styles.emptyMealText}>No hay comidas registradas para este dia.</Text>
+        </View>
+      )}
+
+      <Modal visible={modalNuevaComida} transparent animationType="fade" onRequestClose={() => setModalNuevaComida(false)}>
+        <Pressable style={styles.modalOverlay} onPress={() => setModalNuevaComida(false)}>
+          <Pressable style={styles.modalCard} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.modalTitle}>Nueva comida</Text>
+            <TextInput
+              value={nombreNuevaComida}
+              onChangeText={setNombreNuevaComida}
+              placeholder="Nombre"
+              placeholderTextColor={c.textMuted}
+              style={styles.modalInput}
+            />
+            <View style={styles.modalActions}>
+              <Pressable style={styles.modalBtnGhost} onPress={() => setModalNuevaComida(false)}>
+                <Text style={styles.modalBtnGhostText}>Cancelar</Text>
+              </Pressable>
+              <Pressable style={styles.modalBtnPrimary} onPress={() => void confirmarNuevaComida()}>
+                <Text style={styles.modalBtnPrimaryText}>Aceptar</Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal visible={!!menuMealId} transparent animationType="fade" onRequestClose={cerrarMenu}>
+        <Pressable style={styles.modalOverlay} onPress={cerrarMenu}>
+          <Pressable style={styles.menuCard} onPress={(e) => e.stopPropagation()}>
+            <Pressable
+              style={styles.menuRow}
+              onPress={() => {
+                if (mealDelMenu) copiarDesdeComida(mealDelMenu.items);
+                cerrarMenu();
+              }}
+            >
+              <Text style={styles.menuRowText}>Copiar comida</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.menuRow, !tieneCopia && styles.menuRowDisabled]}
+              disabled={!tieneCopia || !mealDelMenu}
+              onPress={() => {
+                void (async () => {
+                  if (!mealDelMenu || !lineas?.length) {
+                    cerrarMenu();
+                    return;
+                  }
+                  try {
+                    await pegarAlimentosEnComida(mealDelMenu.mealId, lineas);
+                    limpiarPortapapeles();
+                  } catch (e) {
+                    console.error('[Nutricion] pegar comida', e);
+                  } finally {
+                    cerrarMenu();
+                  }
+                })();
+              }}
+            >
+              <Text style={[styles.menuRowText, !tieneCopia && styles.menuRowTextDisabled]}>Pegar comida</Text>
+            </Pressable>
+            <Pressable
+              style={styles.menuRow}
+              onPress={() => {
+                if (mealDelMenu) void vaciarComida(mealDelMenu.mealId);
+                cerrarMenu();
+              }}
+            >
+              <Text style={[styles.menuRowText, styles.menuRowDanger]}>Limpiar comida</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
-}
-
-function getSemanaMovil(fechaIso: string) {
-  const base = new Date(`${fechaIso}T00:00:00`);
-  const day = base.getDay(); // 0 domingo
-  const mondayOffset = day === 0 ? -6 : 1 - day;
-  const monday = new Date(base);
-  monday.setDate(base.getDate() + mondayOffset);
-
-  const days = ['L', 'M', 'M', 'J', 'V', 'S', 'D'];
-  return Array.from({ length: 7 }).map((_, i) => {
-    const d = new Date(monday);
-    d.setDate(monday.getDate() + i);
-    const iso = d.toISOString().split('T')[0];
-    return {
-      key: days[i],
-      dia: d.getDate(),
-      activo: iso === fechaIso,
-      fechaIso: iso,
-    };
-  });
 }
 
 function makeStyles(
@@ -196,17 +500,20 @@ function makeStyles(
       flex: 1,
       backgroundColor: c.background,
     },
+    listContainer: {
+      flex: 1,
+    },
+    listContent: {
+      paddingHorizontal: s.lg,
+      paddingTop: s.xl,
+      paddingBottom: s['3xl'],
+      gap: s.sm,
+    },
     loadingOverlay: {
       position: 'absolute',
       top: 12,
       right: 20,
       zIndex: 10,
-    },
-    scroll: {
-      paddingHorizontal: s.lg,
-      paddingTop: s.xl,
-      paddingBottom: s['3xl'],
-      gap: s.lg,
     },
     weekCalendar: {
       borderWidth: 1,
@@ -253,6 +560,9 @@ function makeStyles(
       paddingHorizontal: s.md,
       paddingVertical: s.sm,
       gap: s.sm,
+    },
+    summaryCardBelowCalendar: {
+      marginTop: s.lg,
     },
     summaryTop: {
       flexDirection: 'row',
@@ -311,14 +621,12 @@ function makeStyles(
       backgroundColor: c.primary,
       borderRadius: r.pill,
     },
-    mealsBlock: {
-      gap: s.sm,
-    },
     sectionTitle: {
       ...ts.label,
       fontFamily: f.mono,
       color: c.textSecondary,
       letterSpacing: ts.label.letterSpacing,
+      marginTop: s.sm,
     },
     mealCard: {
       borderWidth: 1,
@@ -329,8 +637,65 @@ function makeStyles(
       paddingVertical: s.md,
       gap: s.md,
     },
-    mealHeader: {
+    mealCardActive: {
+      opacity: 0.92,
+    },
+    mealHeaderRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: s.sm,
+    },
+    dragHandle: {
+      paddingVertical: 2,
+      paddingHorizontal: 4,
+    },
+    dragHandleText: {
+      ...ts.subheading,
+      fontFamily: f.mono,
+      color: c.textMuted,
+    },
+    mealHeaderText: {
+      flex: 1,
       gap: s.xs,
+    },
+    menuDots: {
+      padding: 4,
+    },
+    menuDotsText: {
+      ...ts.subheading,
+      fontFamily: f.monoBold,
+      color: c.textDisplay,
+    },
+    swipeLeft: {
+      justifyContent: 'center',
+      marginRight: s.sm,
+    },
+    swipeDeleteInner: {
+      backgroundColor: c.danger,
+      justifyContent: 'center',
+      alignItems: 'center',
+      width: 88,
+      borderRadius: r.md,
+      flex: 1,
+      marginVertical: 2,
+    },
+    swipeDeleteTxt: {
+      ...ts.label,
+      fontFamily: f.monoBold,
+      color: '#fff',
+    },
+    swipeRight: {
+      justifyContent: 'center',
+      marginLeft: s.sm,
+    },
+    swipeDeleteFoodInner: {
+      backgroundColor: c.danger,
+      justifyContent: 'center',
+      alignItems: 'center',
+      width: 76,
+      borderRadius: r.md,
+      flex: 1,
+      marginVertical: 2,
     },
     mealItemsList: {
       gap: s.sm,
@@ -340,6 +705,7 @@ function makeStyles(
       justifyContent: 'space-between',
       alignItems: 'center',
       gap: s.md,
+      backgroundColor: c.surface,
     },
     foodMain: {
       flex: 1,
@@ -374,6 +740,13 @@ function makeStyles(
       ...ts.caption,
       fontFamily: f.mono,
       color: c.textMuted,
+    },
+    emptyOverlay: {
+      ...StyleSheet.absoluteFillObject,
+      justifyContent: 'center',
+      alignItems: 'center',
+      paddingHorizontal: s.xl,
+      top: '45%',
     },
     actionsRow: {
       flexDirection: 'row',
@@ -412,6 +785,109 @@ function makeStyles(
       ...ts.bodySm,
       fontFamily: f.sans,
       color: c.text,
+    },
+    footerBlock: {
+      marginTop: s.md,
+      marginBottom: s.lg,
+    },
+    addMealBtn: {
+      borderWidth: 1,
+      borderColor: c.borderVisible,
+      borderRadius: r.md,
+      backgroundColor: c.surfaceElevated,
+      paddingVertical: s.md,
+      alignItems: 'center',
+    },
+    addMealBtnDisabled: {
+      opacity: 0.45,
+    },
+    addMealBtnText: {
+      ...ts.label,
+      fontFamily: f.mono,
+      color: c.primary,
+    },
+    modalOverlay: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.45)',
+      justifyContent: 'center',
+      paddingHorizontal: s.xl,
+    },
+    modalCard: {
+      backgroundColor: c.surface,
+      borderRadius: r.lg,
+      borderWidth: 1,
+      borderColor: c.borderVisible,
+      padding: s.lg,
+      gap: s.md,
+    },
+    modalTitle: {
+      ...ts.subheading,
+      fontFamily: f.sansMedium,
+      color: c.textDisplay,
+    },
+    modalInput: {
+      ...ts.bodySm,
+      fontFamily: f.sans,
+      color: c.text,
+      borderWidth: 1,
+      borderColor: c.borderVisible,
+      borderRadius: r.md,
+      paddingHorizontal: s.md,
+      paddingVertical: s.sm,
+    },
+    modalActions: {
+      flexDirection: 'row',
+      justifyContent: 'flex-end',
+      gap: s.md,
+    },
+    modalBtnGhost: {
+      paddingVertical: s.sm,
+      paddingHorizontal: s.md,
+    },
+    modalBtnGhostText: {
+      ...ts.bodySm,
+      fontFamily: f.sansMedium,
+      color: c.textSecondary,
+    },
+    modalBtnPrimary: {
+      paddingVertical: s.sm,
+      paddingHorizontal: s.md,
+      backgroundColor: c.primary,
+      borderRadius: r.md,
+    },
+    modalBtnPrimaryText: {
+      ...ts.bodySm,
+      fontFamily: f.sansBold,
+      color: c.background,
+    },
+    menuCard: {
+      backgroundColor: c.surface,
+      borderRadius: r.lg,
+      borderWidth: 1,
+      borderColor: c.borderVisible,
+      overflow: 'hidden',
+      alignSelf: 'center',
+      minWidth: 220,
+    },
+    menuRow: {
+      paddingVertical: s.md,
+      paddingHorizontal: s.lg,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: c.separator,
+    },
+    menuRowDisabled: {
+      opacity: 0.4,
+    },
+    menuRowText: {
+      ...ts.bodySm,
+      fontFamily: f.sansMedium,
+      color: c.text,
+    },
+    menuRowTextDisabled: {
+      color: c.textMuted,
+    },
+    menuRowDanger: {
+      color: c.danger,
     },
   });
 }

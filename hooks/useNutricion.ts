@@ -17,16 +17,18 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
+import { DeviceEventEmitter } from 'react-native';
 import { useAuth } from '@/hooks/useAuth';
+import { fechaHoyIsoLocal } from '@/lib/fechaNutricion';
+import { NUTRICION_LOG_ACTUALIZADO } from '@/lib/nutricionEvents';
 import { nutricionService } from '@/services/nutricion.service';
-import type { ResumenDiarioNutricion } from '@/types/app.types';
+import type { LineaCopiadaNutricion, ResumenDiarioNutricion } from '@/types/app.types';
 import type { UserGoal } from '@/types/database.types';
 
 export function useNutricion() {
   const { user } = useAuth();
-  const [fecha, setFecha] = useState(
-    new Date().toISOString().split('T')[0]
-  );
+  const [fecha, setFecha] = useState(fechaHoyIsoLocal);
   const [resumen, setResumen] = useState<ResumenDiarioNutricion | null>(null);
   const [objetivos, setObjetivos] = useState<UserGoal | null>(null);
   const [cargando, setCargando] = useState(false);
@@ -41,13 +43,25 @@ export function useNutricion() {
       ]);
       setResumen(resumenDia);
       setObjetivos(objetivosUsuario);
+    } catch (e) {
+      console.error('[useNutricion] cargar', e);
+      setResumen(null);
     } finally {
       setCargando(false);
     }
   }, [user?.id, fecha]);
 
+  useFocusEffect(
+    useCallback(() => {
+      void cargar();
+    }, [cargar]),
+  );
+
   useEffect(() => {
-    cargar();
+    const sub = DeviceEventEmitter.addListener(NUTRICION_LOG_ACTUALIZADO, () => {
+      void cargar();
+    });
+    return () => sub.remove();
   }, [cargar]);
 
   return {
@@ -63,6 +77,24 @@ export function useNutricion() {
     },
     eliminarAlimento: async (itemId: string) => {
       await nutricionService.eliminarAlimentoDeComida(itemId);
+      await cargar();
+    },
+    vaciarComida: async (mealId: string) => {
+      await nutricionService.vaciarComida(mealId);
+      await cargar();
+    },
+    eliminarComidaDelLog: async (logId: string, mealId: string) => {
+      await nutricionService.eliminarComidaDelLog(logId, mealId);
+      await cargar();
+    },
+    crearComidaPersonalizada: async (logId: string, nombre: string) => {
+      if (!user?.id) return;
+      await nutricionService.crearTipoComidaPersonalizado(user.id, logId, nombre);
+      await cargar();
+    },
+    pegarAlimentosEnComida: async (mealId: string, lineas: LineaCopiadaNutricion[]) => {
+      if (!lineas.length) return;
+      await nutricionService.pegarAlimentosEnComida(mealId, lineas);
       await cargar();
     },
   };

@@ -1,5 +1,14 @@
-import { useEffect, useMemo, useState } from 'react';
+import { CrearAlimentoModal } from '@/components/nutricion/CrearAlimentoModal';
+import { useAuth } from '@/hooks/useAuth';
+import { useTheme } from '@/hooks/useTheme';
+import { emitNutricionLogActualizado } from '@/lib/nutricionEvents';
+import { alimentosService } from '@/services/alimentos.service';
+import { nutricionService } from '@/services/nutricion.service';
+import type { Food } from '@/types/database.types';
+import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router, useLocalSearchParams } from 'expo-router';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Modal,
@@ -10,14 +19,20 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { alimentosService } from '@/services/alimentos.service';
-import { nutricionService } from '@/services/nutricion.service';
-import { useAuth } from '@/hooks/useAuth';
-import { useTheme } from '@/hooks/useTheme';
-import type { Food } from '@/types/database.types';
 
 type TabKey = 'base' | 'favoritos' | 'creados';
+
+function storageKeyUltimaBusqueda(userId: string) {
+  return `activa_last_food_search_${userId}`;
+}
+
+function normalizarParaBuscar(texto: string): string {
+  return texto
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim();
+}
 
 export default function AgregarAlimento() {
   const { c, f, ts, s, r } = useTheme();
@@ -28,18 +43,47 @@ export default function AgregarAlimento() {
   const [tab, setTab] = useState<TabKey>('base');
   const [query, setQuery] = useState('');
   const [resultados, setResultados] = useState<Food[]>([]);
+  /** Última búsqueda en Base de datos (persistida) si el buscador tiene menos de 2 caracteres. */
+  const [ultimaBusqueda, setUltimaBusqueda] = useState<Food[]>([]);
   const [recientes, setRecientes] = useState<Food[]>([]);
   const [creados, setCreados] = useState<Food[]>([]);
   const [favoritos, setFavoritos] = useState<Food[]>([]);
   const [favoritosIds, setFavoritosIds] = useState<string[]>([]);
-  const [cargando, setCargando] = useState(false);
+  const [cargandoBase, setCargandoBase] = useState(false);
+  const [cargandoCreados, setCargandoCreados] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [foodSeleccionado, setFoodSeleccionado] = useState<Food | null>(null);
   const [gramos, setGramos] = useState('100');
   const [guardando, setGuardando] = useState(false);
   const [okMsg, setOkMsg] = useState<string | null>(null);
+  const [crearAlimentoAbierto, setCrearAlimentoAbierto] = useState(false);
 
   const favStorageKey = user?.id ? `activa_food_favorites_${user.id}` : '';
+
+  const alimentoCreadoOResuelto = (food: Food) => {
+    if (food.is_custom && user?.id && food.created_by === user.id) {
+      setCreados((prev) => {
+        const rest = prev.filter((x) => x.id !== food.id);
+        return [food, ...rest];
+      });
+    }
+    void (async () => {
+      if (user?.id) {
+        try {
+          const [list, recent] = await Promise.all([
+            alimentosService.obtenerAlimentosCreados(user.id),
+            alimentosService.obtenerRecientes(user.id),
+          ]);
+          setCreados(list);
+          setRecientes(recent);
+        } catch {
+          /* noop */
+        }
+      }
+      setFoodSeleccionado(food);
+      setGramos('100');
+    })();
+  };
 
   useEffect(() => {
     let active = true;
@@ -56,6 +100,29 @@ export default function AgregarAlimento() {
       } catch {
         if (!active) return;
         setRecientes([]);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!user?.id) {
+      setUltimaBusqueda([]);
+      return;
+    }
+    let active = true;
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(storageKeyUltimaBusqueda(user.id));
+        if (!active || !raw) return;
+        const parsed = JSON.parse(raw) as unknown;
+        if (Array.isArray(parsed)) {
+          setUltimaBusqueda(parsed as Food[]);
+        }
+      } catch {
+        if (active) setUltimaBusqueda([]);
       }
     })();
     return () => {
@@ -102,43 +169,70 @@ export default function AgregarAlimento() {
   useEffect(() => {
     const term = query.trim();
     if (tab !== 'base' || term.length < 2) {
-      if (tab === 'base') setResultados([]);
       return;
     }
 
+    let cancelado = false;
+
     const timer = setTimeout(async () => {
-      setCargando(true);
+      if (cancelado) return;
+      setCargandoBase(true);
       setError(null);
       try {
         const data = await alimentosService.buscarAlimento(term, user?.id);
+        if (cancelado) return;
         setResultados(data);
+        setUltimaBusqueda(data);
+        if (user?.id) {
+          try {
+            await AsyncStorage.setItem(storageKeyUltimaBusqueda(user.id), JSON.stringify(data));
+          } catch {
+            /* noop */
+          }
+        }
       } catch (e: any) {
-        setError(e?.message ?? 'No se pudo buscar alimentos.');
+        if (!cancelado) {
+          setError(e?.message ?? 'No se pudo buscar alimentos.');
+        }
       } finally {
-        setCargando(false);
+        if (!cancelado) setCargandoBase(false);
       }
     }, 350);
 
-    return () => clearTimeout(timer);
+    return () => {
+      cancelado = true;
+      clearTimeout(timer);
+      setCargandoBase(false);
+    };
   }, [query, tab, user?.id]);
 
   useEffect(() => {
     const term = query.trim();
     if (tab !== 'creados' || !user?.id) return;
 
+    let cancelado = false;
+
     const timer = setTimeout(async () => {
-      setCargando(true);
+      if (cancelado) return;
+      setCargandoCreados(true);
       setError(null);
       try {
         const data = await alimentosService.obtenerAlimentosCreados(user.id, term);
+        if (cancelado) return;
         setCreados(data);
       } catch (e: any) {
-        setError(e?.message ?? 'No se pudo cargar alimentos creados.');
+        if (!cancelado) {
+          setError(e?.message ?? 'No se pudo cargar alimentos creados.');
+        }
       } finally {
-        setCargando(false);
+        if (!cancelado) setCargandoCreados(false);
       }
     }, 250);
-    return () => clearTimeout(timer);
+    return () => {
+      cancelado = true;
+      clearTimeout(timer);
+      setCargandoCreados(false);
+    };
   }, [tab, query, user?.id]);
 
   const confirmarAgregar = async () => {
@@ -160,6 +254,7 @@ export default function AgregarAlimento() {
           grasas: Number(foodReal.grasas ?? 0),
         },
       });
+      emitNutricionLogActualizado();
       setFoodSeleccionado(null);
       setGramos('100');
       setOkMsg('Alimento agregado. Puedes seguir añadiendo mas.');
@@ -208,7 +303,50 @@ export default function AgregarAlimento() {
     }
   };
 
-  const listaActual = tab === 'base' ? (query.trim().length >= 2 ? resultados : recientes) : tab === 'favoritos' ? favoritos : creados;
+  const listaBaseSinBusqueda = useMemo(() => {
+    const seen = new Set<string>();
+    const out: Food[] = [];
+    for (const f of recientes) {
+      if (seen.has(f.id)) continue;
+      seen.add(f.id);
+      out.push(f);
+    }
+    for (const f of ultimaBusqueda) {
+      if (seen.has(f.id)) continue;
+      seen.add(f.id);
+      out.push(f);
+    }
+    return out;
+  }, [recientes, ultimaBusqueda]);
+
+  const tituloListaBaseSinBusqueda = useMemo(() => {
+    if (recientes.length === 0 && ultimaBusqueda.length === 0) return null;
+    if (recientes.length > 0 && ultimaBusqueda.length > 0) {
+      return 'Recientes del diario y última búsqueda';
+    }
+    if (recientes.length > 0) return 'Ingresados recientemente';
+    return 'Última búsqueda';
+  }, [recientes.length, ultimaBusqueda.length]);
+
+  const favoritosFiltrados = useMemo(() => {
+    const q = query.trim();
+    if (!q) return favoritos;
+    const nq = normalizarParaBuscar(q);
+    if (!nq) return favoritos;
+    return favoritos.filter((f) => normalizarParaBuscar(f.nombre ?? '').includes(nq));
+  }, [favoritos, query]);
+
+  const listaActual =
+    tab === 'base'
+      ? query.trim().length >= 2
+        ? resultados
+        : listaBaseSinBusqueda
+      : tab === 'favoritos'
+        ? favoritosFiltrados
+        : creados;
+
+  const cargandoEnPestañaActiva =
+    (tab === 'base' && cargandoBase) || (tab === 'creados' && cargandoCreados);
 
   const foodEsFavorito = (food: Food) => {
     if (favoritosIds.includes(food.id)) return true;
@@ -238,21 +376,28 @@ export default function AgregarAlimento() {
             autoFocus
           />
         </View>
+        <Pressable
+          style={styles.crearBtn}
+          onPress={() => setCrearAlimentoAbierto(true)}
+          accessibilityLabel="Crear alimento"
+        >
+          <Ionicons name="create-outline" size={22} color={c.textDisplay} />
+        </Pressable>
       </View>
 
       <View style={styles.tabsRow}>
-        <Pressable onPress={() => setTab('base')}>
+        <Pressable style={styles.tabPressable} onPress={() => setTab('base')}>
           <Text style={[styles.tabText, tab === 'base' && styles.tabActive]}>Base de Datos</Text>
         </Pressable>
-        <Pressable onPress={() => setTab('favoritos')}>
+        <Pressable style={styles.tabPressable} onPress={() => setTab('favoritos')}>
           <Text style={[styles.tabText, tab === 'favoritos' && styles.tabActive]}>Favoritos</Text>
         </Pressable>
-        <Pressable onPress={() => setTab('creados')}>
+        <Pressable style={styles.tabPressable} onPress={() => setTab('creados')}>
           <Text style={[styles.tabText, tab === 'creados' && styles.tabActive]}>Creados</Text>
         </Pressable>
       </View>
 
-      {cargando && (
+      {cargandoEnPestañaActiva && (
         <View style={styles.stateRow}>
           <ActivityIndicator color={c.primary} />
         </View>
@@ -260,9 +405,9 @@ export default function AgregarAlimento() {
       {!!error && <Text style={styles.errorText}>[ERROR: {error}]</Text>}
       {!!okMsg && <Text style={styles.okText}>[{okMsg}]</Text>}
 
-      <ScrollView contentContainerStyle={styles.list}>
-        {tab === 'base' && query.trim().length < 2 && (
-          <Text style={styles.sectionTitle}>Ingresados Recientemente</Text>
+      <ScrollView style={styles.scrollList} contentContainerStyle={styles.list}>
+        {tab === 'base' && query.trim().length < 2 && tituloListaBaseSinBusqueda && (
+          <Text style={styles.sectionTitle}>{tituloListaBaseSinBusqueda}</Text>
         )}
         {listaActual.map((food) => (
           <Pressable
@@ -299,8 +444,12 @@ export default function AgregarAlimento() {
             </View>
           </Pressable>
         ))}
-        {!cargando && listaActual.length === 0 && (
-          <Text style={styles.emptyText}>Sin resultados para tu busqueda.</Text>
+        {!cargandoEnPestañaActiva && listaActual.length === 0 && (
+          <Text style={styles.emptyText}>
+            {tab === 'base' && query.trim().length < 2
+              ? 'Busca alimentos para añadir.'
+              : 'Sin resultados para tu búsqueda.'}
+          </Text>
         )}
       </ScrollView>
 
@@ -334,6 +483,15 @@ export default function AgregarAlimento() {
           </View>
         </View>
       </Modal>
+
+      <CrearAlimentoModal
+        visible={crearAlimentoAbierto}
+        onClose={() => setCrearAlimentoAbierto(false)}
+        userId={user?.id}
+        onFoodCreated={alimentoCreadoOResuelto}
+        esFavoritoAlimento={foodEsFavorito}
+        onToggleFavorito={toggleFavorito}
+      />
       </View>
     </View>
   );
@@ -377,6 +535,8 @@ function makeStyles(
     },
     root: {
       height: '97%',
+      maxHeight: '97%',
+      flexDirection: 'column',
       borderRadius: r.lg,
       borderWidth: 1,
       borderColor: c.borderVisible,
@@ -407,16 +567,34 @@ function makeStyles(
       paddingHorizontal: s.md,
     },
     searchInput: { ...ts.bodySm, fontFamily: f.sans, color: c.textDisplay },
+    crearBtn: {
+      width: 42,
+      height: 42,
+      borderRadius: r.pill,
+      borderWidth: 1,
+      borderColor: c.borderVisible,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: c.surface,
+    },
     tabsRow: {
       marginTop: s.md,
       flexDirection: 'row',
-      gap: s.md,
+      justifyContent: 'center',
+      alignItems: 'center',
+      flexWrap: 'wrap',
+      gap: s.lg,
       borderBottomWidth: 1,
       borderBottomColor: c.separator,
       paddingBottom: s.sm,
     },
+    tabPressable: {
+      paddingVertical: s.xs,
+      paddingHorizontal: s.sm,
+    },
     tabText: { ...ts.label, fontFamily: f.mono, color: c.textMuted },
     tabActive: { color: c.textDisplay },
+    scrollList: { flex: 1 },
     stateRow: { marginTop: s.md },
     errorText: { ...ts.caption, fontFamily: f.mono, color: c.danger, marginTop: s.sm },
     okText: { ...ts.caption, fontFamily: f.mono, color: c.success, marginTop: s.sm },
