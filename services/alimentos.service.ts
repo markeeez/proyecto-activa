@@ -2,12 +2,12 @@
  * SERVICIO DE ALIMENTOS
  *
  * Flujo de búsqueda:
- *   1. Capa maestra: ALIMENTOS_BASICOS → `food_tier=master`
- *   2. Caché `foods` (globales: is_custom=false, created_by null) por nombre
- *   3. Si hay pocos en BD: USDA Foundation (query EN vía LibreTranslate + mapa local) → 10 ítems;
- *      nombres EN→ES con LibreTranslate; luego Open Food Facts ES → 10 ítems (término en español)
- *   4. Upsert vía `foods-upsert-global` (dedupe por api_source + api_id)
- *   5. Ranking: capa + texto + sustantivo − compuestos + orden API + popularidad
+ *   1. Opcional: ALIMENTOS_BASICOS (`INCLUIR_BASICOS_EN_BUSQUEDA`).
+ *   2. Hasta 5 slots: `foods` con api_source `generic` (semilla SQL), ordenados por relevancia.
+ *   3. 5 slots: USDA Foundation (query EN vía LibreTranslate; EN→ES en nombres).
+ *   4. 10 slots: Open Food Facts España (término ES; token en nombre).
+ *   5. Tras ellos: personalizados del usuario hasta `MAX_RESULTADOS_BUSQUEDA`.
+ *   Upsert USDA/OFF vía `foods-upsert-global`; ranking por capa + texto + popularidad dentro de cada tramo.
  *
  * Escritura globales: Edge Functions + service_role (RLS modelo B). Custom: INSERT cliente.
  */
@@ -124,12 +124,16 @@ const EDGE_FUNCTION_UPSERT_GLOBAL = 'foods-upsert-global';
 const USDA_API_SOURCE = 'usda_fdc';
 
 /**
- * Si hay al menos tantas filas globales para `ilike('%término%')`, no llamamos a USDA/OFF.
- * Valores altos + nombres tipo "rice" en muchas marcas bloqueaban APIs; 12 equilibra cuota vs frescura.
+ * Filas del seed genérico (`foods_seed.sql`): `api_source = 'generic'`.
+ * Primeros slots de la lista de búsqueda.
  */
-const MIN_RESULTADOS_BD_PARA_SALTAR_APIS = 12;
+const GENERIC_DB_API_SOURCE = 'generic';
 
-/** Máximo de filas devueltas tras ordenar por relevancia literal + capas. */
+const BUSQUEDA_SLOT_GENERICOS_BD = 5;
+const BUSQUEDA_SLOT_USDA = 5;
+const BUSQUEDA_SLOT_OFF = 10;
+
+/** Máximo de filas devueltas (tramos generic+USDA+OFF + personalizados). */
 const MAX_RESULTADOS_BUSQUEDA = 24;
 
 /**
@@ -209,6 +213,15 @@ async function upsertGlobalFoodsViaEdge(
   }
   return results;
 }
+
+/** Contexto de puntuación compartido entre tramos (generic / USDA / OFF / custom). */
+type SearchScoreCtx = {
+  queryVariants: string[];
+  queryTokens: string[];
+  singleTokenQuery: boolean;
+  apiOrderByKey: Map<string, number>;
+  popularidad: Map<string, number>;
+};
 
 // ---------------------------------------------------------------------------
 
@@ -332,10 +345,10 @@ export const alimentosService = {
 
   /**
    * Busca alimentos por nombre.
-   * 1. Opcional: ALIMENTOS_BASICOS (`INCLUIR_BASICOS_EN_BUSQUEDA`).
-   * 2. Caché global en `foods` (misma búsqueda).
-   * 3. Si hay pocos en BD: USDA Foundation (10) + Open Food Facts España (10).
-   * 4. Personalizados del usuario (`userId`).
+   * 1. Opcional: ALIMENTOS_BASICOS — comparten el tramo de genéricos BD.
+   * 2. Hasta 5: `foods` con api_source `generic` (semilla local).
+   * 3. 5: USDA Foundation; 10: Open Food Facts (ES). Siempre se consultan las APIs.
+   * 4. Tras el bloque 20: personalizados del usuario hasta el máximo.
    */
   async buscarAlimento(query: string, userId?: string | null): Promise<Food[]> {
     const term = query.trim();
@@ -345,6 +358,9 @@ export const alimentosService = {
     const normalizedQuery = normalizeText(termLimpio);
     const queryVariants = variantesNombreParaScoring(normalizedQuery, termLimpio);
     const queryTokens = tokensForMatchingExpanded(normalizedQuery, termLimpio);
+    const nTerm = normalizeText(termLimpio);
+    const singleTokenQuery = nTerm.length > 0 && !nTerm.includes(' ');
+    const patronLocal = `%${termLimpio}%`;
 
     let basicFoods: Food[] = [];
     if (INCLUIR_BASICOS_EN_BUSQUEDA) {
@@ -356,55 +372,55 @@ export const alimentosService = {
       basicFoods = await this._upsertBasicos(basicMatches);
     }
 
-    const patronLocal = `%${termLimpio}%`;
-    let localesNoCustom: Food[] = [];
+    let genericBd: Food[] = [];
     try {
       const { data } = await supabase
         .from('foods')
         .select('*')
+        .eq('api_source', GENERIC_DB_API_SOURCE)
         .ilike('nombre', patronLocal)
         .eq('is_custom', false)
         .is('created_by', null)
-        .limit(30);
-      localesNoCustom = (data ?? []) as Food[];
+        .limit(80);
+      genericBd = (data ?? []) as Food[];
     } catch {
-      localesNoCustom = [];
+      genericBd = [];
     }
 
-    let apiCandidates: Partial<Food>[] = [];
-    const llamarApisExternas =
-      localesNoCustom.length < MIN_RESULTADOS_BD_PARA_SALTAR_APIS;
-    dbgAlimentos('buscar', {
-      term: termLimpio,
-      basicos: basicFoods.length,
-      bdGlobales: localesNoCustom.length,
-      umbralSaltarApis: MIN_RESULTADOS_BD_PARA_SALTAR_APIS,
-      llamarUsdaYOff: llamarApisExternas,
-      ...(llamarApisExternas
-        ? {}
-        : { nota: `APIs omitidas (≥${MIN_RESULTADOS_BD_PARA_SALTAR_APIS} globales ilike en BD)` }),
-    });
+    let personalizados: Food[] = [];
+    if (userId) {
+      const { data } = await supabase
+        .from('foods')
+        .select('*')
+        .ilike('nombre', patronLocal)
+        .eq('is_custom', true)
+        .eq('created_by', userId)
+        .limit(12);
+      personalizados = (data ?? []) as Food[];
+    }
 
-    if (llamarApisExternas) {
+    let usdaPartials: Partial<Food>[] = [];
+    let offPartials: Partial<Food>[] = [];
+    try {
+      const qEn = await terminoInglesParaUsda(termLimpio);
+      dbgAlimentos('USDA query EN', qEn);
       try {
-        const qEn = await terminoInglesParaUsda(termLimpio);
-        dbgAlimentos('USDA query EN', qEn);
-        const usda = await this._buscarUsdaFoundation(qEn);
-        apiCandidates.push(...usda);
-        dbgAlimentos('USDA Foundation candidatos', usda.length);
+        usdaPartials = await this._buscarUsdaFoundation(qEn, BUSQUEDA_SLOT_USDA);
       } catch (e) {
         dbgAlimentos('USDA excepción', e);
       }
       try {
-        const off = await this._buscarOpenFoodFacts(termLimpio, 10);
-        apiCandidates.push(...off);
-        dbgAlimentos('OpenFoodFacts (ES) candidatos', off.length);
+        offPartials = await this._buscarOpenFoodFacts(termLimpio, BUSQUEDA_SLOT_OFF);
       } catch (e) {
         dbgAlimentos('OpenFoodFacts excepción', e);
       }
+      dbgAlimentos('USDA Foundation candidatos', usdaPartials.length);
+      dbgAlimentos('OpenFoodFacts (ES) candidatos', offPartials.length);
+    } catch (e) {
+      dbgAlimentos('búsqueda API (traducción / paralelo)', e);
     }
 
-    /** Conserva el orden devuelto por las APIs (USDA primero, luego OFF). */
+    const apiCandidates = [...usdaPartials, ...offPartials];
     const apiOrderByKey = new Map<string, number>();
     let apiOrderIdx = 0;
     for (const c of apiCandidates) {
@@ -432,97 +448,58 @@ export const alimentosService = {
       }
     }
 
-    let personalizados: Food[] = [];
-    if (userId) {
-      const { data } = await supabase
-        .from('foods')
-        .select('*')
-        .ilike('nombre', patronLocal)
-        .eq('is_custom', true)
-        .eq('created_by', userId)
-        .limit(8);
-      personalizados = (data ?? []) as Food[];
-    }
+    const usdaCached = cachedApiFoods.filter((f) => f.api_source === USDA_API_SOURCE);
+    const offCached = cachedApiFoods.filter(
+      (f) => f.api_source === FOOD_API_SOURCE || f.api_source === 'openfoodfacts',
+    );
 
-    const all: (Food & { _score: number })[] = [];
-    const nTerm = normalizeText(termLimpio);
-    const singleTokenQuery = nTerm.length > 0 && !nTerm.includes(' ');
+    dbgAlimentos('buscar', {
+      term: termLimpio,
+      basicos: basicFoods.length,
+      genericosBd: genericBd.length,
+      usdaCached: usdaCached.length,
+      offCached: offCached.length,
+    });
 
-    const pushScored = (f: Food) => {
-      const rawNombre = f.nombre ?? '';
-      const normalizedName = normalizeText(rawNombre);
-      const fMeta = rellenarMetaFood(f);
-      const forTier: Food =
-        fMeta.api_source === FATSECRET_API_SOURCE &&
-        rawNombre &&
-        /\([^)]+\)/.test(rawNombre) &&
-        fMeta.food_tier === 'reference'
-          ? { ...fMeta, food_tier: 'brand' }
-          : fMeta;
-      const base = tierBoost(forTier);
-      let textScore = 0;
-      for (const v of queryVariants) {
-        textScore = Math.max(textScore, scoreResult(normalizedName, v, queryTokens));
-      }
-      const noun = nounFocusBonusMax(normalizedName, queryVariants, queryTokens, {
-        rawNombre,
-        singleTokenQuery,
-      });
-      const noise = compoundDishPenalty(normalizedName, queryTokens);
-      const literalTier = literalMatchTier(normalizedName, queryVariants, rawNombre);
-      const literalBoost = (4 - literalTier) * 480;
-      const tituloIgualQuery =
-        singleTokenQuery &&
-        queryVariants.some((v) => v && normalizedName === v);
-      const bonusNombreMinimo = tituloIgualQuery ? 520 : 0;
-      let apiOrderBoost = 0;
-      if (f.api_id != null && f.api_source) {
-        const rk = apiOrderByKey.get(`${f.api_source}:${f.api_id}`);
-        if (rk !== undefined) {
-          apiOrderBoost = Math.max(0, 36 - rk) * 11;
-        }
-      }
-      all.push({
-        ...f,
-        _score:
-          base +
-          textScore +
-          noun -
-          noise +
-          literalBoost +
-          apiOrderBoost +
-          bonusNombreMinimo,
-      });
+    const genericPool = [...basicFoods, ...genericBd];
+
+    const popularityIds = [
+      ...genericPool.map((x) => x.id),
+      ...cachedApiFoods.map((x) => x.id),
+      ...personalizados.map((x) => x.id),
+    ].filter(esUuidPostgres);
+    const popularidad = await cargarPopularidadPorIds(popularityIds);
+
+    const scoreCtx: SearchScoreCtx = {
+      queryVariants,
+      queryTokens,
+      singleTokenQuery,
+      apiOrderByKey,
+      popularidad,
     };
 
-    for (const f of basicFoods) pushScored(f);
-    for (const f of localesNoCustom) pushScored(rellenarMetaFood(f));
-    for (const f of cachedApiFoods) pushScored(rellenarMetaFood(f));
-    for (const f of personalizados) pushScored(rellenarMetaFood(f));
+    const rankedGeneric = rankFoodsForBucket(genericPool, scoreCtx);
+    const rankedUsda = rankFoodsForBucket(usdaCached, scoreCtx);
+    const rankedOff = rankFoodsForBucket(offCached, scoreCtx);
+    const rankedPers = rankFoodsForBucket(personalizados, scoreCtx);
 
-    const popularidad = await cargarPopularidadPorIds(
-      all.map((x) => x.id).filter(esUuidPostgres),
+    const seenKeys = new Set<string>();
+    const seenNames = new Set<string>();
+    const merged: Food[] = [];
+
+    pickSearchSlots(rankedGeneric, BUSQUEDA_SLOT_GENERICOS_BD, merged, seenKeys, seenNames);
+    pickSearchSlots(rankedUsda, BUSQUEDA_SLOT_USDA, merged, seenKeys, seenNames);
+    pickSearchSlots(rankedOff, BUSQUEDA_SLOT_OFF, merged, seenKeys, seenNames);
+    pickSearchSlots(
+      rankedPers,
+      Math.max(0, MAX_RESULTADOS_BUSQUEDA - merged.length),
+      merged,
+      seenKeys,
+      seenNames,
     );
-    for (const row of all) {
-      const c = popularidad.get(row.id) ?? 0;
-      row._score += popularityBoost(c);
-    }
 
-    const unique = new Map<string, Food & { _score: number }>();
-    for (const item of all) {
-      const key = dedupKeyFood(item);
-      const prev = unique.get(key);
-      if (!prev || item._score > prev._score) unique.set(key, item);
-    }
-
-    const dedupNombre = dedupePorNombreNormalizado(Array.from(unique.values()));
-
-    const finalList = dedupNombre
-      .sort((a, b) => b._score - a._score)
-      .slice(0, MAX_RESULTADOS_BUSQUEDA)
-      .map(({ _score, ...rest }) => rest as Food);
-    dbgAlimentos('resultado', { total: finalList.length });
-    return finalList;
+    dbgAlimentos('resultado', { total: merged.length });
+    return merged;
   },
 
   /**
@@ -748,7 +725,10 @@ export const alimentosService = {
     return out;
   },
 
-  async _buscarUsdaFoundation(queryEn: string): Promise<Partial<Food>[]> {
+  async _buscarUsdaFoundation(
+    queryEn: string,
+    maxResults = BUSQUEDA_SLOT_USDA,
+  ): Promise<Partial<Food>[]> {
     const key = USDA_FDC_API_KEY.trim();
     if (!key) {
       dbgAlimentos('USDA omitido: falta EXPO_PUBLIC_USDA_FDC_API_KEY');
@@ -757,13 +737,14 @@ export const alimentosService = {
     const q = queryEn.trim().slice(0, 200);
     if (q.replace(/\s/g, '').length < 2) return [];
 
+    const n = Math.min(50, Math.max(1, maxResults));
     const url =
       'https://api.nal.usda.gov/fdc/v1/foods/search?' +
       new URLSearchParams({
         api_key: key,
         query: q,
         dataType: 'Foundation',
-        pageSize: '10',
+        pageSize: String(n),
       }).toString();
 
     const res = await fetch(url);
@@ -1538,6 +1519,7 @@ function tokensForMatching(normalizedQuery: string): string[] {
 function inferTierFromPartial(item: Partial<Food>): FoodTier {
   if (item.food_tier) return item.food_tier;
   if (item.api_source === 'builtin') return 'master';
+  if (item.api_source === GENERIC_DB_API_SOURCE) return 'reference';
   if (item.api_source === FOOD_API_SOURCE || item.api_source === 'openfoodfacts') {
     return 'brand';
   }
@@ -1549,6 +1531,7 @@ function inferTierFromPartial(item: Partial<Food>): FoodTier {
 function inferSourceKindFromPartial(item: Partial<Food>): FoodSourceKind {
   if (item.source_kind) return item.source_kind as FoodSourceKind;
   if (item.api_source === 'builtin') return 'builtin';
+  if (item.api_source === GENERIC_DB_API_SOURCE) return 'generic_curated';
   if (item.api_source === FATSECRET_API_SOURCE) return 'fatsecret';
   if (item.api_source === FOOD_API_SOURCE || item.api_source === 'openfoodfacts') {
     return 'openfoodfacts';
@@ -1572,6 +1555,7 @@ function tierBoost(food: Food): number {
   if (food.api_source === 'builtin' || food.food_tier === 'master') return 310;
 
   const sk = food.source_kind;
+  if (sk === 'generic_curated' || food.api_source === GENERIC_DB_API_SOURCE) return 124;
   if (sk === 'usda_foundation' || food.verified_basic) return 128;
   if (sk === 'usda_sr_legacy') return 102;
   if (sk === 'fatsecret' || food.api_source === FATSECRET_API_SOURCE) {
@@ -1667,4 +1651,84 @@ function dedupePorNombreNormalizado<T extends { _score: number; nombre: string }
     if (!prev || it._score > prev._score) byName.set(k, it);
   }
   return Array.from(byName.values());
+}
+
+function attachSearchScore(f: Food, ctx: SearchScoreCtx): Food & { _score: number } {
+  const rawNombre = f.nombre ?? '';
+  const normalizedName = normalizeText(rawNombre);
+  const fMeta = rellenarMetaFood(f);
+  const forTier: Food =
+    fMeta.api_source === FATSECRET_API_SOURCE &&
+    rawNombre &&
+    /\([^)]+\)/.test(rawNombre) &&
+    fMeta.food_tier === 'reference'
+      ? { ...fMeta, food_tier: 'brand' }
+      : fMeta;
+  const base = tierBoost(forTier);
+  let textScore = 0;
+  for (const v of ctx.queryVariants) {
+    textScore = Math.max(textScore, scoreResult(normalizedName, v, ctx.queryTokens));
+  }
+  const noun = nounFocusBonusMax(normalizedName, ctx.queryVariants, ctx.queryTokens, {
+    rawNombre,
+    singleTokenQuery: ctx.singleTokenQuery,
+  });
+  const noise = compoundDishPenalty(normalizedName, ctx.queryTokens);
+  const literalTier = literalMatchTier(normalizedName, ctx.queryVariants, rawNombre);
+  const literalBoost = (4 - literalTier) * 480;
+  const tituloIgualQuery =
+    ctx.singleTokenQuery &&
+    ctx.queryVariants.some((v) => v && normalizedName === v);
+  const bonusNombreMinimo = tituloIgualQuery ? 520 : 0;
+  let apiOrderBoost = 0;
+  if (f.api_id != null && f.api_source) {
+    const rk = ctx.apiOrderByKey.get(`${f.api_source}:${f.api_id}`);
+    if (rk !== undefined) {
+      apiOrderBoost = Math.max(0, 36 - rk) * 11;
+    }
+  }
+  let score =
+    base +
+    textScore +
+    noun -
+    noise +
+    literalBoost +
+    apiOrderBoost +
+    bonusNombreMinimo;
+  if (esUuidPostgres(f.id)) {
+    score += popularityBoost(ctx.popularidad.get(f.id) ?? 0);
+  }
+  return { ...f, _score: score };
+}
+
+function rankFoodsForBucket(
+  foods: Food[],
+  ctx: SearchScoreCtx,
+): (Food & { _score: number })[] {
+  if (foods.length === 0) return [];
+  const scored = foods.map((x) => attachSearchScore(x, ctx));
+  return dedupePorNombreNormalizado(scored).sort((a, b) => b._score - a._score);
+}
+
+function pickSearchSlots(
+  ranked: (Food & { _score: number })[],
+  maxTake: number,
+  out: Food[],
+  seenKeys: Set<string>,
+  seenNames: Set<string>,
+): void {
+  let taken = 0;
+  for (const row of ranked) {
+    if (taken >= maxTake) break;
+    const dk = dedupKeyFood(row);
+    const nk = normalizeText(row.nombre);
+    if (!nk) continue;
+    if (seenKeys.has(dk) || seenNames.has(nk)) continue;
+    seenKeys.add(dk);
+    seenNames.add(nk);
+    const { _score, ...rest } = row;
+    void _score;
+    out.push(rest as Food);
+    taken++;
+  }
 }
