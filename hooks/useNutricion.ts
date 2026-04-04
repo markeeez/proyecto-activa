@@ -101,10 +101,11 @@ export function useNutricion() {
       await nutricionService.eliminarComidaDelLog(logId, mealId);
       await cargar();
     },
-    crearComidaPersonalizada: async (nombre: string) => {
-      if (!user?.id) return;
-      await nutricionService.crearComidaPersonalizada(user.id, fecha, nombre);
+    crearComidaPersonalizada: async (nombre: string): Promise<string | null> => {
+      if (!user?.id) return null;
+      const mealId = await nutricionService.crearComidaPersonalizada(user.id, fecha, nombre);
       await cargar();
+      return mealId;
     },
     pegarAlimentosEnComida: async (mealId: string, lineas: LineaCopiadaNutricion[]) => {
       if (!lineas.length) return;

@@ -237,8 +237,13 @@ export const nutricionService = {
     return creado as NutritionLog;
   },
 
-  /** Si el log no tiene filas de comida, inserta las 4 predeterminadas. */
-  async asegurarComidasPredeterminadasSiVacias(logId: string): Promise<void> {
+  /**
+   * Si el log no tiene filas de comida, inserta las 4 predeterminadas.
+   * En días pasados no se crean (vista solo comidas con ítems; el usuario añade comida custom si hace falta).
+   */
+  async asegurarComidasPredeterminadasSiVacias(logId: string, fecha: string): Promise<void> {
+    if (esDiaPasadoVsHoy(fecha)) return;
+
     const { count, error: cErr } = await supabase
       .from('nutrition_log_meals')
       .select('*', { count: 'exact', head: true })
@@ -259,11 +264,12 @@ export const nutricionService = {
   },
 
   /**
-   * Carga el día: asegura log + comidas por defecto si hace falta, aplica filtro de vacías en días pasados.
+   * Carga el día: asegura log; en hoy/futuro inserta las 4 predeterminadas si el log está vacío.
+   * En días pasados solo filas reales; vista = comidas con al menos un ítem.
    */
   async obtenerResumenDiaNutricion(userId: string, fecha: string): Promise<ResumenDiarioNutricion | null> {
     const log = await this.asegurarLogDiario(userId, fecha);
-    await this.asegurarComidasPredeterminadasSiVacias(log.id);
+    await this.asegurarComidasPredeterminadasSiVacias(log.id, fecha);
     await consolidarDuplicadosSlotsPredeterminadosLog(log.id);
 
     const { data: mealsConItems, error } = await supabase
@@ -294,13 +300,8 @@ export const nutricionService = {
     let comidas = (mealsConItems ?? []).map((m: any) => mapMealRow(m));
     comidas.sort((a, b) => a.orden - b.orden);
 
-    // Día pasado: ocultar comidas vacías si ya hubo algo registrado ese día (vista “resumen”).
-    // Si el día está totalmente vacío, mostramos las 4 slots para poder registrar a posteriori.
     if (esDiaPasadoVsHoy(fecha)) {
-      const conItems = comidas.filter((c) => c.items.length > 0);
-      if (conItems.length > 0) {
-        comidas = conItems;
-      }
+      comidas = comidas.filter((c) => c.items.length > 0);
     }
 
     return resumenDesdeComidas(fecha, log.id, comidas);
@@ -388,7 +389,8 @@ export const nutricionService = {
     }
   },
 
-  async crearComidaPersonalizada(userId: string, fecha: string, nombre: string): Promise<void> {
+  /** Crea el log del día si no existe y devuelve el id de la nueva fila nutrition_log_meals. */
+  async crearComidaPersonalizada(userId: string, fecha: string, nombre: string): Promise<string> {
     const trimmed = nombre.trim();
     if (!trimmed) throw new Error('Nombre vacío');
 
@@ -405,14 +407,19 @@ export const nutricionService = {
 
     const nextOrden = ultima?.orden != null ? Number(ultima.orden) + 1 : 1;
 
-    const { error: e1 } = await supabase.from('nutrition_log_meals').insert({
-      log_id: log.id,
-      nombre: trimmed,
-      orden: nextOrden,
-      is_default: false,
-      meal_type_id: null,
-    });
+    const { data: creada, error: e1 } = await supabase
+      .from('nutrition_log_meals')
+      .insert({
+        log_id: log.id,
+        nombre: trimmed,
+        orden: nextOrden,
+        is_default: false,
+        meal_type_id: null,
+      })
+      .select('id')
+      .single();
     if (e1) throw e1;
+    return (creada as { id: string }).id;
   },
 
   async pegarAlimentosEnComida(

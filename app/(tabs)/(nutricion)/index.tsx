@@ -17,7 +17,7 @@ import { useComidaPortapapeles } from '@/context/ComidaPortapapelesContext';
 import { useAuth } from '@/hooks/useAuth';
 import { useNutricion } from '@/hooks/useNutricion';
 import { useTheme } from '@/hooks/useTheme';
-import { agregarDiasIso, getSemanaMovil, parseFechaLocal } from '@/lib/fechaNutricion';
+import { agregarDiasIso, esDiaPasadoVsHoy, getSemanaMovil, parseFechaLocal } from '@/lib/fechaNutricion';
 import { guardarOrdenComidas, obtenerOrdenComidas } from '@/lib/nutricionLogPreferencias';
 import { nutricionService } from '@/services/nutricion.service';
 import type { ComidaConAlimentos } from '@/types/app.types';
@@ -178,13 +178,19 @@ export default function NutricionIndex() {
   const confirmarNuevaComida = useCallback(async () => {
     if (!nombreNuevaComida.trim()) return;
     try {
-      await crearComidaPersonalizada(nombreNuevaComida.trim());
+      const nuevoMealId = await crearComidaPersonalizada(nombreNuevaComida.trim());
       setModalNuevaComida(false);
       setNombreNuevaComida('');
+      if (nuevoMealId && esDiaPasadoVsHoy(fecha)) {
+        router.push({
+          pathname: '/(tabs)/(nutricion)/agregar',
+          params: { mealId: nuevoMealId, fecha },
+        });
+      }
     } catch {
       /* silencioso; podría mostrarse toast */
     }
-  }, [nombreNuevaComida, crearComidaPersonalizada]);
+  }, [nombreNuevaComida, crearComidaPersonalizada, fecha]);
 
   const renderHeader = useCallback(() => {
     return (
