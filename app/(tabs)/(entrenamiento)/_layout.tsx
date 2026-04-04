@@ -14,7 +14,7 @@ import { Stack } from 'expo-router';
 export default function EntrenamientoLayout() {
   return (
     <Stack>
-      <Stack.Screen name="index" options={{ title: 'Entrenamiento' }} />
+      <Stack.Screen name="index" options={{ headerShown: false }} />
       <Stack.Screen name="nueva-sesion" options={{ title: 'Nueva sesión', presentation: 'modal' }} />
       <Stack.Screen name="sesion/[id]" options={{ title: 'Sesión' }} />
       <Stack.Screen name="ejercicio/[id]" options={{ title: 'Ejercicio' }} />

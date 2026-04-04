@@ -133,7 +133,11 @@ export interface NutritionLog {
 export interface NutritionLogMeal {
   id: string;
   log_id: string;
-  meal_type_id: string;
+  /** Obsoleto en app; puede ser null tras migración */
+  meal_type_id?: string | null;
+  nombre: string;
+  orden: number;
+  is_default: boolean;
   created_at: string;
 }
 

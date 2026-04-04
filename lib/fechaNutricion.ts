@@ -20,6 +20,14 @@ export function fechaHoyIsoLocal(): string {
   return fechaIsoDesdeDate(new Date());
 }
 
+/**
+ * true si `fechaIso` es estrictamente anterior a hoy (local).
+ * Se usa para ocultar comidas vacías al revisar días pasados desde otro día.
+ */
+export function esDiaPasadoVsHoy(fechaIso: string): boolean {
+  return fechaIso < fechaHoyIsoLocal();
+}
+
 export function agregarDiasIso(iso: string, delta: number): string {
   const d = parseFechaLocal(iso);
   d.setDate(d.getDate() + delta);

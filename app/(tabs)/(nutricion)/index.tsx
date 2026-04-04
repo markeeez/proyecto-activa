@@ -1,17 +1,17 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
 import { router } from 'expo-router';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
-  Modal,
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
+    ActivityIndicator,
+    Modal,
+    Pressable,
+    StyleSheet,
+    Text,
+    TextInput,
+    View,
 } from 'react-native';
+import DraggableFlatList, { ScaleDecorator } from 'react-native-draggable-flatlist';
 import { Gesture, GestureDetector, Swipeable } from 'react-native-gesture-handler';
 import { runOnJS } from 'react-native-reanimated';
-import DraggableFlatList, { ScaleDecorator } from 'react-native-draggable-flatlist';
 
 import { useComidaPortapapeles } from '@/context/ComidaPortapapelesContext';
 import { useAuth } from '@/hooks/useAuth';
@@ -19,15 +19,16 @@ import { useNutricion } from '@/hooks/useNutricion';
 import { useTheme } from '@/hooks/useTheme';
 import { agregarDiasIso, getSemanaMovil, parseFechaLocal } from '@/lib/fechaNutricion';
 import { guardarOrdenComidas, obtenerOrdenComidas } from '@/lib/nutricionLogPreferencias';
+import { nutricionService } from '@/services/nutricion.service';
 import type { ComidaConAlimentos } from '@/types/app.types';
 
 type MacroKey = 'proteinas' | 'carbos' | 'grasas';
 
 function ordenarComidas(comidas: ComidaConAlimentos[], ordenIds: string[] | null): ComidaConAlimentos[] {
   if (!ordenIds?.length) {
-    return [...comidas].sort((a, b) => (a.mealType?.orden ?? 0) - (b.mealType?.orden ?? 0));
+    return [...comidas].sort((a, b) => a.orden - b.orden);
   }
-  const map = new Map(comidas.map((c) => [c.mealType.id, c]));
+  const map = new Map(comidas.map((c) => [c.mealId, c]));
   const seen = new Set<string>();
   const out: ComidaConAlimentos[] = [];
   for (const id of ordenIds) {
@@ -38,7 +39,7 @@ function ordenarComidas(comidas: ComidaConAlimentos[], ordenIds: string[] | null
     }
   }
   for (const c of comidas) {
-    if (!seen.has(c.mealType.id)) out.push(c);
+    if (!seen.has(c.mealId)) out.push(c);
   }
   return out;
 }
@@ -70,21 +71,21 @@ export default function NutricionIndex() {
 
   useEffect(() => {
     if (!user?.id) return;
-    void obtenerOrdenComidas(user.id).then(setOrdenIds);
-  }, [user?.id]);
+    void obtenerOrdenComidas(user.id, fecha).then(setOrdenIds);
+  }, [user?.id, fecha]);
 
-  /** Quitar del orden guardado los meal_type_id que ya no existen en el log (evita “fantasmas” tras borrar en BD). */
+  /** Quitar del orden guardado los meal_id que ya no existen en el log. */
   useEffect(() => {
     if (!user?.id || !resumen?.comidas) return;
     setOrdenIds((prev) => {
       if (prev == null) return prev;
-      const present = new Set(resumen.comidas.map((x) => x.mealType.id));
+      const present = new Set(resumen.comidas.map((x) => x.mealId));
       const next = prev.filter((id) => present.has(id));
       if (next.length === prev.length && next.every((id, i) => id === prev[i])) return prev;
-      void guardarOrdenComidas(user.id, next);
+      void guardarOrdenComidas(user.id, fecha, next);
       return next;
     });
-  }, [resumen?.comidas, user?.id]);
+  }, [resumen?.comidas, user?.id, fecha]);
 
   const listaOrdenada = useMemo(
     () => ordenarComidas(resumen?.comidas ?? [], ordenIds),
@@ -158,11 +159,13 @@ export default function NutricionIndex() {
   const onDragEnd = useCallback(
     ({ data }: { data: ComidaConAlimentos[] }) => {
       setComidasData(data);
-      const ids = data.map((c) => c.mealType.id);
+      const ids = data.map((c) => c.mealId);
       setOrdenIds(ids);
-      if (user?.id) void guardarOrdenComidas(user.id, ids);
+      if (user?.id) void guardarOrdenComidas(user.id, fecha, ids);
+      const lid = resumen?.logId;
+      if (lid) void nutricionService.actualizarOrdenComidas(lid, ids).catch(() => {});
     },
-    [user?.id],
+    [user?.id, fecha, resumen?.logId],
   );
 
   const cerrarMenu = useCallback(() => setMenuMealId(null), []);
@@ -173,16 +176,15 @@ export default function NutricionIndex() {
   );
 
   const confirmarNuevaComida = useCallback(async () => {
-    const logId = resumen?.logId;
-    if (!logId || !nombreNuevaComida.trim()) return;
+    if (!nombreNuevaComida.trim()) return;
     try {
-      await crearComidaPersonalizada(logId, nombreNuevaComida.trim());
+      await crearComidaPersonalizada(nombreNuevaComida.trim());
       setModalNuevaComida(false);
       setNombreNuevaComida('');
     } catch {
       /* silencioso; podría mostrarse toast */
     }
-  }, [resumen?.logId, nombreNuevaComida, crearComidaPersonalizada]);
+  }, [nombreNuevaComida, crearComidaPersonalizada]);
 
   const renderHeader = useCallback(() => {
     return (
@@ -267,10 +269,11 @@ export default function NutricionIndex() {
             renderLeftActions={leftActions}
             overshootLeft={false}
             onSwipeableOpen={(direction) => {
-              if (direction !== 'left' || !logId) return;
+              const mid = meal.mealId;
+              if (direction !== 'left' || !logId || !mid) return;
               void (async () => {
                 try {
-                  await eliminarComidaDelLog(logId, meal.mealId);
+                  await eliminarComidaDelLog(logId, mid);
                 } catch (e) {
                   console.error('[Nutricion] eliminar comida', e);
                 }
@@ -283,7 +286,7 @@ export default function NutricionIndex() {
                   <Text style={styles.dragHandleText}>≡</Text>
                 </Pressable>
                 <View style={styles.mealHeaderText}>
-                  <Text style={styles.mealTitle}>{meal.mealType?.nombre ?? 'Comida'}</Text>
+                  <Text style={styles.mealTitle}>{meal.nombre}</Text>
                   <Text style={styles.mealMeta}>
                     {Math.round(meal.totalCalorias)} KCAL · {Math.round(meal.totalProteinas)}P |{' '}
                     {Math.round(meal.totalCarbos)}C | {Math.round(meal.totalGrasas)}G
@@ -350,7 +353,7 @@ export default function NutricionIndex() {
                   onPress={() =>
                     router.push({
                       pathname: '/(tabs)/(nutricion)/agregar',
-                      params: { mealTypeId: meal.mealType?.id, mealId: meal.mealId, fecha },
+                      params: { mealId: meal.mealId, fecha },
                     })
                   }
                 >
@@ -377,16 +380,12 @@ export default function NutricionIndex() {
   const renderFooter = useCallback(() => {
     return (
       <View style={styles.footerBlock}>
-        <Pressable
-          style={[styles.addMealBtn, !resumen?.logId && styles.addMealBtnDisabled]}
-          disabled={!resumen?.logId}
-          onPress={() => setModalNuevaComida(true)}
-        >
+        <Pressable style={styles.addMealBtn} onPress={() => setModalNuevaComida(true)}>
           <Text style={styles.addMealBtnText}>Añadir comida</Text>
         </Pressable>
       </View>
     );
-  }, [styles, resumen?.logId]);
+  }, [styles]);
 
   return (
     <View style={styles.root}>

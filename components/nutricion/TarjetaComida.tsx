@@ -26,7 +26,7 @@ export function TarjetaComida({ comida, onAgregarAlimento }: TarjetaComidaProps)
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.nombre}>{comida.mealType.nombre}</Text>
+        <Text style={styles.nombre}>{comida.nombre}</Text>
         <Text style={styles.calorias}>{comida.totalCalorias.toFixed(0)} kcal</Text>
       </View>
 

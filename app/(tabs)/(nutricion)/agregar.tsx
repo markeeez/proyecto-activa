@@ -1,6 +1,7 @@
 import { CrearAlimentoModal } from '@/components/nutricion/CrearAlimentoModal';
 import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from '@/hooks/useTheme';
+import { fechaHoyIsoLocal } from '@/lib/fechaNutricion';
 import { emitNutricionLogActualizado } from '@/lib/nutricionEvents';
 import { alimentosService } from '@/services/alimentos.service';
 import { nutricionService } from '@/services/nutricion.service';
@@ -38,7 +39,13 @@ export default function AgregarAlimento() {
   const { c, f, ts, s, r } = useTheme();
   const { user } = useAuth();
   const styles = useMemo(() => makeStyles(c, f, ts, s, r), [c, f, ts, s, r]);
-  const { mealId } = useLocalSearchParams<{ mealId?: string }>();
+  const params = useLocalSearchParams<{
+    mealId?: string;
+    fecha?: string;
+  }>();
+  const mealId = typeof params.mealId === 'string' ? params.mealId : params.mealId?.[0];
+  const fechaRaw = typeof params.fecha === 'string' ? params.fecha : params.fecha?.[0];
+  const fechaLog = fechaRaw && fechaRaw.length > 0 ? fechaRaw : fechaHoyIsoLocal();
 
   const [tab, setTab] = useState<TabKey>('base');
   const [query, setQuery] = useState('');
@@ -236,7 +243,7 @@ export default function AgregarAlimento() {
   }, [tab, query, user?.id]);
 
   const confirmarAgregar = async () => {
-    if (!mealId || !foodSeleccionado) return;
+    if (!mealId || !foodSeleccionado || !user?.id) return;
     const gramosNumero = Number(gramos);
     if (!Number.isFinite(gramosNumero) || gramosNumero <= 0) return;
 
@@ -254,7 +261,7 @@ export default function AgregarAlimento() {
           grasas: Number(foodReal.grasas ?? 0),
         },
       });
-      emitNutricionLogActualizado();
+      emitNutricionLogActualizado({ fechaLog });
       setFoodSeleccionado(null);
       setGramos('100');
       setOkMsg('Alimento agregado. Puedes seguir añadiendo mas.');

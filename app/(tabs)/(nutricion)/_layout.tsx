@@ -8,10 +8,10 @@
  *   alimento/[id]   → detalle de un alimento (macros completos)
  */
 
+import { ComidaPortapapelesProvider } from '@/context/ComidaPortapapelesContext';
 import { Stack } from 'expo-router';
 import { StyleSheet } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { ComidaPortapapelesProvider } from '@/context/ComidaPortapapelesContext';
 
 export default function NutricionLayout() {
   return (

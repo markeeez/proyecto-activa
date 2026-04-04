@@ -1,42 +1,199 @@
 /**
  * SERVICIO DE NUTRICIÓN
  *
- * Gestiona nutrition_logs, nutrition_log_meals, nutrition_log_items,
- * meal_types y user_goals.
+ * Comidas por día en nutrition_log_meals (nombre, orden, is_default).
+ * Las 4 predeterminadas se insertan al crear el día; no se usa meal_types en la app.
  */
 
+import {
+  COMIDAS_PREDETERMINADAS,
+  type ComidaDefaultDef,
+} from '@/constants/comidasPredeterminadas';
+import { esDiaPasadoVsHoy } from '@/lib/fechaNutricion';
 import { supabase } from '@/lib/supabase';
 import { alimentosService } from '@/services/alimentos.service';
-import type { UserGoal, NutritionLog, MealType } from '@/types/database.types';
-import type { ResumenDiarioNutricion } from '@/types/app.types';
+import type { ComidaConAlimentos, ResumenDiarioNutricion } from '@/types/app.types';
+import type { NutritionLog, UserGoal } from '@/types/database.types';
 
-function normalizarExcluidos(log: NutritionLog | null | undefined): string[] {
-  const raw = log?.excluded_meal_type_ids;
-  if (!Array.isArray(raw)) return [];
-  return raw.filter((id): id is string => typeof id === 'string' && id.length > 0);
+function normalizarNombre(s: string): string {
+  return s
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim();
 }
 
-async function persistirMealTypeExcluidoEnLog(logId: string, mealTypeId: string) {
-  const { data: row, error } = await supabase
-    .from('nutrition_logs')
-    .select('excluded_meal_type_ids')
-    .eq('id', logId)
-    .single();
-  if (error) throw error;
+/** Nombre legible aunque en BD venga null (migración / filas viejas). */
+function resolverNombreComida(meal: {
+  nombre?: string | null;
+  orden?: number | null;
+  is_default?: boolean | null;
+}): string {
+  const raw = meal.nombre?.trim();
+  if (raw) return raw;
+  if (meal.is_default) {
+    const def = COMIDAS_PREDETERMINADAS.find((d) => d.orden === Number(meal.orden));
+    if (def) return def.nombre;
+  }
+  return 'Comida';
+}
 
-  const cur = normalizarExcluidos(row as NutritionLog);
-  if (cur.includes(mealTypeId)) return;
+function filaPareceSlotPredeterminado(
+  r: { nombre: string | null; orden: number; is_default: boolean },
+  def: ComidaDefaultDef,
+): boolean {
+  if (Number(r.orden) !== def.orden) return false;
+  if (r.is_default) return true;
+  const n = normalizarNombre(r.nombre ?? '');
+  if (!n || n === normalizarNombre('Comida')) return true;
+  return n === normalizarNombre(def.nombre);
+}
 
-  const next = [...cur, mealTypeId];
-  const { error: upErr } = await supabase
-    .from('nutrition_logs')
-    .update({ excluded_meal_type_ids: next })
-    .eq('id', logId);
-  if (upErr) throw upErr;
+type FilaMealWork = {
+  id: string;
+  nombre: string | null;
+  orden: number;
+  is_default: boolean;
+  itemCount: number;
+};
+
+/**
+ * Une filas duplicadas del mismo slot predeterminado (mismo orden 1–4) en un solo meal
+ * y mueve ítems al que se conserva. Idempotente.
+ */
+async function consolidarDuplicadosSlotsPredeterminadosLog(logId: string): Promise<void> {
+  const { data: rows, error } = await supabase
+    .from('nutrition_log_meals')
+    .select(`id, nombre, orden, is_default, nutrition_log_items (id)`)
+    .eq('log_id', logId);
+
+  if (error) {
+    console.warn('[nutricionService] consolidar: lectura', error.message);
+    return;
+  }
+
+  let work: FilaMealWork[] = (rows ?? []).map((r: any) => ({
+    id: r.id as string,
+    nombre: (r.nombre as string | null) ?? null,
+    orden: Number(r.orden ?? 0),
+    is_default: Boolean(r.is_default),
+    itemCount: (r.nutrition_log_items ?? []).length,
+  }));
+
+  for (const def of COMIDAS_PREDETERMINADAS) {
+    const candidates = work.filter((r) =>
+      filaPareceSlotPredeterminado(
+        { nombre: r.nombre, orden: r.orden, is_default: r.is_default },
+        def,
+      ),
+    );
+    if (candidates.length <= 1) continue;
+
+    const sorted = [...candidates].sort(
+      (a, b) => b.itemCount - a.itemCount || a.id.localeCompare(b.id),
+    );
+    const keeper = sorted[0];
+    const losers = sorted.slice(1);
+
+    for (const loser of losers) {
+      if (loser.itemCount > 0) {
+        const { error: uErr } = await supabase
+          .from('nutrition_log_items')
+          .update({ meal_id: keeper.id })
+          .eq('meal_id', loser.id);
+        if (uErr) {
+          console.warn('[nutricionService] consolidar: mover items', uErr.message);
+          continue;
+        }
+      }
+      const { error: dErr } = await supabase.from('nutrition_log_meals').delete().eq('id', loser.id);
+      if (dErr) {
+        console.warn('[nutricionService] consolidar: borrar meal', dErr.message);
+        continue;
+      }
+      work = work.filter((r) => r.id !== loser.id);
+      keeper.itemCount += loser.itemCount;
+    }
+
+    const { error: patchErr } = await supabase
+      .from('nutrition_log_meals')
+      .update({
+        nombre: def.nombre,
+        orden: def.orden,
+        is_default: true,
+      })
+      .eq('id', keeper.id);
+    if (patchErr) console.warn('[nutricionService] consolidar: normalizar keeper', patchErr.message);
+
+    const ki = work.findIndex((x) => x.id === keeper.id);
+    if (ki >= 0) {
+      work[ki] = {
+        ...work[ki],
+        nombre: def.nombre,
+        orden: def.orden,
+        is_default: true,
+        itemCount: keeper.itemCount,
+      };
+    }
+  }
+}
+
+function totalesDesdeItems(items: ComidaConAlimentos['items']) {
+  return {
+    totalCalorias: items.reduce((acc, it) => acc + it.calorias_calculadas, 0),
+    totalProteinas: items.reduce((acc, it) => acc + it.proteinas_calculadas, 0),
+    totalCarbos: items.reduce((acc, it) => acc + it.carbos_calculados, 0),
+    totalGrasas: items.reduce((acc, it) => acc + it.grasas_calculadas, 0),
+  };
+}
+
+function mapMealRow(meal: any): ComidaConAlimentos {
+  const items = (meal.nutrition_log_items ?? []).map((item: any) => ({
+    id: item.id,
+    meal_id: item.meal_id,
+    food_id: item.food_id,
+    gramos: Number(item.gramos ?? 0),
+    calorias_calculadas: Number(item.calorias_calculadas ?? 0),
+    proteinas_calculadas: Number(item.proteinas_calculadas ?? 0),
+    carbos_calculados: Number(item.carbos_calculados ?? 0),
+    grasas_calculadas: Number(item.grasas_calculadas ?? 0),
+    food: item.foods,
+  }));
+
+  const t = totalesDesdeItems(items);
+  return {
+    mealId: meal.id,
+    nombre: resolverNombreComida(meal),
+    orden: Number(meal.orden ?? 999),
+    isDefault: Boolean(meal.is_default),
+    items,
+    ...t,
+  };
+}
+
+function resumenDesdeComidas(fecha: string, logId: string, comidas: ComidaConAlimentos[]): ResumenDiarioNutricion {
+  return {
+    fecha,
+    logId,
+    totalCalorias: comidas.reduce((a, c) => a + c.totalCalorias, 0),
+    totalProteinas: comidas.reduce((a, c) => a + c.totalProteinas, 0),
+    totalCarbos: comidas.reduce((a, c) => a + c.totalCarbos, 0),
+    totalGrasas: comidas.reduce((a, c) => a + c.totalGrasas, 0),
+    comidas,
+  };
 }
 
 export const nutricionService = {
-  // ─── Objetivos ─────────────────────────────────────────────────────────────
+  async obtenerLogSiExiste(userId: string, fecha: string): Promise<NutritionLog | null> {
+    const { data, error } = await supabase
+      .from('nutrition_logs')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('fecha', fecha)
+      .maybeSingle();
+    if (error) throw error;
+    return (data as NutritionLog | null) ?? null;
+  },
 
   async obtenerObjetivos(userId: string): Promise<UserGoal | null> {
     const { data, error } = await supabase
@@ -52,97 +209,72 @@ export const nutricionService = {
   },
 
   async crearObjetivos(
-    userId: string,
-    datos: Omit<UserGoal, 'id' | 'user_id' | 'created_at'>
-  ) {
-    // TODO: implementar
-    // INSERT INTO user_goals
-  },
+    _userId: string,
+    _datos: Omit<UserGoal, 'id' | 'user_id' | 'created_at'>,
+  ) {},
 
   async actualizarObjetivos(
-    userId: string,
-    datos: Partial<Omit<UserGoal, 'id' | 'user_id' | 'created_at'>>
-  ) {
-    // TODO: implementar
-    // UPDATE user_goals SET ... WHERE user_id = userId (el más reciente)
-  },
+    _userId: string,
+    _datos: Partial<Omit<UserGoal, 'id' | 'user_id' | 'created_at'>>,
+  ) {},
 
-  // ─── Tipos de comida ───────────────────────────────────────────────────────
-
-  /**
-   * Obtiene los tipos de comida del usuario (predeterminados + personalizados).
-   * Los predeterminados tienen user_id = null y is_default = true.
-   */
-  async obtenerTiposComida(userId: string): Promise<MealType[]> {
-    const { data, error } = await supabase
-      .from('meal_types')
-      .select('*')
-      .or(`user_id.is.null,user_id.eq.${userId}`)
-      .order('orden', { ascending: true });
-
-    if (error) throw error;
-    return (data ?? []) as MealType[];
-  },
-
-  // ─── Log diario ────────────────────────────────────────────────────────────
-
-  /**
-   * Obtiene o crea el log del día. Solo puede haber uno por usuario/día.
-   * @returns El log con todas sus comidas y alimentos (joined)
-   */
-  async obtenerOCrearLogDiario(
-    userId: string,
-    fecha: string
-  ): Promise<ResumenDiarioNutricion | null> {
-    const { data: logExistente, error: errorLog } = await supabase
+  async asegurarLogDiario(userId: string, fecha: string): Promise<NutritionLog> {
+    const { data: existente, error: e0 } = await supabase
       .from('nutrition_logs')
       .select('*')
       .eq('user_id', userId)
       .eq('fecha', fecha)
       .maybeSingle();
+    if (e0) throw e0;
+    if (existente) return existente as NutritionLog;
 
-    if (errorLog) throw errorLog;
+    const { data: creado, error: e1 } = await supabase
+      .from('nutrition_logs')
+      .insert({ user_id: userId, fecha })
+      .select('*')
+      .single();
+    if (e1) throw e1;
+    return creado as NutritionLog;
+  },
 
-    let log = logExistente as NutritionLog | null;
-    if (!log) {
-      const { data: logCreado, error: errorCrearLog } = await supabase
-        .from('nutrition_logs')
-        .insert({ user_id: userId, fecha })
-        .select('*')
-        .single();
-
-      if (errorCrearLog) throw errorCrearLog;
-      log = logCreado as NutritionLog;
-    }
-
-    const mealTypes = await this.obtenerTiposComida(userId);
-    const excluidosSet = new Set(normalizarExcluidos(log));
-
-    const { data: mealsExistentes, error: errorMealsExistentes } = await supabase
+  /** Si el log no tiene filas de comida, inserta las 4 predeterminadas. */
+  async asegurarComidasPredeterminadasSiVacias(logId: string): Promise<void> {
+    const { count, error: cErr } = await supabase
       .from('nutrition_log_meals')
-      .select('id, meal_type_id')
-      .eq('log_id', log.id);
+      .select('*', { count: 'exact', head: true })
+      .eq('log_id', logId);
+    if (cErr) throw cErr;
+    if ((count ?? 0) > 0) return;
 
-    if (errorMealsExistentes) throw errorMealsExistentes;
+    const rows = COMIDAS_PREDETERMINADAS.map((d) => ({
+      log_id: logId,
+      nombre: d.nombre,
+      orden: d.orden,
+      is_default: true,
+      meal_type_id: null as string | null,
+    }));
 
-    const mealTypeIdsExistentes = new Set((mealsExistentes ?? []).map((m) => m.meal_type_id));
-    const mealsFaltantes = mealTypes
-      .filter((mt) => !mealTypeIdsExistentes.has(mt.id) && !excluidosSet.has(mt.id))
-      .map((mt) => ({ log_id: log.id, meal_type_id: mt.id }));
+    const { error } = await supabase.from('nutrition_log_meals').insert(rows);
+    if (error) throw error;
+  },
 
-    if (mealsFaltantes.length > 0) {
-      const { error: errorCrearMeals } = await supabase
-        .from('nutrition_log_meals')
-        .insert(mealsFaltantes);
-      if (errorCrearMeals) throw errorCrearMeals;
-    }
+  /**
+   * Carga el día: asegura log + comidas por defecto si hace falta, aplica filtro de vacías en días pasados.
+   */
+  async obtenerResumenDiaNutricion(userId: string, fecha: string): Promise<ResumenDiarioNutricion | null> {
+    const log = await this.asegurarLogDiario(userId, fecha);
+    await this.asegurarComidasPredeterminadasSiVacias(log.id);
+    await consolidarDuplicadosSlotsPredeterminadosLog(log.id);
 
-    const { data: mealsConItems, error: errorMealsConItems } = await supabase
+    const { data: mealsConItems, error } = await supabase
       .from('nutrition_log_meals')
       .select(`
         id,
+        log_id,
+        nombre,
+        orden,
+        is_default,
         meal_type_id,
-        meal_types (*),
         nutrition_log_items (
           id,
           meal_id,
@@ -157,51 +289,38 @@ export const nutricionService = {
       `)
       .eq('log_id', log.id);
 
-    if (errorMealsConItems) throw errorMealsConItems;
+    if (error) throw error;
 
-    const comidas = (mealsConItems ?? []).map((meal: any) => {
-      const items = (meal.nutrition_log_items ?? []).map((item: any) => ({
-        id: item.id,
-        meal_id: item.meal_id,
-        food_id: item.food_id,
-        gramos: Number(item.gramos ?? 0),
-        calorias_calculadas: Number(item.calorias_calculadas ?? 0),
-        proteinas_calculadas: Number(item.proteinas_calculadas ?? 0),
-        carbos_calculados: Number(item.carbos_calculados ?? 0),
-        grasas_calculadas: Number(item.grasas_calculadas ?? 0),
-        food: item.foods,
-      }));
+    let comidas = (mealsConItems ?? []).map((m: any) => mapMealRow(m));
+    comidas.sort((a, b) => a.orden - b.orden);
 
-      return {
-        mealId: meal.id,
-        mealType: meal.meal_types,
-        items,
-        totalCalorias: items.reduce((acc: number, it: any) => acc + it.calorias_calculadas, 0),
-        totalProteinas: items.reduce((acc: number, it: any) => acc + it.proteinas_calculadas, 0),
-        totalCarbos: items.reduce((acc: number, it: any) => acc + it.carbos_calculados, 0),
-        totalGrasas: items.reduce((acc: number, it: any) => acc + it.grasas_calculadas, 0),
-      };
-    });
+    // Día pasado: ocultar comidas vacías si ya hubo algo registrado ese día (vista “resumen”).
+    // Si el día está totalmente vacío, mostramos las 4 slots para poder registrar a posteriori.
+    if (esDiaPasadoVsHoy(fecha)) {
+      const conItems = comidas.filter((c) => c.items.length > 0);
+      if (conItems.length > 0) {
+        comidas = conItems;
+      }
+    }
 
-    comidas.sort((a: any, b: any) => (a.mealType?.orden ?? 999) - (b.mealType?.orden ?? 999));
-
-    return {
-      fecha,
-      logId: log.id,
-      totalCalorias: comidas.reduce((acc: number, c: any) => acc + c.totalCalorias, 0),
-      totalProteinas: comidas.reduce((acc: number, c: any) => acc + c.totalProteinas, 0),
-      totalCarbos: comidas.reduce((acc: number, c: any) => acc + c.totalCarbos, 0),
-      totalGrasas: comidas.reduce((acc: number, c: any) => acc + c.totalGrasas, 0),
-      comidas,
-    };
+    return resumenDesdeComidas(fecha, log.id, comidas);
   },
 
-  // ─── Alimentos en log ──────────────────────────────────────────────────────
+  async actualizarOrdenComidas(logId: string, mealIdsEnOrden: string[]): Promise<void> {
+    const results = await Promise.all(
+      mealIdsEnOrden.map((id, index) =>
+        supabase
+          .from('nutrition_log_meals')
+          .update({ orden: index + 1 })
+          .eq('id', id)
+          .eq('log_id', logId),
+      ),
+    );
+    for (const r of results) {
+      if (r.error) throw r.error;
+    }
+  },
 
-  /**
-   * Añade un alimento a una comida del log.
-   * Calcula automáticamente los macros según los gramos.
-   */
   async añadirAlimentoAComida(datos: {
     mealId: string;
     foodId: string;
@@ -242,16 +361,15 @@ export const nutricionService = {
     if (error) throw error;
   },
 
-  /** Quita la sección del día y evita que se regenere vacía al recargar. */
   async eliminarComidaDelLog(logId: string, mealId: string) {
-    const { data: meal, error: errMeal } = await supabase
+    const { data: row, error: errMeal } = await supabase
       .from('nutrition_log_meals')
-      .select('meal_type_id')
+      .select('id')
       .eq('id', mealId)
       .eq('log_id', logId)
       .maybeSingle();
     if (errMeal) throw errMeal;
-    if (!meal) {
+    if (!row) {
       throw new Error('La comida no existe en este día o ya fue eliminada.');
     }
 
@@ -268,38 +386,33 @@ export const nutricionService = {
     if (!borrada?.length) {
       throw new Error('No se pudo eliminar la comida del registro (revisa permisos RLS).');
     }
-
-    await persistirMealTypeExcluidoEnLog(logId, meal.meal_type_id as string);
   },
 
-  async crearTipoComidaPersonalizado(userId: string, logId: string, nombre: string): Promise<MealType> {
+  async crearComidaPersonalizada(userId: string, fecha: string, nombre: string): Promise<void> {
     const trimmed = nombre.trim();
     if (!trimmed) throw new Error('Nombre vacío');
 
-    const types = await this.obtenerTiposComida(userId);
-    const maxOrden = types.length ? Math.max(...types.map((t) => t.orden)) : 0;
+    const log = await this.asegurarLogDiario(userId, fecha);
 
-    const { data: mt, error } = await supabase
-      .from('meal_types')
-      .insert({
-        nombre: trimmed,
-        orden: maxOrden + 1,
-        is_default: false,
-        user_id: userId,
-      })
-      .select('*')
-      .single();
+    const { data: ultima, error: e0 } = await supabase
+      .from('nutrition_log_meals')
+      .select('orden')
+      .eq('log_id', log.id)
+      .order('orden', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (e0) throw e0;
 
-    if (error) throw error;
-    const row = mt as MealType;
+    const nextOrden = ultima?.orden != null ? Number(ultima.orden) + 1 : 1;
 
-    const { error: e2 } = await supabase.from('nutrition_log_meals').insert({
-      log_id: logId,
-      meal_type_id: row.id,
+    const { error: e1 } = await supabase.from('nutrition_log_meals').insert({
+      log_id: log.id,
+      nombre: trimmed,
+      orden: nextOrden,
+      is_default: false,
+      meal_type_id: null,
     });
-    if (e2) throw e2;
-
-    return row;
+    if (e1) throw e1;
   },
 
   async pegarAlimentosEnComida(
@@ -320,7 +433,5 @@ export const nutricionService = {
     }
   },
 
-  async actualizarGramosAlimento(itemId: string, nuevosGramos: number) {
-    // TODO: implementar (recalcular macros + actualizar)
-  },
+  async actualizarGramosAlimento(_itemId: string, _nuevosGramos: number) {},
 };

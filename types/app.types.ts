@@ -6,12 +6,11 @@
  */
 
 import type {
-  Food,
-  MealType,
-  NutritionLogItem,
-  Exercise,
-  WorkoutSet,
-  WorkoutSessionExercise,
+    Exercise,
+    Food,
+    NutritionLogItem,
+    WorkoutSessionExercise,
+    WorkoutSet,
 } from './database.types';
 
 // ─── Nutrición ────────────────────────────────────────────────────────────────
@@ -28,10 +27,12 @@ export interface LineaCopiadaNutricion {
   food: { calorias: number; proteinas: number; carbohidratos: number; grasas: number };
 }
 
-/** Comida completa con sus alimentos (para mostrar en el log diario) */
+/** Comida del día (fila nutrition_log_meals + items) */
 export interface ComidaConAlimentos {
   mealId: string;
-  mealType: MealType;
+  nombre: string;
+  orden: number;
+  isDefault: boolean;
   items: AlimentoEnLog[];
   totalCalorias: number;
   totalProteinas: number;
@@ -42,7 +43,7 @@ export interface ComidaConAlimentos {
 /** Resumen del día de nutrición */
 export interface ResumenDiarioNutricion {
   fecha: string;
-  /** nutrition_logs.id (crear comidas personalizadas, excluir secciones, etc.) */
+  /** Siempre presente tras cargar (se crea el log al entrar al día) */
   logId: string;
   totalCalorias: number;
   totalProteinas: number;

@@ -12,19 +12,19 @@
  * Escritura globales: Edge Functions + service_role (RLS modelo B). Custom: INSERT cliente.
  */
 
-import { FunctionsHttpError } from '@supabase/supabase-js';
-import { supabase } from '@/lib/supabase';
-import { libreTranslate } from '@/lib/libretranslate';
 import {
-  FOOD_API_SOURCE,
-  FATSECRET_API_SOURCE,
-  USDA_FDC_API_KEY,
+    FATSECRET_API_SOURCE,
+    FOOD_API_SOURCE,
+    USDA_FDC_API_KEY,
 } from '@/constants/config';
+import { libreTranslate } from '@/lib/libretranslate';
+import { supabase } from '@/lib/supabase';
 import type {
-  Food,
-  FoodSourceKind,
-  FoodTier,
+    Food,
+    FoodSourceKind,
+    FoodTier,
 } from '@/types/database.types';
+import { FunctionsHttpError } from '@supabase/supabase-js';
 
 // ---------------------------------------------------------------------------
 // DICCIONARIO DE ALIMENTOS BÁSICOS
