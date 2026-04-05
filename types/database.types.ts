@@ -24,11 +24,13 @@ export type CategoriaEjercicio =
   | 'flexibilidad'
   | 'otro';
 
+/** Valores del CHECK en `workout_sets.tipo_serie` (alineado con plantilla). */
 export type TipoSerie =
-  | 'normal'
+  | 'lineal'
+  | 'warm_up'
   | 'top_set'
-  | 'drop_set'
-  | 'calentamiento';
+  | 'back_off'
+  | 'superset';
 
 export type TipoPeso = 'kg' | 'bodyweight' | 'assisted';
 
@@ -164,12 +166,35 @@ export interface Exercise {
   is_custom: boolean;
   created_by: string | null;
   created_at: string;
+  /** Opcional hasta migración en Supabase */
+  equipamiento?: string | null;
+}
+
+/** Plantilla de rutina (tabla routines). */
+export interface Routine {
+  id: string;
+  nombre: string;
+  descripcion: string | null;
+  foto_url: string | null;
+  is_default: boolean;
+  is_public: boolean;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface UserFavoriteRoutine {
+  user_id: string;
+  routine_id: string;
+  created_at: string;
 }
 
 export interface WorkoutSession {
   id: string;
   user_id: string;
   nombre: string | null;
+  /** FK → routines; NULL si el entreno no viene de plantilla */
+  routine_id: string | null;
   fecha: string; // date ISO
   hora_inicio: string | null; // time HH:MM
   hora_fin: string | null;

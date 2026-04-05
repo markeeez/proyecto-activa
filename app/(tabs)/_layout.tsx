@@ -13,11 +13,29 @@
  * pantallas de detalle sin perder el contexto del tab.
  */
 
-import { Tabs } from 'expo-router';
+import { View } from 'react-native';
+import { Tabs, usePathname } from 'expo-router';
+import { BottomTabBar, type BottomTabBarProps } from '@react-navigation/bottom-tabs';
+
+import { BarraEntrenoMinimizado } from '@/components/entrenamiento/BarraEntrenoMinimizado';
+import { useEntreno } from '@/context/EntrenoContext';
+
+function TabBarWithEntreno(props: BottomTabBarProps) {
+  const { entrenoActivo } = useEntreno();
+  const pathname = usePathname();
+  const enEntrenoActivo = pathname.includes('entreno-activo');
+  return (
+    <View>
+      {entrenoActivo != null && !enEntrenoActivo ? <BarraEntrenoMinimizado /> : null}
+      <BottomTabBar {...props} />
+    </View>
+  );
+}
 
 export default function TabsLayout() {
   return (
     <Tabs
+      tabBar={(props) => <TabBarWithEntreno {...props} />}
       screenOptions={{
         headerShown: false,
         // TODO: personalizar colores con constantes/colores.ts

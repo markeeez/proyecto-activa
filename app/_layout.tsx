@@ -22,6 +22,7 @@ import {
 } from '@expo-google-fonts/doto';
 
 import { AuthProvider } from '@/context/AuthContext';
+import { EntrenoProvider } from '@/context/EntrenoContext';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { configurarGoogle } from '@/services/social-auth.service';
 
@@ -55,16 +56,18 @@ export default function RootLayout() {
 
   return (
     <AuthProvider>
-      <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-        <Stack screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="index" />
-          <Stack.Screen name="(auth)" />
-          <Stack.Screen name="(onboarding)" />
-          <Stack.Screen name="(tabs)" />
-          <Stack.Screen name="+not-found" />
-        </Stack>
-        <StatusBar style="auto" />
-      </ThemeProvider>
+      <EntrenoProvider>
+        <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+          <Stack screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="index" />
+            <Stack.Screen name="(auth)" />
+            <Stack.Screen name="(onboarding)" />
+            <Stack.Screen name="(tabs)" />
+            <Stack.Screen name="+not-found" />
+          </Stack>
+          <StatusBar style="auto" />
+        </ThemeProvider>
+      </EntrenoProvider>
     </AuthProvider>
   );
 }

@@ -1,58 +1,238 @@
 /**
  * SERVICIO DE EJERCICIOS
  *
- * Búsqueda de ejercicios con estrategia de caché (igual que alimentos).
- * Gestiona también ejercicios personalizados del usuario.
+ * Búsqueda en tabla local `exercises` (Supabase).
  */
 
 import { supabase } from '@/lib/supabase';
-import type { Exercise } from '@/types/database.types';
+import type { CategoriaEjercicio, Exercise } from '@/types/database.types';
+
+export type ModoListaEjercicios = 'general' | 'favoritos' | 'creados';
+
+export type BuscarEjerciciosParams = {
+  texto?: string;
+  musculoPrimario?: string | null;
+  equipamiento?: string | null;
+  limite?: number;
+  /** Filtro combinado con músculo/equipamiento */
+  modoLista?: ModoListaEjercicios;
+  userId?: string | null;
+  /** Ids favoritos del usuario; vacío = sin resultados en modo favoritos */
+  idsFavoritos?: string[];
+};
+
+function norm(s: string | null | undefined): string | null {
+  const t = s?.trim();
+  return t ? t : null;
+}
 
 export const ejerciciosService = {
-  /**
-   * Busca ejercicios por nombre. Aplica estrategia de caché.
-   */
-  async buscarEjercicio(query: string): Promise<Exercise[]> {
-    // TODO: implementar (mismo patrón que alimentosService.buscarAlimento)
-    return [];
+  async buscarEjercicios(params: BuscarEjerciciosParams): Promise<Exercise[]> {
+    const limite = params.limite ?? 100;
+    const texto = norm(params.texto);
+    const musculo = norm(params.musculoPrimario);
+    const equip = norm(params.equipamiento);
+    const modoLista = params.modoLista ?? 'general';
+    const userId = params.userId ?? null;
+
+    let q = supabase.from('exercises').select('*');
+
+    if (modoLista === 'creados') {
+      if (!userId) return [];
+      q = q.eq('is_custom', true).eq('created_by', userId);
+    } else if (modoLista === 'favoritos') {
+      if (!userId) return [];
+      let ids = params.idsFavoritos;
+      if (ids === undefined) {
+        ids = await this.obtenerEjerciciosFavoritos(userId);
+      }
+      if (ids.length === 0) return [];
+      q = q.in('id', ids);
+    }
+
+    if (texto) {
+      q = q.ilike('nombre', `%${texto}%`);
+    }
+    if (musculo) {
+      q = q.eq('musculo_primario', musculo);
+    }
+
+    q = q.order('nombre').limit(limite);
+
+    const { data, error } = await q;
+
+    if (error) {
+      console.error('[ejerciciosService.buscarEjercicios]', error.message);
+      return [];
+    }
+
+    let rows = (data ?? []) as Exercise[];
+
+    if (equip) {
+      rows = rows.filter((r) => (r.equipamiento ?? '').trim() === equip);
+    }
+
+    return rows;
+  },
+
+  async obtenerEjerciciosFavoritos(userId: string): Promise<string[]> {
+    const { data, error } = await supabase
+      .from('user_favorite_exercises')
+      .select('exercise_id')
+      .eq('user_id', userId);
+
+    if (error) {
+      console.error('[ejerciciosService.obtenerEjerciciosFavoritos]', error.message);
+      return [];
+    }
+    return (data ?? []).map((r: { exercise_id: string }) => r.exercise_id);
+  },
+
+  async toggleFavoritoEjercicio(userId: string, exerciseId: string): Promise<void> {
+    const { data: existing } = await supabase
+      .from('user_favorite_exercises')
+      .select('exercise_id')
+      .eq('user_id', userId)
+      .eq('exercise_id', exerciseId)
+      .maybeSingle();
+
+    if (existing) {
+      const { error } = await supabase
+        .from('user_favorite_exercises')
+        .delete()
+        .eq('user_id', userId)
+        .eq('exercise_id', exerciseId);
+      if (error) console.error('[toggleFavoritoEjercicio] delete', error.message);
+      return;
+    }
+
+    const { error } = await supabase.from('user_favorite_exercises').insert({
+      user_id: userId,
+      exercise_id: exerciseId,
+    });
+    if (error) console.error('[toggleFavoritoEjercicio] insert', error.message);
+  },
+
+  async obtenerMusculosDisponibles(): Promise<string[]> {
+    const { data, error } = await supabase
+      .from('exercises')
+      .select('musculo_primario')
+      .not('musculo_primario', 'is', null)
+      .order('musculo_primario');
+
+    if (error) {
+      console.error('[ejerciciosService.obtenerMusculosDisponibles]', error.message);
+      return [];
+    }
+
+    const set = new Set<string>();
+    for (const row of data ?? []) {
+      const m = String((row as { musculo_primario?: string }).musculo_primario ?? '').trim();
+      if (m) set.add(m);
+    }
+    return [...set].sort((a, b) => a.localeCompare(b, 'es'));
+  },
+
+  async obtenerEquipamientoDisponible(): Promise<string[]> {
+    const { data, error } = await supabase
+      .from('exercises')
+      .select('equipamiento')
+      .not('equipamiento', 'is', null)
+      .order('equipamiento');
+
+    if (error) {
+      console.error('[ejerciciosService.obtenerEquipamientoDisponible]', error.message);
+      return [];
+    }
+
+    const set = new Set<string>();
+    for (const row of data ?? []) {
+      const e = String((row as { equipamiento?: string | null }).equipamiento ?? '').trim();
+      if (e) set.add(e);
+    }
+    return [...set].sort((a, b) => a.localeCompare(b, 'es'));
   },
 
   /**
-   * Filtra ejercicios por músculo primario.
+   * Valores distintos para chips de filtro (muestra acotada; suficiente para catálogo local).
    */
+  async obtenerOpcionesFiltros(): Promise<{ musculos: string[]; equipamientos: string[] }> {
+    const { data, error } = await supabase
+      .from('exercises')
+      .select('musculo_primario, equipamiento')
+      .limit(4000);
+
+    if (error) {
+      console.error('[ejerciciosService.obtenerOpcionesFiltros]', error.message);
+      return { musculos: [], equipamientos: [] };
+    }
+
+    const musculos = new Set<string>();
+    const equipamientos = new Set<string>();
+
+    for (const row of data ?? []) {
+      const m = (row as { musculo_primario?: string }).musculo_primario?.trim();
+      if (m) musculos.add(m);
+      const e = (row as { equipamiento?: string | null }).equipamiento?.trim();
+      if (e) equipamientos.add(e);
+    }
+
+    return {
+      musculos: [...musculos].sort((a, b) => a.localeCompare(b, 'es')),
+      equipamientos: [...equipamientos].sort((a, b) => a.localeCompare(b, 'es')),
+    };
+  },
+
   async filtrarPorMusculo(musculo: string): Promise<Exercise[]> {
-    // TODO: implementar
-    // SELECT * FROM exercises WHERE musculo_primario = musculo OR musculo IN musculos_secundarios
-    return [];
+    return this.buscarEjercicios({ musculoPrimario: musculo });
   },
 
-  /**
-   * Obtiene un ejercicio por su ID.
-   */
   async obtenerEjercicio(id: string): Promise<Exercise | null> {
-    // TODO: implementar
-    return null;
+    const { data, error } = await supabase.from('exercises').select('*').eq('id', id).maybeSingle();
+
+    if (error) {
+      console.error('[ejerciciosService.obtenerEjercicio]', error.message);
+      return null;
+    }
+    return data as Exercise | null;
   },
 
-  /**
-   * Obtiene el historial de series del usuario para un ejercicio concreto.
-   * Útil para mostrar la progresión en DetalleEjercicio.
-   */
   async obtenerHistorialEjercicio(userId: string, exerciseId: string) {
-    // TODO: implementar
-    // SELECT ws.* FROM workout_sets ws
-    // JOIN workout_session_exercises wse ON ws.session_exercise_id = wse.id
-    // JOIN workout_sessions wsess ON wse.session_id = wsess.id
-    // WHERE wsess.user_id = userId AND wse.exercise_id = exerciseId
-    // ORDER BY wsess.fecha DESC
+    void userId;
+    void exerciseId;
     return [];
   },
 
   async crearEjercicioPersonalizado(
     userId: string,
-    datos: Omit<Exercise, 'id' | 'api_source' | 'api_id' | 'is_custom' | 'created_by' | 'created_at'>
-  ) {
-    // TODO: implementar
-    // INSERT INTO exercises { ...datos, is_custom: true, created_by: userId }
+    datos: {
+      nombre: string;
+      musculo_primario: string;
+      musculos_secundarios?: string[];
+      categoria?: CategoriaEjercicio;
+      descripcion?: string | null;
+    },
+  ): Promise<Exercise | null> {
+    const { data, error } = await supabase
+      .from('exercises')
+      .insert({
+        nombre: datos.nombre.trim(),
+        musculo_primario: datos.musculo_primario.trim(),
+        musculos_secundarios: datos.musculos_secundarios ?? [],
+        categoria: datos.categoria ?? 'fuerza',
+        descripcion: datos.descripcion ?? null,
+        is_custom: true,
+        created_by: userId,
+        api_source: null,
+        api_id: null,
+      })
+      .select('*')
+      .single();
+
+    if (error) {
+      console.error('[ejerciciosService.crearEjercicioPersonalizado]', error.message);
+      return null;
+    }
+    return data as Exercise;
   },
 };

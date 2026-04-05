@@ -1,14 +1,16 @@
 /**
- * PANTALLA: Entreno — cabecera fija (~20%) + contenido por tab sin scroll vertical.
+ * PANTALLA: Entreno — tabs compactos pegados al área segura + contenido flex sin scroll vertical.
  * UI mock; conexión Supabase en un paso posterior.
  */
 
 import { useCallback, useMemo, useState } from 'react';
-import { Dimensions, LayoutChangeEvent, Pressable, StyleSheet, Text, View } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LayoutChangeEvent, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFocusEffect, useRouter } from 'expo-router';
 
 import { EntrenosCalendarioTab, type DiaSemanaEntreno } from '@/components/entrenamiento/EntrenosCalendarioTab';
-import { RutinasListadoTab, type RutinaMock } from '@/components/entrenamiento/RutinasListadoTab';
+import { RutinasListadoTab } from '@/components/entrenamiento/RutinasListadoTab';
+import { useEntreno } from '@/context/EntrenoContext';
 import { useTheme } from '@/hooks/useTheme';
 
 type TabEntreno = 'entrenos' | 'rutinas';
@@ -44,43 +46,23 @@ function etiquetaRangoSemana(lunes: Date): string {
   return `${lunes.toLocaleDateString('es-ES', op)} — ${domingo.toLocaleDateString('es-ES', op)}`;
 }
 
-const RUTINAS_MIS_MOCK: RutinaMock[] = [
-  {
-    id: '1',
-    nombre: 'ESPALDA',
-    ejercicios: ['Dominadas', 'Remo con barra', 'Jalón al pecho', 'Face pull'],
-  },
-  {
-    id: '2',
-    nombre: 'PIERNA',
-    ejercicios: ['Sentadilla', 'Prensa', 'Zancadas', 'Curl femoral'],
-  },
-  {
-    id: '3',
-    nombre: 'PUSH UPPER',
-    ejercicios: ['Press banca', 'Press militar', 'Aperturas'],
-  },
-];
-
-const RUTINAS_FAV_MOCK: RutinaMock[] = [
-  {
-    id: 'f1',
-    nombre: 'FULL BODY EXPRESS',
-    ejercicios: ['Burpees', 'Kettlebell swing', 'Farmer walk'],
-  },
-];
-
 export default function EntrenamientoIndex() {
   const { c, f, ts, s, r } = useTheme();
   const insets = useSafeAreaInsets();
-  const windowH = Dimensions.get('window').height;
-
-  const usableH = Math.max(0, windowH - insets.top - insets.bottom);
-  const headerH = Math.round(usableH * 0.2);
+  const router = useRouter();
+  const { entrenoActivo } = useEntreno();
 
   const [tab, setTab] = useState<TabEntreno>('entrenos');
+
+  useFocusEffect(
+    useCallback(() => {
+      if (entrenoActivo != null && tab === 'rutinas') {
+        router.replace('/(tabs)/(entrenamiento)/entreno-activo');
+      }
+    }, [entrenoActivo, tab, router]),
+  );
   const [lunesSemana, setLunesSemana] = useState(() => inicioSemanaLunes(new Date()));
-  const [contentH, setContentH] = useState(usableH * 0.8);
+  const [contentH, setContentH] = useState(400);
 
   const onContentLayout = useCallback((e: LayoutChangeEvent) => {
     setContentH(e.nativeEvent.layout.height);
@@ -134,20 +116,19 @@ export default function EntrenamientoIndex() {
           flex: 1,
         },
         header: {
-          height: headerH,
+          paddingTop: insets.top + s.md,
           paddingHorizontal: s.md,
-          justifyContent: 'flex-end',
-          paddingBottom: s.sm,
+          paddingBottom: s.md,
           borderBottomWidth: 1,
           borderBottomColor: c.border,
         },
         tabRow: {
           flexDirection: 'row',
-          gap: s.xs,
+          gap: s.sm,
         },
         tabBtn: {
           flex: 1,
-          paddingVertical: s.sm,
+          paddingVertical: s.xs + 2,
           alignItems: 'center',
           borderWidth: 1,
           borderColor: c.borderVisible,
@@ -170,13 +151,15 @@ export default function EntrenamientoIndex() {
         content: {
           flex: 1,
           minHeight: 0,
+          paddingTop: s.md,
+          paddingBottom: s.sm,
         },
       }),
-    [c, f, ts, s, r, headerH],
+    [c, f, ts, s, r, insets.top],
   );
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
+    <View style={styles.safe}>
       <View style={styles.inner}>
         <View style={styles.header}>
           <View style={styles.tabRow}>
@@ -190,7 +173,13 @@ export default function EntrenamientoIndex() {
             </Pressable>
             <Pressable
               style={[styles.tabBtn, tab === 'rutinas' && styles.tabBtnOn]}
-              onPress={() => setTab('rutinas')}
+              onPress={() => {
+                if (entrenoActivo != null) {
+                  router.replace('/(tabs)/(entrenamiento)/entreno-activo');
+                } else {
+                  setTab('rutinas');
+                }
+              }}
               accessibilityRole="tab"
               accessibilityState={{ selected: tab === 'rutinas' }}
             >
@@ -210,10 +199,10 @@ export default function EntrenamientoIndex() {
               contentHeight={contentH}
             />
           ) : (
-            <RutinasListadoTab rutinasMis={RUTINAS_MIS_MOCK} rutinasFavoritas={RUTINAS_FAV_MOCK} />
+            <RutinasListadoTab />
           )}
         </View>
       </View>
-    </SafeAreaView>
+    </View>
   );
 }
