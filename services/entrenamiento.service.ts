@@ -115,6 +115,21 @@ export type DetalleSesion = {
   ejercicios: DetalleSesionEjercicio[];
 };
 
+/** Última sesión completada de una rutina (para precargar entreno y columna Anterior por serie). */
+export type UltimaSesionRutina = {
+  sessionId: string;
+  ejercicios: {
+    exercise_id: string;
+    orden: number;
+    sets: {
+      numero_serie: number;
+      peso_kg: number | null;
+      repeticiones: number | null;
+      tipo_peso: string;
+    }[];
+  }[];
+};
+
 type SesionSemanaRow = {
   id: string;
   nombre: string | null;
@@ -755,5 +770,71 @@ export const entrenamientoService = {
       hora_fin: row.hora_fin,
       ejercicios,
     };
+  },
+
+  async obtenerUltimaSesionRutina(userId: string, routineId: string): Promise<UltimaSesionRutina | null> {
+    const { data: sess, error: errSess } = await supabase
+      .from('workout_sessions')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('routine_id', routineId)
+      .not('hora_fin', 'is', null)
+      .order('hora_inicio', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (errSess) {
+      console.error('[obtenerUltimaSesionRutina] session', errSess.message);
+      return null;
+    }
+    if (!sess?.id) return null;
+
+    const sessionId = sess.id as string;
+
+    type WseUltimaRow = {
+      orden: number;
+      exercise_id: string;
+      workout_sets:
+        | {
+            numero_serie: number;
+            peso_kg: number | null;
+            repeticiones: number | null;
+            tipo_peso: TipoPeso;
+            completada: boolean;
+          }[]
+        | null;
+    };
+
+    const { data: wseData, error: errWse } = await supabase
+      .from('workout_session_exercises')
+      .select('orden, exercise_id, workout_sets ( numero_serie, peso_kg, repeticiones, tipo_peso, completada )')
+      .eq('session_id', sessionId)
+      .order('orden');
+
+    if (errWse) {
+      console.error('[obtenerUltimaSesionRutina] wse', errWse.message);
+      return { sessionId, ejercicios: [] };
+    }
+
+    const rows = (wseData ?? []) as WseUltimaRow[];
+    const ejercicios = rows.map((wse) => {
+      const setsRaw = wse.workout_sets ?? [];
+      const sets = setsRaw
+        .filter((s) => s.completada)
+        .sort((a, b) => a.numero_serie - b.numero_serie)
+        .map((s) => ({
+          numero_serie: s.numero_serie,
+          peso_kg: s.peso_kg,
+          repeticiones: s.repeticiones,
+          tipo_peso: s.tipo_peso,
+        }));
+      return {
+        exercise_id: wse.exercise_id,
+        orden: wse.orden,
+        sets,
+      };
+    });
+
+    return { sessionId, ejercicios };
   },
 };

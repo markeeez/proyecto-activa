@@ -12,6 +12,8 @@ export type BorradorSerieLinea = {
 export type BorradorEjercicioLinea = {
   lineId: string;
   exerciseId: string;
+  /** Orden en plantilla/sesión (p. ej. última sesión misma rutina). */
+  orden?: number;
   nombre: string;
   musculo_primario: string;
   sets: BorradorSerieLinea[];

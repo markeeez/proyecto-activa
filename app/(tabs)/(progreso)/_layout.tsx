@@ -1,9 +1,9 @@
 /**
  * PROGRESO — Stack layout
  *
- * Pantallas dentro del tab de progreso:
- *
- *   index   → dashboard con gráficos de métricas corporales y nutrición
+ *   index                    → dashboard progreso (nutrición, peso, accesos)
+ *   historial-peso           → historial de peso (placeholder)
+ *   estadisticas-ejercicio   → estadísticas de ejercicio (placeholder, PARTE 2)
  */
 
 import { Stack } from 'expo-router';
@@ -11,7 +11,9 @@ import { Stack } from 'expo-router';
 export default function ProgresoLayout() {
   return (
     <Stack>
-      <Stack.Screen name="index" options={{ title: 'Progreso' }} />
+      <Stack.Screen name="index" options={{ headerShown: false }} />
+      <Stack.Screen name="historial-peso" options={{ headerShown: false }} />
+      <Stack.Screen name="estadisticas-ejercicio" options={{ headerShown: false }} />
     </Stack>
   );
 }

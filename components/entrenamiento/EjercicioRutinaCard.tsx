@@ -38,8 +38,8 @@ type Props = {
   canMoveUp: boolean;
   canMoveDown: boolean;
   modo?: 'rutina' | 'entreno';
-  /** modo entreno: último set completado de este ejercicio (misma cadena en cada fila) */
-  textoAnteriorEjercicio?: string | null;
+  /** modo entreno: texto "Anterior" por fila de serie (misma longitud que data.sets) */
+  textoAnteriorSeries?: (string | null)[];
 };
 
 function makeStyles(c: Theme, f: ReturnType<typeof useTheme>['f'], ts: ReturnType<typeof useTheme>['ts'], s: ReturnType<typeof useTheme>['s'], r: ReturnType<typeof useTheme>['r']) {
@@ -315,7 +315,7 @@ export function EjercicioRutinaCard({
   canMoveUp,
   canMoveDown,
   modo = 'rutina',
-  textoAnteriorEjercicio = null,
+  textoAnteriorSeries,
 }: Props) {
   const { c, f, ts, s, r } = useTheme();
   const styles = useMemo(() => makeStyles(c, f, ts, s, r), [c, f, ts, s, r]);
@@ -474,7 +474,7 @@ export function EjercicioRutinaCard({
                   numberOfLines={1}
                   ellipsizeMode="tail"
                 >
-                  {textoAnteriorEjercicio ?? '—'}
+                  {(textoAnteriorSeries != null ? textoAnteriorSeries[index] : null) ?? '—'}
                 </Text>
               </View>
             ) : null}

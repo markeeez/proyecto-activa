@@ -2,6 +2,8 @@
  * Pantalla del entreno en curso: borrador en contexto, series completadas, terminar / minimizar.
  */
 
+import { Ionicons } from '@expo/vector-icons';
+import { useNavigation, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -17,23 +19,22 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
-import { useNavigation, useRouter } from 'expo-router';
 
 import { AgregarEjercicioSheet } from '@/components/entrenamiento/AgregarEjercicioSheet';
 import { CrearEjercicioModal } from '@/components/entrenamiento/CrearEjercicioModal';
 import { EjercicioRutinaCard } from '@/components/entrenamiento/EjercicioRutinaCard';
-import { useEntreno, useEntrenoDuracionTexto } from '@/context/EntrenoContext';
+import type { Theme } from '@/constants/theme';
+import { useEntreno, useEntrenoDuracionTexto, type SnapshotRutina } from '@/context/EntrenoContext';
 import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from '@/hooks/useTheme';
 import { tipoSerieUiADb } from '@/lib/entrenamientoSerie';
+import { ejerciciosService } from '@/services/ejercicios.service';
 import {
   entrenamientoService,
   type BorradorEjercicioRutina,
   type EntrenoEjercicioPersistido,
+  type UltimaSesionRutina,
 } from '@/services/entrenamiento.service';
-import { ejerciciosService } from '@/services/ejercicios.service';
-import type { Theme } from '@/constants/theme';
 import type { Exercise } from '@/types/database.types';
 import type { BorradorEjercicioLinea, BorradorSerieLinea } from '@/types/entrenamientoBorrador.types';
 
@@ -113,6 +114,54 @@ function lineasARutinaCompleta(lineas: BorradorEjercicioLinea[]): BorradorEjerci
       tipo_peso: 'kg',
     })),
   }));
+}
+
+/** Compara borrador vs plantilla original: ejercicios, series y tipo de serie (no kg/reps/completada). */
+function haycambiosEstructurales(lineas: BorradorEjercicioLinea[], snapshot: SnapshotRutina): boolean {
+  if (lineas.length !== snapshot.ejercicios.length) return true;
+  for (let i = 0; i < lineas.length; i++) {
+    const L = lineas[i]!;
+    const S = snapshot.ejercicios[i]!;
+    if (L.exerciseId !== S.exercise_id) return true;
+    if (L.sets.length !== S.sets.length) return true;
+    for (let j = 0; j < L.sets.length; j++) {
+      if (tipoSerieUiADb(L.sets[j]!.tipoUi) !== S.sets[j]!.tipo_serie) return true;
+    }
+  }
+  return false;
+}
+
+function textoAnteriorDesdeValores(
+  peso_kg: number | null,
+  repeticiones: number | null,
+  tipo_peso: string,
+): string {
+  const r = repeticiones != null ? String(repeticiones) : '—';
+  if (tipo_peso === 'bodyweight') return `BW × ${r}`;
+  if (tipo_peso === 'assisted') return `Asist. × ${r}`;
+  const p = peso_kg != null ? `${peso_kg}kg` : '—';
+  return `${p} × ${r}`;
+}
+
+function textosAnteriorPorLinea(
+  line: BorradorEjercicioLinea,
+  ultima: UltimaSesionRutina | null,
+  anteriorGlobalPorExercise: Record<string, string>,
+): (string | null)[] {
+  if (ultima) {
+    return line.sets.map((_, j) => {
+      const numeroSerie = j + 1;
+      const block =
+        line.orden != null
+          ? ultima.ejercicios.find((e) => e.exercise_id === line.exerciseId && e.orden === line.orden)
+          : ultima.ejercicios.find((e) => e.exercise_id === line.exerciseId);
+      const st = block?.sets.find((s) => s.numero_serie === numeroSerie);
+      if (!st) return null;
+      return textoAnteriorDesdeValores(st.peso_kg, st.repeticiones, st.tipo_peso);
+    });
+  }
+  const g = anteriorGlobalPorExercise[line.exerciseId];
+  return line.sets.map(() => (g ? g : null));
 }
 
 function makeStyles(c: Theme, f: ReturnType<typeof useTheme>['f'], ts: ReturnType<typeof useTheme>['ts'], s: ReturnType<typeof useTheme>['s'], r: ReturnType<typeof useTheme>['r']) {
@@ -257,8 +306,12 @@ export default function EntrenoActivoScreen() {
       setAnteriorPorEjercicio({});
       return;
     }
+    if (entrenoActivo?.ultimaSesionRutina) {
+      setAnteriorPorEjercicio({});
+      return;
+    }
     let cancel = false;
-    (async () => {
+    void (async () => {
       const entries = await Promise.all(
         lineas.map(async (l) => {
           const t = await entrenamientoService.obtenerAnteriorPorEjercicio(user.id, l.exerciseId);
@@ -275,7 +328,16 @@ export default function EntrenoActivoScreen() {
     return () => {
       cancel = true;
     };
-  }, [user?.id, lineas]);
+  }, [user?.id, lineas, entrenoActivo?.ultimaSesionRutina]);
+
+  const textosAnteriorPorLineId = useMemo(() => {
+    const ultima = entrenoActivo?.ultimaSesionRutina ?? null;
+    const m = new Map<string, (string | null)[]>();
+    for (const line of lineas) {
+      m.set(line.lineId, textosAnteriorPorLinea(line, ultima, anteriorPorEjercicio));
+    }
+    return m;
+  }, [lineas, entrenoActivo?.ultimaSesionRutina, anteriorPorEjercicio]);
 
   const hayIncompletas = useMemo(
     () => lineas.some((l) => l.sets.some((s) => !s.completada)),
@@ -364,6 +426,7 @@ export default function EntrenoActivoScreen() {
 
   const ejecutarTerminar = useCallback(async () => {
     if (!entrenoActivo || !user?.id) return;
+    const snapshot = entrenoActivo.snapshotRutina;
     const snap: PostSnap = {
       lineas: entrenoActivo.lineas.map((l) => ({
         ...l,
@@ -372,17 +435,23 @@ export default function EntrenoActivoScreen() {
       routineId: entrenoActivo.routineId,
       nombre: entrenoActivo.nombre,
     };
+    const hayModificaciones = snapshot != null && haycambiosEstructurales(snap.lineas, snapshot);
     const payload = lineasAPersistido(entrenoActivo.lineas);
     try {
       await entrenamientoService.guardarSetsCompletados(entrenoActivo.sessionId, payload);
-      postSnapRef.current = snap;
       await terminarEntreno();
       setNombreNuevaRutina(snap.nombre || 'Mi rutina');
-      setPostSnap(snap);
       if (snap.routineId == null) {
+        postSnapRef.current = snap;
+        setPostSnap(snap);
         setModalGuardarRutina(true);
-      } else {
+      } else if (hayModificaciones) {
+        postSnapRef.current = snap;
+        setPostSnap(snap);
         setModalActualizarRutina(true);
+      } else {
+        postSnapRef.current = null;
+        setPostSnap(null);
       }
     } catch {
       postSnapRef.current = null;
@@ -534,7 +603,7 @@ export default function EntrenoActivoScreen() {
                 <EjercicioRutinaCard
                   key={line.lineId}
                   modo="entreno"
-                  textoAnteriorEjercicio={anteriorPorEjercicio[line.exerciseId] ?? null}
+                  textoAnteriorSeries={textosAnteriorPorLineId.get(line.lineId)}
                   data={line}
                   onChange={(next) => actualizarLinea(line.lineId, next)}
                   onMoveUp={() => moverLinea(index, -1)}
@@ -696,19 +765,19 @@ export default function EntrenoActivoScreen() {
               La plantilla de la rutina se reemplazará por los ejercicios y series que tienes ahora en pantalla.
             </Text>
             <View style={styles.modalRow}>
-              <Pressable style={styles.modalBtn} onPress={cerrarPostModalsYSalir} disabled={guardandoRutina}>
-                <Text style={styles.modalBtnTxt}>No</Text>
-              </Pressable>
               <Pressable
-                style={[styles.modalBtn, styles.modalBtnPrimary]}
+                style={styles.modalBtn}
                 onPress={() => void onConfirmarActualizarRutina()}
                 disabled={guardandoRutina}
               >
                 {guardandoRutina ? (
                   <ActivityIndicator color={c.textOnPrimary} />
                 ) : (
-                  <Text style={[styles.modalBtnTxt, styles.modalBtnTxtOn]}>Actualizar</Text>
+                  <Text style={styles.modalBtnTxt}>Actualizar</Text>
                 )}
+              </Pressable>
+              <Pressable style={[styles.modalBtn, styles.modalBtnPrimary]} onPress={cerrarPostModalsYSalir} disabled={guardandoRutina}>
+                <Text style={[styles.modalBtnTxt, styles.modalBtnTxtOn]}>Continuar</Text>
               </Pressable>
             </View>
           </View>

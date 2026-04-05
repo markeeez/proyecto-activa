@@ -21,7 +21,42 @@ import { supabase } from '@/lib/supabase';
 import { tipoSerieDbAUi } from '@/lib/entrenamientoSerie';
 import type { BorradorEjercicioLinea, BorradorSerieLinea } from '@/types/entrenamientoBorrador.types';
 import type { TipoSerie } from '@/types/database.types';
-import { entrenamientoService, type EjercicioBorrador } from '@/services/entrenamiento.service';
+import {
+  entrenamientoService,
+  type EjercicioBorrador,
+  type UltimaSesionRutina,
+} from '@/services/entrenamiento.service';
+
+/** Plantilla original al iniciar desde rutina (para detectar cambios estructurales al terminar). */
+export type SnapshotRutina = {
+  ejercicios: {
+    exercise_id: string;
+    orden: number;
+    sets: {
+      numero_serie: number;
+      tipo_serie: string;
+      reps: number | null;
+      peso_kg: number | null;
+      tipo_peso: string;
+    }[];
+  }[];
+};
+
+function snapshotRutinaDesdeCargados(cargados: EjercicioBorrador[]): SnapshotRutina {
+  return {
+    ejercicios: cargados.map((ej) => ({
+      exercise_id: ej.exercise_id,
+      orden: ej.orden,
+      sets: ej.sets.map((s) => ({
+        numero_serie: s.numero_serie,
+        tipo_serie: s.tipo_serie,
+        reps: s.repeticiones,
+        peso_kg: s.peso_kg,
+        tipo_peso: s.tipo_peso,
+      })),
+    })),
+  };
+}
 
 function lid(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -31,22 +66,42 @@ function seriePorDefecto(): BorradorSerieLinea {
   return { setId: lid(), tipoUi: 'lineal', kg: '', reps: '', completada: false };
 }
 
-function mapCargadoALinea(ej: EjercicioBorrador): BorradorEjercicioLinea {
+function mapCargadoALineaDesdeUltima(ej: EjercicioBorrador, ultima: UltimaSesionRutina | null): BorradorEjercicioLinea {
+  const sets: BorradorSerieLinea[] =
+    ej.sets.length > 0
+      ? ej.sets.map((s) => {
+          let kg = s.peso_kg != null ? String(s.peso_kg) : '';
+          let reps = s.repeticiones != null ? String(s.repeticiones) : '';
+          if (ultima) {
+            const block = ultima.ejercicios.find(
+              (e) => e.exercise_id === ej.exercise_id && e.orden === ej.orden,
+            );
+            const prev = block?.sets.find((st) => st.numero_serie === s.numero_serie);
+            if (prev) {
+              kg = prev.peso_kg != null ? String(prev.peso_kg) : '';
+              reps = prev.repeticiones != null ? String(prev.repeticiones) : '';
+            } else {
+              kg = '';
+              reps = '';
+            }
+          }
+          return {
+            setId: lid(),
+            tipoUi: tipoSerieDbAUi(s.tipo_serie),
+            kg,
+            reps,
+            completada: false,
+          };
+        })
+      : [seriePorDefecto()];
+
   return {
     lineId: lid(),
     exerciseId: ej.exercise_id,
+    orden: ej.orden,
     nombre: ej.nombre,
     musculo_primario: ej.musculo_primario,
-    sets:
-      ej.sets.length > 0
-        ? ej.sets.map((s) => ({
-            setId: lid(),
-            tipoUi: tipoSerieDbAUi(s.tipo_serie),
-            kg: s.peso_kg != null ? String(s.peso_kg) : '',
-            reps: s.repeticiones != null ? String(s.repeticiones) : '',
-            completada: false,
-          }))
-        : [seriePorDefecto()],
+    sets,
   };
 }
 
@@ -94,6 +149,7 @@ function mapWseRecuperadoALinea(wse: WseRecuperacionRow): BorradorEjercicioLinea
   return {
     lineId: lid(),
     exerciseId: wse.exercise_id,
+    orden: wse.orden,
     nombre,
     musculo_primario: musculo,
     sets,
@@ -107,6 +163,8 @@ export type EntrenoActivo = {
   horaInicioMs: number;
   minimizado: boolean;
   lineas: BorradorEjercicioLinea[];
+  snapshotRutina: SnapshotRutina | null;
+  ultimaSesionRutina: UltimaSesionRutina | null;
 };
 
 type EntrenoContextValue = {
@@ -167,6 +225,8 @@ export function EntrenoProvider({ children }: { children: ReactNode }) {
         horaInicioMs,
         minimizado: false,
         lineas: [],
+        snapshotRutina: null,
+        ultimaSesionRutina: null,
       });
     },
     [user?.id],
@@ -176,12 +236,14 @@ export function EntrenoProvider({ children }: { children: ReactNode }) {
     async (routineId: string, nombreRutina: string) => {
       if (!user?.id) return;
       const cargados = await entrenamientoService.cargarEjerciciosDesdeRutina(routineId);
+      const ultimaSesionRutina = await entrenamientoService.obtenerUltimaSesionRutina(user.id, routineId);
+      const snapshotRutina = snapshotRutinaDesdeCargados(cargados);
       const sessionId = await entrenamientoService.crearWorkoutSession(
         user.id,
         nombreRutina.trim() || 'Entreno',
         routineId,
       );
-      const lineas = cargados.map(mapCargadoALinea);
+      const lineas = cargados.map((ej) => mapCargadoALineaDesdeUltima(ej, ultimaSesionRutina));
       setEntreno({
         sessionId,
         nombre: nombreRutina.trim() || 'Entreno',
@@ -189,6 +251,8 @@ export function EntrenoProvider({ children }: { children: ReactNode }) {
         horaInicioMs: Date.now(),
         minimizado: false,
         lineas,
+        snapshotRutina,
+        ultimaSesionRutina,
       });
     },
     [user?.id],
@@ -250,6 +314,8 @@ export function EntrenoProvider({ children }: { children: ReactNode }) {
       horaInicioMs,
       minimizado: false,
       lineas,
+      snapshotRutina: null,
+      ultimaSesionRutina: null,
     });
 
     router.push('/(tabs)/(entrenamiento)/entreno-activo');
