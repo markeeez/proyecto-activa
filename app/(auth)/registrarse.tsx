@@ -11,6 +11,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { router } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/hooks/useTheme';
 import { supabase } from '@/lib/supabase';
 import { SocialAuthButtons } from '@/components/ui/SocialAuthButtons';
@@ -23,6 +24,7 @@ type UsernameStatus = 'idle' | 'checking' | 'available' | 'taken' | 'invalid';
 // ─── Componente ───────────────────────────────────────────────────────────────
 
 export default function Registrarse() {
+  const insets = useSafeAreaInsets();
   const { c, f, ts, s, r } = useTheme();
 
   const [nombre, setNombre]     = useState('');
@@ -151,112 +153,114 @@ export default function Registrarse() {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <ScrollView
-        contentContainerStyle={styles.scroll}
+        contentContainerStyle={[
+          styles.scroll,
+          {
+            paddingTop: insets.top + s.lg,
+            paddingBottom: insets.bottom + s.md,
+          },
+        ]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-
-        {/* ── LAYER 1: Encabezado ───────────────────────────── */}
-        <View style={styles.header}>
+        <View style={styles.topBlock}>
           <Text style={styles.title}>CREATE{'\n'}ACCOUNT</Text>
+
+          <View style={styles.fieldsColumn}>
+            {/* Nombre */}
+            <View style={styles.fieldWrapper}>
+              <Text style={styles.fieldLabel}>NOMBRE</Text>
+              <TextInput
+                style={styles.input}
+                value={nombre}
+                onChangeText={setNombre}
+                placeholder="Tu nombre"
+                placeholderTextColor={c.textMuted}
+                returnKeyType="next"
+                onSubmitEditing={() => refUsername.current?.focus()}
+                selectionColor={c.primary}
+                autoComplete="given-name"
+              />
+              <View style={[styles.underline, nombre.length > 0 && styles.underlineFilled]} />
+            </View>
+
+            {/* Username */}
+            <View style={styles.fieldWrapper}>
+              <View style={styles.labelRow}>
+                <Text style={styles.fieldLabel}>USERNAME</Text>
+                <UsernameIndicator status={usernameStatus} styles={styles} />
+              </View>
+              <TextInput
+                ref={refUsername}
+                style={styles.input}
+                value={username}
+                onChangeText={v => setUsername(v.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
+                placeholder="tu_usuario"
+                placeholderTextColor={c.textMuted}
+                autoCapitalize="none"
+                autoCorrect={false}
+                returnKeyType="next"
+                onSubmitEditing={() => refEmail.current?.focus()}
+                selectionColor={c.primary}
+                maxLength={20}
+              />
+              <View style={[
+                styles.underline,
+                username.length > 0 && styles.underlineFilled,
+                usernameStatus === 'available' && styles.underlineSuccess,
+                (usernameStatus === 'taken' || usernameStatus === 'invalid') && styles.underlineError,
+              ]} />
+              <Text style={styles.fieldHint}>3–20 CARACTERES. SOLO a–z, 0–9, _</Text>
+            </View>
+
+            {/* Email */}
+            <View style={styles.fieldWrapper}>
+              <Text style={styles.fieldLabel}>EMAIL</Text>
+              <TextInput
+                ref={refEmail}
+                style={styles.input}
+                value={email}
+                onChangeText={setEmail}
+                placeholder="tu@email.com"
+                placeholderTextColor={c.textMuted}
+                autoCapitalize="none"
+                keyboardType="email-address"
+                returnKeyType="next"
+                onSubmitEditing={() => refPassword.current?.focus()}
+                selectionColor={c.primary}
+                autoComplete="email"
+              />
+              <View style={[styles.underline, email.length > 0 && styles.underlineFilled]} />
+            </View>
+
+            {/* Password */}
+            <View style={styles.fieldWrapper}>
+              <Text style={styles.fieldLabel}>PASSWORD</Text>
+              <TextInput
+                ref={refPassword}
+                style={styles.input}
+                value={password}
+                onChangeText={setPassword}
+                secureTextEntry
+                placeholder="Mínimo 8 caracteres"
+                placeholderTextColor={c.textMuted}
+                returnKeyType="done"
+                onSubmitEditing={handleRegister}
+                selectionColor={c.primary}
+              />
+              <View style={[
+                styles.underline,
+                password.length > 0 && styles.underlineFilled,
+                password.length > 0 && password.length < 8 && styles.underlineError,
+                password.length >= 8 && styles.underlineSuccess,
+              ]} />
+            </View>
+
+            {error && <Text style={styles.errorText}>{error}</Text>}
+          </View>
         </View>
 
-        {/* ── LAYER 2: Formulario ───────────────────────────── */}
-        <View style={styles.form}>
-
-          {/* Nombre */}
-          <View style={styles.fieldWrapper}>
-            <Text style={styles.fieldLabel}>NOMBRE</Text>
-            <TextInput
-              style={styles.input}
-              value={nombre}
-              onChangeText={setNombre}
-              placeholder="Tu nombre"
-              placeholderTextColor={c.textMuted}
-              returnKeyType="next"
-              onSubmitEditing={() => refUsername.current?.focus()}
-              selectionColor={c.primary}
-              autoComplete="given-name"
-            />
-            <View style={[styles.underline, nombre.length > 0 && styles.underlineFilled]} />
-          </View>
-
-          {/* Username */}
-          <View style={styles.fieldWrapper}>
-            <View style={styles.labelRow}>
-              <Text style={styles.fieldLabel}>USERNAME</Text>
-              <UsernameIndicator status={usernameStatus} styles={styles} />
-            </View>
-            <TextInput
-              ref={refUsername}
-              style={styles.input}
-              value={username}
-              onChangeText={v => setUsername(v.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
-              placeholder="tu_usuario"
-              placeholderTextColor={c.textMuted}
-              autoCapitalize="none"
-              autoCorrect={false}
-              returnKeyType="next"
-              onSubmitEditing={() => refEmail.current?.focus()}
-              selectionColor={c.primary}
-              maxLength={20}
-            />
-            <View style={[
-              styles.underline,
-              username.length > 0 && styles.underlineFilled,
-              usernameStatus === 'available' && styles.underlineSuccess,
-              (usernameStatus === 'taken' || usernameStatus === 'invalid') && styles.underlineError,
-            ]} />
-            <Text style={styles.fieldHint}>3–20 CARACTERES. SOLO a–z, 0–9, _</Text>
-          </View>
-
-          {/* Email */}
-          <View style={styles.fieldWrapper}>
-            <Text style={styles.fieldLabel}>EMAIL</Text>
-            <TextInput
-              ref={refEmail}
-              style={styles.input}
-              value={email}
-              onChangeText={setEmail}
-              placeholder="tu@email.com"
-              placeholderTextColor={c.textMuted}
-              autoCapitalize="none"
-              keyboardType="email-address"
-              returnKeyType="next"
-              onSubmitEditing={() => refPassword.current?.focus()}
-              selectionColor={c.primary}
-              autoComplete="email"
-            />
-            <View style={[styles.underline, email.length > 0 && styles.underlineFilled]} />
-          </View>
-
-          {/* Password */}
-          <View style={styles.fieldWrapper}>
-            <Text style={styles.fieldLabel}>PASSWORD</Text>
-            <TextInput
-              ref={refPassword}
-              style={styles.input}
-              value={password}
-              onChangeText={setPassword}
-              secureTextEntry
-              placeholder="Mínimo 8 caracteres"
-              placeholderTextColor={c.textMuted}
-              returnKeyType="done"
-              onSubmitEditing={handleRegister}
-              selectionColor={c.primary}
-            />
-            <View style={[
-              styles.underline,
-              password.length > 0 && styles.underlineFilled,
-              password.length > 0 && password.length < 8 && styles.underlineError,
-              password.length >= 8 && styles.underlineSuccess,
-            ]} />
-          </View>
-
-          {/* Error inline */}
-          {error && <Text style={styles.errorText}>{error}</Text>}
-
-          {/* Botón primario */}
+        <View style={styles.bottomBlock}>
           <TouchableOpacity
             style={[styles.btnPrimary, cargando && styles.btnDisabled]}
             onPress={handleRegister}
@@ -269,22 +273,18 @@ export default function Registrarse() {
             }
           </TouchableOpacity>
 
-          {/* Botones sociales — OR ─── Google / Apple */}
           <SocialAuthButtons onResult={handleSocialResult} />
 
+          <View style={styles.footer}>
+            <Text style={styles.footerText}>¿YA TIENES CUENTA?</Text>
+            <TouchableOpacity
+              onPress={() => router.replace('/(auth)/iniciar-sesion')}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            >
+              <Text style={styles.footerLink}>SIGN IN</Text>
+            </TouchableOpacity>
+          </View>
         </View>
-
-        {/* ── LAYER 3: Link login ───────────────────────────── */}
-        <View style={styles.footer}>
-          <Text style={styles.footerText}>¿YA TIENES CUENTA?</Text>
-          <TouchableOpacity
-            onPress={() => router.replace('/(auth)/iniciar-sesion')}
-            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-          >
-            <Text style={styles.footerLink}>SIGN IN</Text>
-          </TouchableOpacity>
-        </View>
-
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -332,25 +332,23 @@ function makeStyles(
 
     scroll: {
       flexGrow: 1,
+      justifyContent: 'space-between',
       paddingHorizontal: s.lg,
-      paddingBottom: s['3xl'],
     },
 
-    // ── Layer 1
-    header: {
-      marginTop: s['2xl'],    // 48px — no tan grande como el hero del login
-      marginBottom: s['2xl'],
+    topBlock: {
+      width: '100%',
     },
 
     title: {
       ...ts.displayMd,
       fontFamily: f.display,
       color: c.textDisplay,
+      marginBottom: s.xl,
     },
 
-    // ── Layer 2
-    form: {
-      gap: s.lg,
+    fieldsColumn: {
+      gap: s.md,
     },
 
     fieldWrapper: {
@@ -433,13 +431,17 @@ function makeStyles(
       letterSpacing: 0.4,
     },
 
+    bottomBlock: {
+      width: '100%',
+      gap: s.md,
+    },
+
     btnPrimary: {
       height: 52,
       borderRadius: r.pill,
       backgroundColor: c.textDisplay,
       alignItems: 'center',
       justifyContent: 'center',
-      marginTop: s.sm,
     },
 
     btnDisabled: {
@@ -453,13 +455,11 @@ function makeStyles(
       letterSpacing: 1.2,
     },
 
-    // ── Layer 3
     footer: {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'center',
       gap: s.sm,
-      marginTop: s['2xl'],
     },
 
     footerText: {

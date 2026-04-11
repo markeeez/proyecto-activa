@@ -14,6 +14,7 @@ export default function ProgresoLayout() {
       <Stack.Screen name="index" options={{ headerShown: false }} />
       <Stack.Screen name="historial-peso" options={{ headerShown: false }} />
       <Stack.Screen name="estadisticas-ejercicio" options={{ headerShown: false }} />
+      <Stack.Screen name="personalizar-plan" options={{ headerShown: false }} />
     </Stack>
   );
 }

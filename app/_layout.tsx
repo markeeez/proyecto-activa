@@ -28,6 +28,8 @@ import { configurarGoogle } from '@/services/social-auth.service';
 
 SplashScreen.preventAutoHideAsync();
 
+// Tras sesión activa, la comprobación user_goals → /(onboarding)/datos vive en app/index.tsx.
+
 // Configurar Google SDK una sola vez al arrancar
 configurarGoogle();
 

@@ -1,14 +1,15 @@
 import { router } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-    ActivityIndicator,
-    Modal,
-    Pressable,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
+  ActivityIndicator,
+  Modal,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import DraggableFlatList, { ScaleDecorator } from 'react-native-draggable-flatlist';
 import { Gesture, GestureDetector, Swipeable } from 'react-native-gesture-handler';
 import { runOnJS } from 'react-native-reanimated';
@@ -140,6 +141,14 @@ export default function NutricionIndex() {
     cambiarFecha(agregarDiasIso(fecha, -1));
   }, [fecha, cambiarFecha]);
 
+  const avanzarSemana = useCallback(() => {
+    cambiarFecha(agregarDiasIso(fecha, 7));
+  }, [fecha, cambiarFecha]);
+
+  const retrocederSemana = useCallback(() => {
+    cambiarFecha(agregarDiasIso(fecha, -7));
+  }, [fecha, cambiarFecha]);
+
   const swipeCalendario = useMemo(
     () =>
       Gesture.Pan()
@@ -195,20 +204,32 @@ export default function NutricionIndex() {
   const renderHeader = useCallback(() => {
     return (
       <>
-        <GestureDetector gesture={swipeCalendario}>
-          <View style={styles.weekCalendar}>
-            {semana.map((d, index) => (
-              <Pressable
-                key={`${d.key}-${d.fechaIso}-${index}`}
-                style={[styles.dayItem, d.activo && styles.dayItemActive]}
-                onPress={() => cambiarFecha(d.fechaIso)}
-              >
-                <Text style={[styles.dayLetter, d.activo && styles.dayLetterActive]}>{d.key}</Text>
-                <Text style={[styles.dayNumber, d.activo && styles.dayNumberActive]}>{d.dia}</Text>
-              </Pressable>
-            ))}
+        <View style={styles.weekCalendarRow}>
+          <Pressable onPress={retrocederSemana} hitSlop={8} style={styles.weekArrow}>
+            <Ionicons name="chevron-back" size={20} color={c.textSecondary} />
+          </Pressable>
+
+          <View style={styles.weekCalendarGestureWrap}>
+            <GestureDetector gesture={swipeCalendario}>
+              <View style={styles.weekCalendar}>
+                {semana.map((d, index) => (
+                  <Pressable
+                    key={`${d.key}-${d.fechaIso}-${index}`}
+                    style={[styles.dayItem, d.activo && styles.dayItemActive]}
+                    onPress={() => cambiarFecha(d.fechaIso)}
+                  >
+                    <Text style={[styles.dayLetter, d.activo && styles.dayLetterActive]}>{d.key}</Text>
+                    <Text style={[styles.dayNumber, d.activo && styles.dayNumberActive]}>{d.dia}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            </GestureDetector>
           </View>
-        </GestureDetector>
+
+          <Pressable onPress={avanzarSemana} hitSlop={8} style={styles.weekArrow}>
+            <Ionicons name="chevron-forward" size={20} color={c.textSecondary} />
+          </Pressable>
+        </View>
 
         <View style={[styles.summaryCard, styles.summaryCardBelowCalendar]}>
           <View style={styles.summaryTop}>
@@ -250,6 +271,9 @@ export default function NutricionIndex() {
     semana,
     styles,
     cambiarFecha,
+    retrocederSemana,
+    avanzarSemana,
+    c.textSecondary,
     totalCalorias,
     fechaLabel,
     progresoCalorias,
@@ -520,18 +544,34 @@ function makeStyles(
       right: 20,
       zIndex: 10,
     },
+    weekCalendarRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: s.xs,
+    },
+    weekCalendarGestureWrap: {
+      flex: 1,
+      minWidth: 0,
+    },
+    weekArrow: {
+      width: 28,
+      height: 28,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
     weekCalendar: {
+      flex: 1,
       borderWidth: 1,
       borderColor: c.borderVisible,
       borderRadius: r.lg,
       backgroundColor: c.surface,
-      paddingHorizontal: s.sm,
+      paddingHorizontal: s.xs,
       paddingVertical: s.sm,
       flexDirection: 'row',
       justifyContent: 'space-between',
     },
     dayItem: {
-      width: 36,
+      width: 30,
       paddingVertical: s.xs,
       borderRadius: r.pill,
       alignItems: 'center',

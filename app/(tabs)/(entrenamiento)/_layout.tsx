@@ -8,6 +8,7 @@
  *   sesion/[id]        → sesión activa o pasada con sus ejercicios y series
  *   ejercicio/[id]     → detalle de un ejercicio (músculos, descripción, historial)
  *   crear-rutina       → formulario crear rutina (modal pantalla completa)
+ *   rutina/[id]       → detalle y edición de rutina
  */
 
 import { Stack } from 'expo-router';
@@ -28,6 +29,7 @@ export default function EntrenamientoLayout() {
         name="entreno-activo"
         options={{ headerShown: false, presentation: 'card', animation: 'slide_from_right' }}
       />
+      <Stack.Screen name="rutina/[id]" options={{ headerShown: false, animation: 'slide_from_right' }} />
       <Stack.Screen name="nueva-sesion" options={{ title: 'Nueva sesión', presentation: 'modal' }} />
       <Stack.Screen name="sesion/[id]" options={{ title: 'Sesión' }} />
       <Stack.Screen name="ejercicio/[id]" options={{ title: 'Ejercicio' }} />

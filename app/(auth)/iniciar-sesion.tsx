@@ -28,7 +28,7 @@ export default function IniciarSesion() {
 
   useEffect(() => {
     if (session) {
-      router.replace('/(tabs)/(nutricion)');
+      router.replace('/');
     }
   }, [session]);
 
@@ -63,7 +63,7 @@ export default function IniciarSesion() {
       return;
     }
 
-    router.replace('/(tabs)/(nutricion)');
+    router.replace('/');
   };
 
   const styles = makeStyles(c, f, ts, s, r);

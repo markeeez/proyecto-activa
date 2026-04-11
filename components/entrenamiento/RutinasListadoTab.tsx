@@ -154,18 +154,6 @@ function makeStyles(c: Theme, f: ReturnType<typeof useTheme>['f'], ts: ReturnTyp
       color: c.primary,
       letterSpacing: 0.8,
     },
-    ejerciciosBox: {
-      marginTop: s.xs,
-      paddingTop: s.xs,
-      borderTopWidth: 1,
-      borderTopColor: c.border,
-      gap: 2,
-    },
-    ejercicioLine: {
-      ...ts.caption,
-      fontFamily: f.mono,
-      color: c.textSecondary,
-    },
     loadingBox: {
       padding: s.lg,
       alignItems: 'center',
@@ -280,7 +268,6 @@ export function RutinasListadoTab() {
   const [lista, setLista] = useState<RutinaListaVista[]>([]);
   const [favIds, setFavIds] = useState<Set<string>>(new Set());
   const [cargando, setCargando] = useState(false);
-  const [expandidoId, setExpandidoId] = useState<string | null>(null);
 
   const cargar = useCallback(async () => {
     if (!user?.id) {
@@ -335,7 +322,6 @@ export function RutinasListadoTab() {
   const seleccionarFiltro = (next: FiltroRutinas) => {
     setFiltro(next);
     setAccordionOpen(false);
-    setExpandidoId(null);
   };
 
   const cerrarModalEntrenoVacio = useCallback(() => {
@@ -444,7 +430,6 @@ export function RutinasListadoTab() {
             </Text>
           ) : (
             lista.map((rut) => {
-              const expandido = expandidoId === rut.id;
               const esFav = favIds.has(rut.id);
               return (
                 <View key={rut.id} style={styles.card}>
@@ -457,19 +442,16 @@ export function RutinasListadoTab() {
                   >
                     <Ionicons name={esFav ? 'star' : 'star-outline'} size={22} color={esFav ? c.warning : c.textMuted} />
                   </Pressable>
-                  <Pressable onPress={() => setExpandidoId(expandido ? null : rut.id)} accessibilityRole="button">
+                  <Pressable
+                    onPress={() =>
+                      router.push(`/(tabs)/(entrenamiento)/rutina/${rut.id}` as Parameters<typeof router.push>[0])
+                    }
+                    accessibilityRole="button"
+                    accessibilityLabel={`Abrir rutina ${rut.nombre}`}
+                  >
                     <Text style={styles.cardTitle} numberOfLines={1}>
                       {rut.nombre}
                     </Text>
-                    {expandido && rut.ejercicios.length > 0 && (
-                      <View style={styles.ejerciciosBox}>
-                        {rut.ejercicios.map((ex, i) => (
-                          <Text key={i} style={styles.ejercicioLine} numberOfLines={1}>
-                            · {ex}
-                          </Text>
-                        ))}
-                      </View>
-                    )}
                   </Pressable>
                   <Pressable
                     style={[

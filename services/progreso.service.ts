@@ -5,6 +5,36 @@
 import { supabase } from '@/lib/supabase';
 import { agregarDiasIso, fechaHoyIsoLocal, fechaIsoDesdeDate, parseFechaLocal } from '@/lib/fechaNutricion';
 
+/** Plan nutricional guardado en `user_goals` (pantalla progreso / personalizar). */
+export type PlanActual = {
+  objetivo: string;
+  calorias_objetivo: number;
+  proteinas_objetivo: number;
+  carbos_objetivo: number;
+  grasas_objetivo: number;
+  /** ISO timestamptz desde `user_goals.created_at`. */
+  created_at: string;
+  peso_objetivo: number | null;
+};
+
+/** Progreso hacia el peso objetivo (tab Plan). */
+export type ProgresoPeso = {
+  pesoInicio: number;
+  pesoActual: number;
+  pesoObjetivo: number;
+  objetivo: 'perder_peso' | 'ganar_masa';
+  porcentaje: number;
+};
+
+/** Datos para recalcular TDEE: `profiles` + último `peso_kg` en `user_body_metrics`. */
+export type ContextoPlanNutricion = {
+  genero: 'hombre' | 'mujer' | null;
+  edad: number | null;
+  alturaCm: number | null;
+  factorActividad: number | null;
+  pesoKg: number | null;
+};
+
 export interface NutricionSemana {
   /** Lunes de la semana (YYYY-MM-DD, calendario local). */
   semanaInicio: string;
@@ -151,6 +181,175 @@ function clampFechaMin(fecha: string, minIso: string): string {
 }
 
 export const progresoService = {
+  /** Último plan nutricional del usuario (`user_goals`). */
+  async obtenerPlanActual(userId: string): Promise<PlanActual | null> {
+    const { data, error } = await supabase
+      .from('user_goals')
+      .select(
+        'objetivo, calorias_objetivo, proteinas_objetivo, carbos_objetivo, grasas_objetivo, created_at, peso_objetivo',
+      )
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) return null;
+    const rawPo = data.peso_objetivo;
+    const nPo = rawPo == null ? NaN : Number(rawPo);
+    const peso_objetivo = Number.isFinite(nPo) ? nPo : null;
+    return {
+      objetivo: String(data.objetivo),
+      calorias_objetivo: Number(data.calorias_objetivo) || 0,
+      proteinas_objetivo: Number(data.proteinas_objetivo) || 0,
+      carbos_objetivo: Number(data.carbos_objetivo) || 0,
+      grasas_objetivo: Number(data.grasas_objetivo) || 0,
+      created_at: data.created_at != null ? String(data.created_at) : '',
+      peso_objetivo,
+    };
+  },
+
+  /**
+   * Peso inicio (métrica con `created_at` más cercano a `user_goals.created_at`),
+   * peso actual (última fecha), objetivo y % hacia la meta.
+   */
+  async obtenerProgresoPeso(userId: string): Promise<ProgresoPeso | null> {
+    const { data: goal, error: eGoal } = await supabase
+      .from('user_goals')
+      .select('peso_objetivo, objetivo, created_at')
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (eGoal) throw eGoal;
+    if (!goal) return null;
+
+    const obj = String(goal.objetivo);
+    const rawPo = goal.peso_objetivo;
+    const pesoObjMeta =
+      rawPo != null && rawPo !== '' ? Number(rawPo) : NaN;
+    if (rawPo == null || !Number.isFinite(pesoObjMeta) || obj === 'mantener') return null;
+    if (obj !== 'perder_peso' && obj !== 'ganar_masa') return null;
+
+    const goalCreatedRaw = goal.created_at != null ? String(goal.created_at) : '';
+    const goalMs = goalCreatedRaw ? new Date(goalCreatedRaw).getTime() : NaN;
+
+    const { data: metrics, error: eMet } = await supabase
+      .from('user_body_metrics')
+      .select('peso_kg, created_at, fecha')
+      .eq('user_id', userId)
+      .not('peso_kg', 'is', null);
+    if (eMet) throw eMet;
+    const rows = (metrics ?? []).filter((r) => r.peso_kg != null && !Number.isNaN(Number(r.peso_kg)));
+    if (rows.length === 0) return null;
+
+    function metricTimeMs(r: { created_at?: unknown; fecha?: unknown }): number {
+      if (r.created_at != null && String(r.created_at).length > 0) {
+        const t = new Date(String(r.created_at)).getTime();
+        if (Number.isFinite(t)) return t;
+      }
+      if (r.fecha != null) {
+        const t = new Date(String(r.fecha) + 'T12:00:00').getTime();
+        if (Number.isFinite(t)) return t;
+      }
+      return NaN;
+    }
+
+    const sortedByFecha = [...rows].sort((a, b) => String(b.fecha ?? '').localeCompare(String(a.fecha ?? '')));
+    const latest = sortedByFecha[0];
+    const pesoActual = Number(latest?.peso_kg);
+    if (!Number.isFinite(pesoActual)) return null;
+
+    let best = rows[0]!;
+    if (Number.isFinite(goalMs)) {
+      let bestDiff = Infinity;
+      for (const r of rows) {
+        const t = metricTimeMs(r);
+        if (!Number.isFinite(t)) continue;
+        const d = Math.abs(t - goalMs);
+        if (d < bestDiff) {
+          bestDiff = d;
+          best = r;
+        }
+      }
+    }
+
+    const pesoInicio = Number(best.peso_kg);
+    if (!Number.isFinite(pesoInicio)) return null;
+    if (pesoInicio === pesoObjMeta) return null;
+
+    let pct: number;
+    if (obj === 'perder_peso') {
+      pct = ((pesoInicio - pesoActual) / (pesoInicio - pesoObjMeta)) * 100;
+    } else {
+      pct = ((pesoActual - pesoInicio) / (pesoObjMeta - pesoInicio)) * 100;
+    }
+    if (!Number.isFinite(pct)) return null;
+    pct = Math.max(0, Math.min(100, pct));
+
+    return {
+      pesoInicio,
+      pesoActual,
+      pesoObjetivo: pesoObjMeta,
+      objetivo: obj as 'perder_peso' | 'ganar_masa',
+      porcentaje: pct,
+    };
+  },
+
+  /**
+   * `genero`, `edad`, `altura_cm`, `factor_actividad` desde `profiles`;
+   * `peso_kg` desde el último registro de `user_body_metrics`.
+   */
+  async obtenerContextoPlanNutricion(userId: string): Promise<ContextoPlanNutricion> {
+    const [{ data: mRow }, { data: pRow }] = await Promise.all([
+      supabase
+        .from('user_body_metrics')
+        .select('peso_kg')
+        .eq('user_id', userId)
+        .order('fecha', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      supabase
+        .from('profiles')
+        .select('genero, edad, altura_cm, factor_actividad')
+        .eq('id', userId)
+        .maybeSingle(),
+    ]);
+
+    const pesoRaw = mRow?.peso_kg;
+    const pesoNum = pesoRaw != null ? Number(pesoRaw) : NaN;
+    const pesoKg = Number.isFinite(pesoNum) && pesoNum > 0 ? pesoNum : null;
+
+    const g = pRow?.genero;
+    const genero = g === 'hombre' || g === 'mujer' ? g : null;
+
+    const e = pRow?.edad;
+    let edad: number | null = null;
+    if (typeof e === 'number' && Number.isFinite(e) && e > 0) edad = Math.round(e);
+    else if (typeof e === 'string') {
+      const n = parseInt(e, 10);
+      if (Number.isFinite(n) && n > 0) edad = n;
+    }
+
+    const a = pRow?.altura_cm;
+    let alturaCm: number | null = null;
+    if (a != null) {
+      const n = Number(a);
+      if (Number.isFinite(n) && n > 0) alturaCm = n;
+    }
+
+    const f = pRow?.factor_actividad;
+    let factorActividad: number | null = null;
+    if (typeof f === 'number' && Number.isFinite(f) && f > 0) factorActividad = f;
+    else if (typeof f === 'string') {
+      const n = parseFloat(f.replace(',', '.'));
+      if (Number.isFinite(n) && n > 0) factorActividad = n;
+    }
+
+    return {
+      genero,
+      edad,
+      alturaCm,
+      factorActividad,
+      pesoKg,
+    };
+  },
+
   /**
    * Media diaria por semana: suma de ítems / días con fila en nutrition_logs en esa semana.
    */

@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFont } from '@shopify/react-native-skia';
 import { Image } from 'expo-image';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -24,7 +24,13 @@ import {
   parseFechaLocal,
 } from '@/lib/fechaNutricion';
 import { supabase } from '@/lib/supabase';
-import { progresoService, type NutricionSemana, type RegistroPeso } from '@/services/progreso.service';
+import {
+  progresoService,
+  type NutricionSemana,
+  type PlanActual,
+  type ProgresoPeso,
+  type RegistroPeso,
+} from '@/services/progreso.service';
 
 const SPACE_MONO_CHART = require('@expo-google-fonts/space-mono/400Regular/SpaceMono_400Regular.ttf');
 
@@ -93,6 +99,39 @@ function valorMetrica(row: NutricionSemana, m: MetricaNut): number {
     default:
       return 0;
   }
+}
+
+type TabProgreso = 'datos' | 'plan';
+
+function textoObjetivoLegible(objetivoDb: string): string {
+  switch (objetivoDb) {
+    case 'perder_peso':
+      return 'Perder grasa';
+    case 'mantener':
+      return 'Mantener peso';
+    case 'ganar_masa':
+      return 'Ganar masa muscular';
+    case 'mejorar_rendimiento':
+      return 'Mejorar rendimiento';
+    default:
+      return objetivoDb;
+  }
+}
+
+/** Texto para "DÍAS CON ESTE PLAN: …" según `user_goals.created_at`. */
+function textoDiasConEstePlan(createdAtIso: string): string {
+  if (!createdAtIso.trim()) return '—';
+  const hoy = new Date();
+  const createdAt = new Date(createdAtIso);
+  const dias = Math.floor((hoy.getTime() - createdAt.getTime()) / (1000 * 60 * 60 * 24));
+  if (dias === 0) return 'Hoy';
+  if (dias === 1) return '1 día';
+  return `${dias} días`;
+}
+
+function fmtPesoKgTabPlan(kg: number): string {
+  const t = kg.toFixed(1);
+  return t.endsWith('.0') ? String(Math.round(kg)) : t;
 }
 
 function textoTituloSemanaActual(metrica: MetricaNut, valor: number): string {
@@ -253,7 +292,7 @@ const stylesChart = StyleSheet.create({
 });
 
 export default function ProgresoIndex() {
-  const { c, f, ts, s, r } = useTheme();
+  const { c, f, ts, s, r, isDark } = useTheme();
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
 
@@ -279,6 +318,11 @@ export default function ProgresoIndex() {
   const [ultimosPesos, setUltimosPesos] = useState<RegistroPeso[]>([]);
   const [guardandoPeso, setGuardandoPeso] = useState(false);
 
+  const [tabPrincipal, setTabPrincipal] = useState<TabProgreso>('datos');
+  const [planActual, setPlanActual] = useState<PlanActual | null>(null);
+  const [progresoPeso, setProgresoPeso] = useState<ProgresoPeso | null>(null);
+  const [cargandoPlan, setCargandoPlan] = useState(false);
+
   const hoyIso = fechaHoyIsoLocal();
 
   /** Rango nutrición: 90 días / 365 días / desde alta (no el mismo criterio que el gráfico de peso). */
@@ -293,7 +337,7 @@ export default function ProgresoIndex() {
     return agregarDiasIso(hoyIso, -365);
   }, [rangoPeso, fechaRegistro, hoyIso]);
 
-  const styles = useMemo(() => makeStyles(c, f, ts, s, r), [c, f, ts, s, r]);
+  const styles = useMemo(() => makeStyles(c, f, ts, s, r, isDark), [c, f, ts, s, r, isDark]);
 
   const displayName = perfilUsername ?? user?.email?.split('@')[0] ?? 'Usuario';
   const avatarUrl =
@@ -390,6 +434,44 @@ export default function ProgresoIndex() {
     void recargarBloquePeso();
   }, [user?.id, recargarBloquePeso]);
 
+  const recargarPlan = useCallback(async () => {
+    if (!user?.id || tabPrincipal !== 'plan') return;
+    setCargandoPlan(true);
+    try {
+      const [p, prog] = await Promise.all([
+        progresoService.obtenerPlanActual(user.id),
+        progresoService.obtenerProgresoPeso(user.id),
+      ]);
+      setPlanActual(p);
+      setProgresoPeso(prog);
+    } catch {
+      setPlanActual(null);
+      setProgresoPeso(null);
+    } finally {
+      setCargandoPlan(false);
+    }
+  }, [user?.id, tabPrincipal]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void recargarPlan();
+    }, [recargarPlan]),
+  );
+
+  useEffect(() => {
+    void recargarPlan();
+  }, [recargarPlan]);
+
+  const pctMacrosPlan = useMemo(() => {
+    if (!planActual) return { prot: 0, carb: 0, gras: 0 };
+    const k = planActual.calorias_objetivo;
+    if (k <= 0) return { prot: 0, carb: 0, gras: 0 };
+    const prot_pct = Math.round(((planActual.proteinas_objetivo * 4) / k) * 100);
+    const carb_pct = Math.round(((planActual.carbos_objetivo * 4) / k) * 100);
+    const gras_pct = 100 - prot_pct - carb_pct;
+    return { prot: prot_pct, carb: carb_pct, gras: gras_pct };
+  }, [planActual]);
+
   const semanaActualIso = inicioSemanaLunesIso(hoyIso);
   const filaSemanaActual = nutricionSemanal.find((n) => n.semanaInicio === semanaActualIso);
   const valorSemanaActual = filaSemanaActual
@@ -482,6 +564,29 @@ export default function ProgresoIndex() {
           </View>
         </View>
 
+        <View style={styles.tabsWrap}>
+          <View style={styles.tabsPill}>
+            <Pressable
+              style={[styles.tabBtn, tabPrincipal === 'datos' && styles.tabBtnOn]}
+              onPress={() => setTabPrincipal('datos')}
+              accessibilityRole="button"
+              accessibilityState={{ selected: tabPrincipal === 'datos' }}
+            >
+              <Text style={[styles.tabBtnTxt, tabPrincipal === 'datos' && styles.tabBtnTxtOn]}>DATOS</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.tabBtn, tabPrincipal === 'plan' && styles.tabBtnOn]}
+              onPress={() => setTabPrincipal('plan')}
+              accessibilityRole="button"
+              accessibilityState={{ selected: tabPrincipal === 'plan' }}
+            >
+              <Text style={[styles.tabBtnTxt, tabPrincipal === 'plan' && styles.tabBtnTxtOn]}>PLAN</Text>
+            </Pressable>
+          </View>
+        </View>
+
+        {tabPrincipal === 'datos' ? (
+          <>
         {/* —— Nutrición semanal —— */}
         <View style={[styles.section, styles.blockNutricion]}>
           <View style={styles.rowTitleFiltro}>
@@ -620,6 +725,114 @@ export default function ProgresoIndex() {
             </View>
           </View>
         </View>
+          </>
+        ) : (
+          <View style={styles.planTab}>
+            {cargandoPlan ? (
+              <View style={styles.planCargando}>
+                <ActivityIndicator color={c.primary} />
+              </View>
+            ) : planActual ? (
+              <>
+                <Text style={styles.planLabelObj}>OBJETIVO ACTUAL</Text>
+                <Text style={styles.planObjTitulo} numberOfLines={2}>
+                  {textoObjetivoLegible(planActual.objetivo)}
+                </Text>
+                <Text style={styles.planDiasConPlan} numberOfLines={1}>
+                  DÍAS CON ESTE PLAN: {textoDiasConEstePlan(planActual.created_at)}
+                </Text>
+
+                <View style={styles.planKcalBlock}>
+                  <Text style={styles.planKcalNum}>
+                    {Math.round(planActual.calorias_objetivo).toLocaleString('es-ES')}
+                  </Text>
+                  <Text style={styles.planKcalSuf}>kcal/día</Text>
+                </View>
+
+                <View style={styles.macroCardsRowPlan}>
+                  <View style={styles.macroCardPlan}>
+                    <Text style={styles.macroCardLabelPlan}>PROTEÍNAS</Text>
+                    <Text style={styles.macroCardGramsPlan}>{planActual.proteinas_objetivo}g</Text>
+                    <Text style={styles.macroCardMetaPlan}>{pctMacrosPlan.prot}%</Text>
+                    <Text style={styles.macroCardMetaPlan}>{planActual.proteinas_objetivo * 4} kcal</Text>
+                  </View>
+                  <View style={styles.macroCardPlan}>
+                    <Text style={styles.macroCardLabelPlan}>CARBOS</Text>
+                    <Text style={styles.macroCardGramsPlan}>{planActual.carbos_objetivo}g</Text>
+                    <Text style={styles.macroCardMetaPlan}>{pctMacrosPlan.carb}%</Text>
+                    <Text style={styles.macroCardMetaPlan}>{planActual.carbos_objetivo * 4} kcal</Text>
+                  </View>
+                  <View style={styles.macroCardPlan}>
+                    <Text style={styles.macroCardLabelPlan}>GRASAS</Text>
+                    <Text style={styles.macroCardGramsPlan}>{planActual.grasas_objetivo}g</Text>
+                    <Text style={styles.macroCardMetaPlan}>{pctMacrosPlan.gras}%</Text>
+                    <Text style={styles.macroCardMetaPlan}>{planActual.grasas_objetivo * 9} kcal</Text>
+                  </View>
+                </View>
+
+                {progresoPeso ? (
+                  <View style={styles.planProgresoBlock}>
+                    <View style={styles.planProgresoTopRow}>
+                      <Text style={styles.planProgresoPesoLat}>{fmtPesoKgTabPlan(progresoPeso.pesoInicio)} kg</Text>
+                      <Text style={styles.planProgresoPesoLat}>{fmtPesoKgTabPlan(progresoPeso.pesoObjetivo)} kg</Text>
+                    </View>
+                    <View style={styles.planProgresoBarRow}>
+                      {Array.from({ length: 20 }, (_, i) => {
+                        const filled = Math.min(
+                          20,
+                          Math.max(0, Math.round((progresoPeso.porcentaje / 100) * 20)),
+                        );
+                        const on = i < filled;
+                        return (
+                          <View
+                            key={i}
+                            style={[
+                              styles.planProgresoSeg,
+                              on
+                                ? { backgroundColor: c.primary }
+                                : {
+                                    backgroundColor: 'transparent',
+                                    borderWidth: 1,
+                                    borderColor: c.border,
+                                  },
+                            ]}
+                          />
+                        );
+                      })}
+                    </View>
+                    <View style={styles.planProgresoPctWrap}>
+                      <Text style={styles.planProgresoPct}>{Math.round(progresoPeso.porcentaje)}%</Text>
+                      <Text style={styles.planProgresoPctDesc}>
+                        {progresoPeso.objetivo === 'perder_peso'
+                          ? 'hacia tu objetivo de pérdida'
+                          : 'hacia tu objetivo de ganancia'}
+                      </Text>
+                    </View>
+                  </View>
+                ) : null}
+
+                <Pressable
+                  onPress={() => router.navigate('/(tabs)/(progreso)/personalizar-plan')}
+                  accessibilityRole="link"
+                  accessibilityLabel="Personalizar plan"
+                >
+                  <Text style={styles.planLinkPersonalizar}>Personalizar plan</Text>
+                </Pressable>
+              </>
+            ) : (
+              <>
+                <Text style={styles.muted}>Sin plan guardado.</Text>
+                <Pressable
+                  onPress={() => router.navigate('/(tabs)/(progreso)/personalizar-plan')}
+                  accessibilityRole="link"
+                  accessibilityLabel="Personalizar plan"
+                >
+                  <Text style={styles.planLinkPersonalizar}>Personalizar plan</Text>
+                </Pressable>
+              </>
+            )}
+          </View>
+        )}
       </View>
 
       <Modal transparent visible={menuNutAbierto} animationType="fade" onRequestClose={() => setMenuNutAbierto(false)}>
@@ -675,7 +888,9 @@ function makeStyles(
   ts: ReturnType<typeof useTheme>['ts'],
   s: ReturnType<typeof useTheme>['s'],
   r: ReturnType<typeof useTheme>['r'],
+  isDark: boolean,
 ) {
+  const tabTxtOn = isDark ? '#000000' : '#FFFFFF';
   return StyleSheet.create({
     screen: {
       flex: 1,
@@ -686,15 +901,191 @@ function makeStyles(
       flexDirection: 'column',
       paddingHorizontal: s.md,
       paddingBottom: s.md,
-      gap: s.sm,
+      gap: s.xs,
       justifyContent: 'space-between',
     },
     headerBlock: {
       flexShrink: 0,
     },
+    tabsWrap: {
+      alignSelf: 'center',
+      maxWidth: 240,
+      width: '100%',
+      flexShrink: 0,
+      marginTop: s.sm,
+    },
+    tabsPill: {
+      flexDirection: 'row',
+      backgroundColor: c.surfaceElevated,
+      borderRadius: 999,
+      padding: 3,
+      borderWidth: 1,
+      borderColor: c.borderVisible,
+    },
+    tabBtn: {
+      flex: 1,
+      borderRadius: 999,
+      height: 32,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    tabBtnOn: {
+      backgroundColor: c.textDisplay,
+    },
+    tabBtnTxt: {
+      ...ts.caption,
+      fontFamily: f.mono,
+      color: c.textSecondary,
+      textTransform: 'uppercase',
+      letterSpacing: 0.6,
+    },
+    tabBtnTxtOn: {
+      color: tabTxtOn,
+    },
+    planTab: {
+      flex: 1,
+      minHeight: 0,
+      justifyContent: 'flex-start',
+      paddingTop: s.md,
+      gap: s.sm,
+    },
+    planCargando: {
+      flex: 1,
+      minHeight: 120,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    planLabelObj: {
+      ...ts.caption,
+      fontFamily: f.mono,
+      color: c.textSecondary,
+      textTransform: 'uppercase',
+      letterSpacing: 0.6,
+      textAlign: 'center',
+      alignSelf: 'stretch',
+    },
+    planObjTitulo: {
+      ...ts.subheading,
+      fontFamily: f.sansMedium,
+      color: c.textDisplay,
+      textAlign: 'center',
+      alignSelf: 'stretch',
+      marginBottom: s.xs,
+    },
+    planDiasConPlan: {
+      ...ts.caption,
+      fontFamily: f.mono,
+      color: c.textSecondary,
+      textAlign: 'center',
+      alignSelf: 'stretch',
+      marginBottom: s.sm,
+    },
+    macroCardsRowPlan: {
+      flexDirection: 'row',
+      gap: s.xs,
+      flexShrink: 0,
+    },
+    macroCardPlan: {
+      flex: 1,
+      borderWidth: 1,
+      borderColor: c.borderVisible,
+      borderRadius: r.sm,
+      paddingVertical: s.sm,
+      paddingHorizontal: s.xs,
+      backgroundColor: c.surface,
+      alignItems: 'center',
+    },
+    macroCardLabelPlan: {
+      ...ts.caption,
+      fontFamily: f.mono,
+      color: c.textSecondary,
+      letterSpacing: 0.6,
+      textAlign: 'center',
+    },
+    macroCardGramsPlan: {
+      ...ts.subheading,
+      fontFamily: f.sansMedium,
+      color: c.textDisplay,
+      marginTop: s.xs,
+    },
+    macroCardMetaPlan: {
+      ...ts.caption,
+      fontFamily: f.mono,
+      color: c.textSecondary,
+      marginTop: 4,
+      textAlign: 'center',
+    },
+    planKcalBlock: {
+      alignItems: 'center',
+      alignSelf: 'stretch',
+      flexShrink: 0,
+      marginBottom: s.sm,
+    },
+    planKcalNum: {
+      ...ts.displayMd,
+      fontFamily: f.mono,
+      color: c.primary,
+    },
+    planKcalSuf: {
+      ...ts.caption,
+      fontFamily: f.mono,
+      color: c.textSecondary,
+      marginTop: s.xs,
+    },
+    planLinkPersonalizar: {
+      ...ts.bodySm,
+      fontFamily: f.sansMedium,
+      color: c.primary,
+      textDecorationLine: 'underline',
+      textAlign: 'center',
+    },
+    planProgresoBlock: {
+      width: '100%',
+      flexShrink: 0,
+      marginTop: s.xs,
+    },
+    planProgresoTopRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: s.sm,
+    },
+    planProgresoPesoLat: {
+      ...ts.caption,
+      fontFamily: f.mono,
+      color: c.textSecondary,
+    },
+    planProgresoBarRow: {
+      flexDirection: 'row',
+      gap: 2,
+      height: 8,
+      alignSelf: 'stretch',
+      marginBottom: s.sm,
+    },
+    planProgresoSeg: {
+      flex: 1,
+      height: 8,
+      borderRadius: 0,
+    },
+    planProgresoPctWrap: {
+      alignItems: 'center',
+      alignSelf: 'stretch',
+    },
+    planProgresoPct: {
+      ...ts.body,
+      fontFamily: f.mono,
+      color: c.primary,
+    },
+    planProgresoPctDesc: {
+      ...ts.caption,
+      fontFamily: f.sans,
+      color: c.textSecondary,
+      textAlign: 'center',
+      marginTop: 2,
+    },
     blockNutricion: {
       flexShrink: 0,
-      marginTop: s.md,
+      marginTop: s.sm,
     },
     flexSpacer: {
       flex: 1,

@@ -20,6 +20,30 @@ export type RutinaListaVista = {
   ejercicios: string[];
 };
 
+/** Detalle completo de una rutina (plantilla) para pantalla de detalle / edición. */
+export type DetalleRutinaSet = {
+  numero_serie: number;
+  tipo_serie: TipoSeriePlantillaDb;
+  reps: number | null;
+  peso_kg: number | null;
+  tipo_peso: TipoPeso;
+};
+
+export type DetalleRutinaEjercicio = {
+  id: string;
+  exercise_id: string;
+  orden: number;
+  notas: string | null;
+  exercises: { nombre: string; musculo_primario: string };
+  routine_sets: DetalleRutinaSet[];
+};
+
+export type DetalleRutina = {
+  id: string;
+  nombre: string;
+  routine_exercises: DetalleRutinaEjercicio[];
+};
+
 type RoutineJoinRow = {
   id: string;
   nombre: string;
@@ -344,6 +368,80 @@ export const entrenamientoService = {
       return [];
     }
     return (data ?? []).map((r: { routine_id: string }) => r.routine_id);
+  },
+
+  async obtenerDetalleRutina(routineId: string): Promise<DetalleRutina | null> {
+    const { data, error } = await supabase
+      .from('routines')
+      .select(
+        `id, nombre,
+        routine_exercises (
+          id, exercise_id, orden, notas,
+          exercises ( nombre, musculo_primario ),
+          routine_sets ( numero_serie, tipo_serie, reps, peso_kg, tipo_peso )
+        )`,
+      )
+      .eq('id', routineId)
+      .maybeSingle();
+
+    if (error) {
+      console.error('[obtenerDetalleRutina]', error.message);
+      return null;
+    }
+    if (!data) return null;
+
+    type ReRow = {
+      id: string;
+      exercise_id: string;
+      orden: number;
+      notas: string | null;
+      exercises: { nombre: string; musculo_primario: string } | { nombre: string; musculo_primario: string }[] | null;
+      routine_sets:
+        | {
+            numero_serie: number;
+            tipo_serie: TipoSeriePlantillaDb;
+            reps: number | null;
+            peso_kg: number | null;
+            tipo_peso: TipoPeso | null;
+          }[]
+        | null;
+    };
+
+    const row = data as { id: string; nombre: string; routine_exercises: ReRow[] | null };
+    const rexList = (row.routine_exercises ?? []).slice().sort((a, b) => a.orden - b.orden);
+
+    const routine_exercises: DetalleRutinaEjercicio[] = rexList.map((re) => {
+      const exRaw = re.exercises;
+      const exOne = Array.isArray(exRaw) ? exRaw[0] : exRaw;
+      const setsRaw = re.routine_sets ?? [];
+      const routine_sets: DetalleRutinaSet[] = setsRaw
+        .slice()
+        .sort((a, b) => a.numero_serie - b.numero_serie)
+        .map((s) => ({
+          numero_serie: s.numero_serie,
+          tipo_serie: s.tipo_serie,
+          reps: s.reps,
+          peso_kg: s.peso_kg,
+          tipo_peso: (s.tipo_peso ?? 'kg') as TipoPeso,
+        }));
+      return {
+        id: re.id,
+        exercise_id: re.exercise_id,
+        orden: re.orden,
+        notas: re.notas,
+        exercises: {
+          nombre: exOne?.nombre?.trim() ?? 'Ejercicio',
+          musculo_primario: exOne?.musculo_primario?.trim() ?? '',
+        },
+        routine_sets,
+      };
+    });
+
+    return {
+      id: row.id,
+      nombre: row.nombre,
+      routine_exercises,
+    };
   },
 
   // ─── Sesiones ──────────────────────────────────────────────────────────────
