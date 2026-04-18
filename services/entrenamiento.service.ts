@@ -12,6 +12,7 @@ import type {
   WorkoutSet,
 } from '@/types/database.types';
 import type { TipoSeriePlantillaDb } from '@/lib/entrenamientoSerie';
+import type { SesionCompleta } from '@/types/app.types';
 
 /** Listado de rutinas con nombres de ejercicios (plantilla). */
 export type RutinaListaVista = {
@@ -49,7 +50,8 @@ type RoutineJoinRow = {
   nombre: string;
   routine_exercises?: {
     orden: number;
-    exercises: { nombre: string } | null;
+    /** PostgREST puede devolver objeto o array de 1 elemento según tipos generados. */
+    exercises: { nombre: string } | { nombre: string }[] | null;
   }[] | null;
 };
 
@@ -57,11 +59,14 @@ function mapRoutineJoin(row: RoutineJoinRow): RutinaListaVista {
   const lines = (row.routine_exercises ?? [])
     .slice()
     .sort((a, b) => a.orden - b.orden)
-    .map((re) => re.exercises?.nombre?.trim() ?? '')
+    .map((re) => {
+      const ex = re.exercises;
+      const one = Array.isArray(ex) ? ex[0] : ex;
+      return one?.nombre?.trim() ?? '';
+    })
     .filter((n) => n.length > 0);
   return { id: row.id, nombre: row.nombre, ejercicios: lines };
 }
-import type { SesionCompleta } from '@/types/app.types';
 
 /** Borrador al guardar rutina desde la pantalla Crear rutina */
 export type BorradorSerieRutina = {
@@ -157,6 +162,18 @@ export type UltimaSesionRutina = {
   }[];
 };
 
+/** Rutina predeterminada para explorar (lista + filtros en cliente). */
+export type RutinaExplorar = {
+  id: string;
+  nombre: string;
+  descripcion: string | null;
+  dificultad: string | null;
+  musculos: string[];
+  /** `musculo_primario` por ejercicio (orden de plantilla); necesario para filtros/orden por músculo. */
+  musculosPorEjercicio: string[];
+  esFavorita: boolean;
+};
+
 type SesionSemanaRow = {
   id: string;
   nombre: string | null;
@@ -217,6 +234,27 @@ type RoutineExerciseJoinRow = {
     | null;
 };
 
+/** Fila cruda de join: relaciones anidadas suelen inferirse como objeto o array. */
+type AnteriorJoinRowRaw = {
+  repeticiones: number | null;
+  peso_kg: number | null;
+  tipo_peso: TipoPeso;
+  workout_session_exercises:
+    | {
+        exercise_id: string;
+        workout_sessions:
+          | { user_id: string; fecha: string; created_at: string }
+          | { user_id: string; fecha: string; created_at: string }[];
+      }
+    | {
+        exercise_id: string;
+        workout_sessions:
+          | { user_id: string; fecha: string; created_at: string }
+          | { user_id: string; fecha: string; created_at: string }[];
+      }[]
+    | null;
+};
+
 type AnteriorJoinRow = {
   repeticiones: number | null;
   peso_kg: number | null;
@@ -226,6 +264,198 @@ type AnteriorJoinRow = {
     workout_sessions: { user_id: string; fecha: string; created_at: string };
   };
 };
+
+function normalizarAnteriorJoinRow(r: AnteriorJoinRowRaw): AnteriorJoinRow | null {
+  const wseRaw = r.workout_session_exercises;
+  const wse = Array.isArray(wseRaw) ? wseRaw[0] : wseRaw;
+  if (!wse) return null;
+  const sessRaw = wse.workout_sessions;
+  const sess = Array.isArray(sessRaw) ? sessRaw[0] : sessRaw;
+  if (!sess) return null;
+  return {
+    repeticiones: r.repeticiones,
+    peso_kg: r.peso_kg,
+    tipo_peso: r.tipo_peso,
+    workout_session_exercises: {
+      exercise_id: wse.exercise_id,
+      workout_sessions: sess,
+    },
+  };
+}
+
+type RoutineMetaRow = {
+  id: string;
+  nombre: string;
+  descripcion: string | null;
+  dificultad: string | null;
+  is_default: boolean;
+  is_public: boolean;
+  created_by: string | null;
+};
+
+async function obtenerMetaRutina(routineId: string): Promise<RoutineMetaRow | null> {
+  const { data, error } = await supabase
+    .from('routines')
+    .select('id, nombre, descripcion, dificultad, is_default, is_public, created_by')
+    .eq('id', routineId)
+    .maybeSingle();
+
+  if (error) {
+    console.error('[obtenerMetaRutina]', error.message);
+    return null;
+  }
+  return (data as RoutineMetaRow | null) ?? null;
+}
+
+async function limpiarRutinaClonada(routineId: string): Promise<void> {
+  const { data: reRows, error: reErr } = await supabase.from('routine_exercises').select('id').eq('routine_id', routineId);
+  if (reErr) {
+    console.error('[limpiarRutinaClonada] routine_exercises select', reErr.message);
+  } else {
+    const routineExerciseIds = (reRows ?? []).map((row: { id: string }) => row.id);
+    if (routineExerciseIds.length > 0) {
+      const { error: rsErr } = await supabase.from('routine_sets').delete().in('routine_exercise_id', routineExerciseIds);
+      if (rsErr) console.error('[limpiarRutinaClonada] routine_sets delete', rsErr.message);
+    }
+    const { error: delReErr } = await supabase.from('routine_exercises').delete().eq('routine_id', routineId);
+    if (delReErr) console.error('[limpiarRutinaClonada] routine_exercises delete', delReErr.message);
+  }
+
+  const { error: delRoutineErr } = await supabase.from('routines').delete().eq('id', routineId);
+  if (delRoutineErr) console.error('[limpiarRutinaClonada] routines delete', delRoutineErr.message);
+}
+
+async function escribirRutinaEjercicios(routineId: string, ejercicios: BorradorEjercicioRutina[]): Promise<void> {
+  const { error: delErr } = await supabase.from('routine_exercises').delete().eq('routine_id', routineId);
+  if (delErr) {
+    console.error('[escribirRutinaEjercicios] delete', delErr.message);
+    throw new Error(delErr.message);
+  }
+
+  for (const ex of ejercicios) {
+    const { data: reRow, error: errRe } = await supabase
+      .from('routine_exercises')
+      .insert({
+        routine_id: routineId,
+        exercise_id: ex.exercise_id,
+        orden: ex.orden,
+        notas: null,
+      })
+      .select('id')
+      .single();
+
+    if (errRe || !reRow?.id) {
+      console.error('[escribirRutinaEjercicios] routine_exercises', errRe?.message);
+      throw new Error(errRe?.message ?? 'No se pudo guardar la rutina.');
+    }
+
+    const routineExerciseId = reRow.id as string;
+
+    for (const set of ex.sets) {
+      const { error: errSet } = await supabase.from('routine_sets').insert({
+        routine_exercise_id: routineExerciseId,
+        numero_serie: set.numero_serie,
+        tipo_serie: set.tipo_serie,
+        reps: set.repeticiones,
+        peso_kg: set.peso_kg,
+        tipo_peso: set.tipo_peso,
+      });
+      if (errSet) {
+        console.error('[escribirRutinaEjercicios] routine_sets', errSet.message);
+        throw new Error(errSet.message);
+      }
+    }
+  }
+}
+
+async function clonarRutinaBase(original: RoutineMetaRow, userId: string): Promise<string> {
+  const { data: routineRow, error: errRoutine } = await supabase
+    .from('routines')
+    .insert({
+      nombre: original.nombre,
+      descripcion: original.descripcion,
+      dificultad: original.dificultad,
+      created_by: userId,
+      is_default: false,
+      is_public: false,
+    })
+    .select('id')
+    .single();
+
+  if (errRoutine || !routineRow?.id) {
+    console.error('[clonarRutinaBase] routines', errRoutine?.message);
+    throw new Error(errRoutine?.message ?? 'No se pudo clonar la rutina.');
+  }
+
+  const nuevoRoutineId = routineRow.id as string;
+
+  type CloneExerciseRow = {
+    id: string;
+    exercise_id: string;
+    orden: number;
+    notas: string | null;
+    routine_sets:
+      | {
+          numero_serie: number;
+          tipo_serie: TipoSeriePlantillaDb;
+          reps: number | null;
+          peso_kg: number | null;
+          tipo_peso: TipoPeso | null;
+        }[]
+      | null;
+  };
+
+  const { data: exerciseRows, error: exerciseErr } = await supabase
+    .from('routine_exercises')
+    .select('id, exercise_id, orden, notas, routine_sets ( numero_serie, tipo_serie, reps, peso_kg, tipo_peso )')
+    .eq('routine_id', original.id)
+    .order('orden');
+
+  if (exerciseErr) {
+    console.error('[clonarRutinaBase] routine_exercises', exerciseErr.message);
+    await limpiarRutinaClonada(nuevoRoutineId);
+    throw new Error(exerciseErr.message);
+  }
+
+  for (const originalEx of (exerciseRows ?? []) as CloneExerciseRow[]) {
+    const { data: newReRow, error: newReErr } = await supabase
+      .from('routine_exercises')
+      .insert({
+        routine_id: nuevoRoutineId,
+        exercise_id: originalEx.exercise_id,
+        orden: originalEx.orden,
+        notas: originalEx.notas,
+      })
+      .select('id')
+      .single();
+
+    if (newReErr || !newReRow?.id) {
+      console.error('[clonarRutinaBase] clone routine_exercises', newReErr?.message);
+      await limpiarRutinaClonada(nuevoRoutineId);
+      throw new Error(newReErr?.message ?? 'No se pudo clonar la rutina.');
+    }
+
+    const newRoutineExerciseId = newReRow.id as string;
+    for (const set of originalEx.routine_sets ?? []) {
+      const { error: setErr } = await supabase.from('routine_sets').insert({
+        routine_exercise_id: newRoutineExerciseId,
+        numero_serie: set.numero_serie,
+        tipo_serie: set.tipo_serie,
+        reps: set.reps,
+        peso_kg: set.peso_kg,
+        tipo_peso: set.tipo_peso ?? 'kg',
+      });
+
+      if (setErr) {
+        console.error('[clonarRutinaBase] clone routine_sets', setErr.message);
+        await limpiarRutinaClonada(nuevoRoutineId);
+        throw new Error(setErr.message);
+      }
+    }
+  }
+
+  return nuevoRoutineId;
+}
 
 export const entrenamientoService = {
   /**
@@ -619,11 +849,13 @@ export const entrenamientoService = {
       return null;
     }
 
-    const rows = (data ?? []) as AnteriorJoinRow[];
+    const rows = (data ?? [])
+      .map((r) => normalizarAnteriorJoinRow(r as AnteriorJoinRowRaw))
+      .filter((r): r is AnteriorJoinRow => r != null);
     const mine = rows.filter(
       (r) =>
-        r.workout_session_exercises?.exercise_id === exerciseId &&
-        r.workout_session_exercises?.workout_sessions?.user_id === userId,
+        r.workout_session_exercises.exercise_id === exerciseId &&
+        r.workout_session_exercises.workout_sessions.user_id === userId,
     );
     if (!mine.length) return null;
 
@@ -700,43 +932,57 @@ export const entrenamientoService = {
     }
   },
 
-  async actualizarRutinaDesdeEntreno(routineId: string, ejercicios: BorradorEjercicioRutina[]): Promise<void> {
-    const { error: delErr } = await supabase.from('routine_exercises').delete().eq('routine_id', routineId);
-    if (delErr) {
-      console.error('[actualizarRutinaDesdeEntreno] delete', delErr.message);
-      return;
+  async actualizarRutinaDesdeEntreno(
+    routineId: string,
+    ejercicios: BorradorEjercicioRutina[],
+    opciones?: { nombre?: string },
+  ): Promise<string> {
+    const { data: auth, error: authErr } = await supabase.auth.getUser();
+    const userId = auth.user?.id ?? null;
+    if (authErr || !userId) {
+      console.error('[actualizarRutinaDesdeEntreno] auth', authErr?.message);
+      throw new Error('Debes iniciar sesión para guardar la rutina.');
     }
 
-    for (const ex of ejercicios) {
-      const { data: reRow, error: errRe } = await supabase
-        .from('routine_exercises')
-        .insert({
-          routine_id: routineId,
-          exercise_id: ex.exercise_id,
-          orden: ex.orden,
-          notas: null,
-        })
-        .select('id')
-        .single();
+    const meta = await obtenerMetaRutina(routineId);
+    if (!meta) {
+      throw new Error('No se pudo cargar la rutina.');
+    }
 
-      if (errRe || !reRow?.id) {
-        console.error('[actualizarRutinaDesdeEntreno] routine_exercises', errRe?.message);
-        continue;
+    const tituloLimpio = opciones?.nombre?.trim() ?? '';
+    const isPredeterminada = meta.created_by == null || meta.is_default === true;
+
+    if (!isPredeterminada) {
+      if (tituloLimpio && tituloLimpio !== meta.nombre) {
+        const { error: updateErr } = await supabase.from('routines').update({ nombre: tituloLimpio }).eq('id', routineId);
+        if (updateErr) {
+          console.error('[actualizarRutinaDesdeEntreno] routines update', updateErr.message);
+          throw new Error(updateErr.message);
+        }
+      }
+      await escribirRutinaEjercicios(routineId, ejercicios);
+      return routineId;
+    }
+
+    const nuevoRoutineId = await clonarRutinaBase(meta, userId);
+
+    try {
+      if (tituloLimpio && tituloLimpio !== meta.nombre) {
+        const { error: updateErr } = await supabase
+          .from('routines')
+          .update({ nombre: tituloLimpio })
+          .eq('id', nuevoRoutineId);
+        if (updateErr) {
+          console.error('[actualizarRutinaDesdeEntreno] clone routines update', updateErr.message);
+          throw new Error(updateErr.message);
+        }
       }
 
-      const routineExerciseId = reRow.id as string;
-
-      for (const set of ex.sets) {
-        const { error: errSet } = await supabase.from('routine_sets').insert({
-          routine_exercise_id: routineExerciseId,
-          numero_serie: set.numero_serie,
-          tipo_serie: set.tipo_serie,
-          reps: set.repeticiones,
-          peso_kg: set.peso_kg,
-          tipo_peso: set.tipo_peso,
-        });
-        if (errSet) console.error('[actualizarRutinaDesdeEntreno] routine_sets', errSet.message);
-      }
+      await escribirRutinaEjercicios(nuevoRoutineId, ejercicios);
+      return nuevoRoutineId;
+    } catch (error) {
+      await limpiarRutinaClonada(nuevoRoutineId);
+      throw error;
     }
   },
 
@@ -940,4 +1186,116 @@ export const entrenamientoService = {
 
     return { sessionId, ejercicios };
   },
+
+  async obtenerRutinasPredeterminadas(): Promise<RutinaExplorar[]> {
+    type ExploreReRow = {
+      orden: number;
+      exercises: { musculo_primario: string | null } | { musculo_primario: string | null }[] | null;
+    };
+    type ExploreRoutineRow = {
+      id: string;
+      nombre: string;
+      descripcion: string | null;
+      dificultad: string | null;
+      routine_exercises?: ExploreReRow[] | null;
+    };
+
+    const { data, error } = await supabase
+      .from('routines')
+      .select(
+        `id, nombre, descripcion, dificultad,
+        routine_exercises ( orden, exercises ( musculo_primario ) )`,
+      )
+      .eq('is_default', true)
+      .order('nombre');
+
+    if (error) {
+      console.error('[obtenerRutinasPredeterminadas]', error.message);
+      throw new Error(error.message);
+    }
+
+    const { data: auth } = await supabase.auth.getUser();
+    const uid = auth.user?.id ?? null;
+
+    let favoritos = new Set<string>();
+    if (uid) {
+      const { data: favRows, error: favErr } = await supabase
+        .from('user_favorite_routines')
+        .select('routine_id')
+        .eq('user_id', uid);
+
+      if (favErr) {
+        console.error('[obtenerRutinasPredeterminadas] favoritos', favErr.message);
+      } else {
+        favoritos = new Set((favRows ?? []).map((r: { routine_id: string }) => r.routine_id));
+      }
+    }
+
+    const musculosUnicosPorFrecuencia = (primaries: string[]): string[] => {
+      const counts = new Map<string, { n: number; label: string }>();
+      for (const raw of primaries) {
+        const t = raw.trim();
+        if (!t) continue;
+        const k = t.toLowerCase();
+        const cur = counts.get(k);
+        if (cur) cur.n += 1;
+        else counts.set(k, { n: 1, label: t });
+      }
+      return [...counts.values()]
+        .sort((a, b) => b.n - a.n || a.label.localeCompare(b.label, 'es'))
+        .map((x) => x.label);
+    };
+
+    const out: RutinaExplorar[] = [];
+    for (const raw of (data ?? []) as ExploreRoutineRow[]) {
+      const rel = (raw.routine_exercises ?? []).slice().sort((a, b) => a.orden - b.orden);
+      const musculosPorEjercicio: string[] = [];
+      for (const re of rel) {
+        const exRaw = re.exercises;
+        const exOne = Array.isArray(exRaw) ? exRaw[0] : exRaw;
+        const mp = exOne?.musculo_primario?.trim() ?? '';
+        musculosPorEjercicio.push(mp);
+      }
+      const musculos = musculosUnicosPorFrecuencia(musculosPorEjercicio.filter((m) => m.length > 0));
+      out.push({
+        id: raw.id,
+        nombre: raw.nombre,
+        descripcion: raw.descripcion,
+        dificultad: raw.dificultad,
+        musculos,
+        musculosPorEjercicio,
+        esFavorita: favoritos.has(raw.id),
+      });
+    }
+    return out;
+  },
 };
+
+/**
+ * Fija favorito en BD según estado deseado (insert/delete). Usuario = sesión actual.
+ * Coexiste con `entrenamientoService.toggleFavoritoRutina(userId, routineId)` que alterna sin estado explícito.
+ */
+export async function toggleFavoritoRutina(rutinaId: string, esFavorita: boolean): Promise<void> {
+  const { data: auth, error: authErr } = await supabase.auth.getUser();
+  if (authErr || !auth.user?.id) {
+    console.error('[toggleFavoritoRutina] sin usuario', authErr?.message);
+    return;
+  }
+  const userId = auth.user.id;
+  if (esFavorita) {
+    const { error } = await supabase.from('user_favorite_routines').insert({
+      user_id: userId,
+      routine_id: rutinaId,
+    });
+    if (error && error.code !== '23505') {
+      console.error('[toggleFavoritoRutina] insert', error.message);
+    }
+  } else {
+    const { error } = await supabase
+      .from('user_favorite_routines')
+      .delete()
+      .eq('user_id', userId)
+      .eq('routine_id', rutinaId);
+    if (error) console.error('[toggleFavoritoRutina] delete', error.message);
+  }
+}

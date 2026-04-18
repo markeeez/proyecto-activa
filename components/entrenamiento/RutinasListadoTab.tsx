@@ -384,7 +384,7 @@ export function RutinasListadoTab() {
         >
           <Text style={styles.secondaryBtnText}>NUEVA RUTINA</Text>
         </Pressable>
-        <Pressable style={styles.secondaryBtn} onPress={() => {}} accessibilityRole="button">
+        <Pressable style={styles.secondaryBtn} onPress={() => router.push('/(tabs)/(entrenamiento)/explorar-rutinas')} accessibilityRole="button">
           <Text style={styles.secondaryBtnText}>EXPLORAR</Text>
         </Pressable>
       </View>

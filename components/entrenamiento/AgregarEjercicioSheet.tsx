@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
 
 import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from '@/hooks/useTheme';
@@ -137,6 +138,19 @@ function makeStyles(c: Theme, f: ReturnType<typeof useTheme>['f'], ts: ReturnTyp
       alignItems: 'center',
       borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: c.border,
+    },
+    ejercicioImg: {
+      width: 56,
+      height: 56,
+      borderRadius: 8,
+    },
+    ejercicioImgPlaceholder: {
+      width: 56,
+      height: 56,
+      borderRadius: 8,
+      backgroundColor: c.surface,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     itemMain: {
       flex: 1,
@@ -435,8 +449,24 @@ export function AgregarEjercicioSheet({ visible, onClose, onSeleccionar, onCrear
               }
               renderItem={({ item }) => {
                 const esFav = favSet.has(item.id);
+                const fotoRaw = (item as Exercise & { foto_url?: string | null }).foto_url;
+                const fotoUri = fotoRaw?.trim() ?? '';
                 return (
                   <View style={styles.itemRow}>
+                    {fotoUri ? (
+                      <Image
+                        source={{ uri: fotoUri }}
+                        style={[styles.ejercicioImg, { marginLeft: s.md, marginRight: s.sm }]}
+                        contentFit="cover"
+                        cachePolicy="memory-disk"
+                        autoplay={false}
+                        recyclingKey={item.id}
+                      />
+                    ) : (
+                      <View style={[styles.ejercicioImgPlaceholder, { marginLeft: s.md, marginRight: s.sm }]}>
+                        <Ionicons name="barbell-outline" size={24} color={c.textMuted} />
+                      </View>
+                    )}
                     <Pressable
                       style={styles.itemMain}
                       onPress={() => {

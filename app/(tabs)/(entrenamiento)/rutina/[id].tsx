@@ -29,7 +29,6 @@ import { useEntreno } from '@/context/EntrenoContext';
 import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from '@/hooks/useTheme';
 import { tipoSerieDbAUi, tipoSerieUiADb } from '@/lib/entrenamientoSerie';
-import { supabase } from '@/lib/supabase';
 import { ejerciciosService } from '@/services/ejercicios.service';
 import {
   entrenamientoService,
@@ -829,21 +828,23 @@ export default function RutinaDetallePantalla() {
 
     setGuardando(true);
     try {
-      const { error: errNombre } = await supabase
-        .from('routines')
-        .update({ nombre: tituloLimpio })
-        .eq('id', routineId);
-      if (errNombre) {
-        Alert.alert('Error', errNombre.message ?? 'No se pudo actualizar el nombre.');
+      const savedRoutineId = await entrenamientoService.actualizarRutinaDesdeEntreno(routineId, ejerciciosPayload, {
+        nombre: tituloLimpio,
+      });
+      if (savedRoutineId !== routineId) {
+        setModoEdicion(false);
+        router.replace(`/(tabs)/(entrenamiento)/rutina/${savedRoutineId}`);
         return;
       }
-      await entrenamientoService.actualizarRutinaDesdeEntreno(routineId, ejerciciosPayload);
       await cargar();
       setModoEdicion(false);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'No se pudo guardar la rutina.';
+      Alert.alert('Error', message);
     } finally {
       setGuardando(false);
     }
-  }, [routineId, user?.id, tituloEdicion, lineas, cargar]);
+  }, [routineId, user?.id, tituloEdicion, lineas, cargar, router]);
 
   const onEmpezarRutina = useCallback(async () => {
     if (!routineId || !detalle || hayEntrenoActivo || iniciandoEntreno) return;
