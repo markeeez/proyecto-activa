@@ -25,6 +25,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from '@/hooks/useTheme';
 import { supabase } from '@/lib/supabase';
 import type { GeneroOnboarding } from '@/app/(onboarding)/datos';
+import { useThemeMode } from '@/context/ThemeContext';
 import type { Objetivo, Plan } from '@/types/database.types';
 
 type ProfileRow = {
@@ -411,19 +412,13 @@ function makeStyles(
       justifyContent: 'center',
       gap: s.sm,
     },
-    themeToggleSoon: {
-      ...ts.caption,
-      fontFamily: f.mono,
-      color: c.textDisabled,
-      textAlign: 'center',
-      marginTop: s.xs,
-    },
     themeIcon: { opacity: 0.9 },
   });
 }
 
 export default function PerfilIndex() {
   const insets = useSafeAreaInsets();
+  const { isDark, setMode } = useThemeMode();
   const { c, f, ts, s, r } = useTheme();
   const { user } = useAuth();
   const styles = useMemo(() => makeStyles(c, f, ts, s, r), [c, f, ts, s, r]);
@@ -857,16 +852,16 @@ export default function PerfilIndex() {
               </Pressable>
             </View>
 
-            {/* TODO: conectar con ThemeContext cuando se implemente */}
+            {/* Iconos: sol (claro) · luna (oscuro) — preferencia en ThemeContext */}
             <View style={styles.themeToggleSection}>
               <View style={styles.themeToggleRow}>
                 <Ionicons name="sunny-outline" size={16} color={c.textSecondary} style={styles.themeIcon} />
-                <View style={{ opacity: 0.4 }}>
-                  <Switch value={false} disabled />
-                </View>
+                <Switch
+                  value={isDark}
+                  onValueChange={(value) => setMode(value ? 'dark' : 'light')}
+                />
                 <Ionicons name="moon-outline" size={16} color={c.textSecondary} style={styles.themeIcon} />
               </View>
-              <Text style={styles.themeToggleSoon}>PRÓXIMAMENTE</Text>
             </View>
 
             {/* TODO: ELIMINAR ANTES DE PRODUCCIÓN */}

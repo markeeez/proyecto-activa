@@ -27,8 +27,8 @@ const Palette = {
   surfaceRaised:  '#1A1A1A',
   borderSubtle:   '#222222',
   borderVisible:  '#333333',
-  textDisabled:   '#666666',
-  textSecondary:  '#999999',
+  textDisabled:   '#888888',
+  textSecondary:  '#BBBBBB',
   textPrimary:    '#E8E8E8',
   textDisplay:    '#FFFFFF',
 

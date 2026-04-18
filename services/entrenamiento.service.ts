@@ -96,6 +96,8 @@ export type EjercicioBorrador = {
 export type EntrenoEjercicioPersistido = {
   exercise_id: string;
   orden: number;
+  /** workout_session_exercises.notas */
+  notas?: string | null;
   sets: {
     numero_serie: number;
     tipo_serie: TipoSeriePlantillaDb;
@@ -127,6 +129,7 @@ export type DetalleSesionEjercicio = {
   id: string;
   nombre: string;
   musculo_primario: string;
+  notas: string | null;
   sets: DetalleSesionSet[];
 };
 
@@ -178,6 +181,7 @@ type DetalleSesionRow = {
     id: string;
     orden: number;
     exercise_id: string;
+    notas: string | null;
     exercises: { nombre: string; musculo_primario: string } | { nombre: string; musculo_primario: string }[] | null;
     workout_sets: {
       numero_serie: number;
@@ -644,7 +648,7 @@ export const entrenamientoService = {
           session_id: sessionId,
           exercise_id: ex.exercise_id,
           orden: ex.orden,
-          notas: null,
+          notas: ex.notas != null && ex.notas.trim() !== '' ? ex.notas.trim() : null,
         })
         .select('id')
         .single();
@@ -818,7 +822,7 @@ export const entrenamientoService = {
       .select(
         `id, nombre, fecha, hora_inicio, hora_fin,
         workout_session_exercises (
-          id, orden, exercise_id,
+          id, orden, exercise_id, notas,
           exercises ( nombre, musculo_primario ),
           workout_sets ( numero_serie, tipo_serie, peso_kg, repeticiones, tipo_peso, completada )
         )`,
@@ -856,6 +860,7 @@ export const entrenamientoService = {
         id: wse.id,
         nombre,
         musculo_primario: musculo,
+        notas: wse.notas ?? null,
         sets,
       };
     });

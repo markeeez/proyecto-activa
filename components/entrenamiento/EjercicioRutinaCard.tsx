@@ -40,6 +40,9 @@ type Props = {
   modo?: 'rutina' | 'entreno';
   /** modo entreno: texto "Anterior" por fila de serie (misma longitud que data.sets) */
   textoAnteriorSeries?: (string | null)[];
+  /** modo entreno: nota del ejercicio (controlada desde el padre) */
+  nota?: string;
+  onNotaChange?: (nota: string) => void;
 };
 
 function makeStyles(c: Theme, f: ReturnType<typeof useTheme>['f'], ts: ReturnType<typeof useTheme>['ts'], s: ReturnType<typeof useTheme>['s'], r: ReturnType<typeof useTheme>['r']) {
@@ -283,6 +286,41 @@ function makeStyles(c: Theme, f: ReturnType<typeof useTheme>['f'], ts: ReturnTyp
     aiSendBtnDisabled: {
       opacity: 0.35,
     },
+    notaHeaderRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      height: 28,
+      paddingHorizontal: s.sm,
+      paddingVertical: 0,
+      gap: 6,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: c.border,
+    },
+    notaHeaderLabel: {
+      ...ts.caption,
+      fontFamily: f.mono,
+      color: c.textMuted,
+      letterSpacing: 0.6,
+    },
+    notaHeaderSpacer: {
+      flex: 1,
+    },
+    notaInputOuter: {
+      paddingHorizontal: s.sm,
+      paddingTop: s.xs,
+      paddingBottom: s.xs,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: c.border,
+    },
+    notaInput: {
+      ...ts.caption,
+      fontFamily: f.mono,
+      color: c.textSecondary,
+      backgroundColor: c.surfaceElevated,
+      borderRadius: r.sm,
+      padding: s.sm,
+      maxHeight: 80,
+    },
   });
 }
 
@@ -316,6 +354,8 @@ export function EjercicioRutinaCard({
   canMoveDown,
   modo = 'rutina',
   textoAnteriorSeries,
+  nota,
+  onNotaChange,
 }: Props) {
   const { c, f, ts, s, r } = useTheme();
   const styles = useMemo(() => makeStyles(c, f, ts, s, r), [c, f, ts, s, r]);
@@ -328,6 +368,7 @@ export function EjercicioRutinaCard({
   const [menuSetId, setMenuSetId] = useState<string | null>(null);
   const [modalIaAbierto, setModalIaAbierto] = useState(false);
   const [iaPregunta, setIaPregunta] = useState('');
+  const [notaAbierta, setNotaAbierta] = useState(false);
 
   const opcionesEjercicio: OpcionMenuItem[] = useMemo(
     () => [
@@ -404,6 +445,41 @@ export function EjercicioRutinaCard({
           <Ionicons name="ellipsis-horizontal" size={22} color={c.textSecondary} />
         </Pressable>
       </View>
+
+      {esEntreno && onNotaChange ? (
+        <>
+          <Pressable
+            style={styles.notaHeaderRow}
+            onPress={() => setNotaAbierta((v) => !v)}
+            accessibilityRole="button"
+            accessibilityState={{ expanded: notaAbierta }}
+            accessibilityLabel="Nota del ejercicio"
+          >
+            <Ionicons name="document-text-outline" size={14} color={c.textMuted} />
+            <Text style={styles.notaHeaderLabel}>NOTA</Text>
+            <View style={styles.notaHeaderSpacer} />
+            <Ionicons
+              name={notaAbierta ? 'chevron-up' : 'chevron-down'}
+              size={14}
+              color={c.textMuted}
+            />
+          </Pressable>
+          {notaAbierta ? (
+            <View style={styles.notaInputOuter}>
+              <TextInput
+                style={styles.notaInput}
+                multiline
+                scrollEnabled
+                placeholder="Añade una nota para este ejercicio..."
+                placeholderTextColor={c.textMuted}
+                value={nota ?? ''}
+                onChangeText={onNotaChange}
+                textAlignVertical="top"
+              />
+            </View>
+          ) : null}
+        </>
+      ) : null}
 
       {esEntreno ? (
         <View style={styles.tableHead}>

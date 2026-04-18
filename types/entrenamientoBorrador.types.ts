@@ -17,4 +17,6 @@ export type BorradorEjercicioLinea = {
   nombre: string;
   musculo_primario: string;
   sets: BorradorSerieLinea[];
+  /** Solo entreno activo — no rutina; no precargar desde historial */
+  nota?: string;
 };

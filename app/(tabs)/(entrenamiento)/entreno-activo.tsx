@@ -69,6 +69,7 @@ function lineasAPersistido(lineas: BorradorEjercicioLinea[]): EntrenoEjercicioPe
     out.push({
       exercise_id: line.exerciseId,
       orden: ordenEj++,
+      notas: (line.nota ?? '').trim() || null,
       sets: setsComp.map((s, i) => ({
         numero_serie: i + 1,
         tipo_serie: tipoSerieUiADb(s.tipoUi),
@@ -397,6 +398,13 @@ export default function EntrenoActivoScreen() {
     setSheetAbierto(true);
   }, []);
 
+  const actualizarNotaLinea = useCallback(
+    (lineId: string, nota: string) => {
+      setLineas((prev) => prev.map((l) => (l.lineId === lineId ? { ...l, nota } : l)));
+    },
+    [setLineas],
+  );
+
   const crearPersonalizado = useCallback(
     async (nombre: string, musculo: string) => {
       if (!user?.id) {
@@ -603,6 +611,8 @@ export default function EntrenoActivoScreen() {
                 <EjercicioRutinaCard
                   key={line.lineId}
                   modo="entreno"
+                  nota={line.nota ?? ''}
+                  onNotaChange={(texto: string) => actualizarNotaLinea(line.lineId, texto)}
                   textoAnteriorSeries={textosAnteriorPorLineId.get(line.lineId)}
                   data={line}
                   onChange={(next) => actualizarLinea(line.lineId, next)}

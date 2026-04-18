@@ -14,11 +14,13 @@
  */
 
 import { View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { Tabs, usePathname } from 'expo-router';
 import { BottomTabBar, type BottomTabBarProps } from '@react-navigation/bottom-tabs';
 
 import { BarraEntrenoMinimizado } from '@/components/entrenamiento/BarraEntrenoMinimizado';
 import { useEntreno } from '@/context/EntrenoContext';
+import { useTheme } from '@/hooks/useTheme';
 
 function TabBarWithEntreno(props: BottomTabBarProps) {
   const { entrenoActivo } = useEntreno();
@@ -33,34 +35,72 @@ function TabBarWithEntreno(props: BottomTabBarProps) {
 }
 
 export default function TabsLayout() {
+  const { c } = useTheme();
+
   return (
     <Tabs
       tabBar={(props) => <TabBarWithEntreno {...props} />}
       screenOptions={{
         headerShown: false,
-        // TODO: personalizar colores con constantes/colores.ts
-        // TODO: añadir iconos SVG/Ionicons por tab
+        tabBarActiveTintColor: c.textDisplay,
+        tabBarInactiveTintColor: c.textMuted,
+        tabBarStyle: {
+          backgroundColor: c.background,
+          borderTopColor: c.border,
+          borderTopWidth: 1,
+        },
+        tabBarLabelStyle: {
+          fontFamily: 'SpaceMono_400Regular',
+          fontSize: 9,
+          letterSpacing: 0.5,
+          textTransform: 'uppercase',
+        },
       }}
     >
       <Tabs.Screen
         name="(nutricion)"
-        options={{ title: 'Nutrición' }}
+        options={{
+          title: 'Nutrición',
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? 'restaurant' : 'restaurant-outline'} size={24} color={color} />
+          ),
+        }}
       />
       <Tabs.Screen
         name="(entrenamiento)"
-        options={{ title: 'Entreno' }}
+        options={{
+          title: 'Entreno',
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? 'barbell' : 'barbell-outline'} size={24} color={color} />
+          ),
+        }}
       />
       <Tabs.Screen
         name="(progreso)"
-        options={{ title: 'Progreso' }}
+        options={{
+          title: 'Progreso',
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? 'stats-chart' : 'stats-chart-outline'} size={24} color={color} />
+          ),
+        }}
       />
       <Tabs.Screen
         name="(ia)"
-        options={{ title: 'IA' }}
+        options={{
+          title: 'IA',
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? 'sparkles' : 'sparkles-outline'} size={24} color={color} />
+          ),
+        }}
       />
       <Tabs.Screen
         name="(perfil)"
-        options={{ title: 'Perfil' }}
+        options={{
+          title: 'Perfil',
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? 'person' : 'person-outline'} size={24} color={color} />
+          ),
+        }}
       />
     </Tabs>
   );

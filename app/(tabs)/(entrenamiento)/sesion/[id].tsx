@@ -242,6 +242,21 @@ export default function DetalleSesionPantalla() {
           color: c.textSecondary,
           marginBottom: s.sm,
         },
+        ejNotaFila: {
+          flexDirection: 'row',
+          alignItems: 'flex-start',
+          gap: s.xs,
+          paddingVertical: s.xs,
+          marginBottom: s.xs,
+        },
+        ejNotaTxt: {
+          flex: 1,
+          minWidth: 0,
+          ...ts.caption,
+          fontFamily: f.mono,
+          color: c.textSecondary,
+          fontStyle: 'italic',
+        },
         tablaHead: {
           flexDirection: 'row',
           alignItems: 'center',
@@ -739,6 +754,12 @@ export default function DetalleSesionPantalla() {
                 <Text style={styles.ejTitulo}>{ej.nombre}</Text>
                 {ej.musculo_primario ? (
                   <Text style={styles.ejMusculo}>{ej.musculo_primario}</Text>
+                ) : null}
+                {ej.notas != null && ej.notas.trim() !== '' ? (
+                  <View style={styles.ejNotaFila}>
+                    <Ionicons name="document-text-outline" size={14} color={c.textSecondary} />
+                    <Text style={styles.ejNotaTxt}>{ej.notas.trim()}</Text>
+                  </View>
                 ) : null}
                 {setsHechas.length === 0 ? (
                   <Text style={styles.vacioEj}>Sin series registradas</Text>
