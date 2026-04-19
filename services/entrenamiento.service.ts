@@ -1299,3 +1299,61 @@ export async function toggleFavoritoRutina(rutinaId: string, esFavorita: boolean
     if (error) console.error('[toggleFavoritoRutina] delete', error.message);
   }
 }
+
+/**
+ * Renombra una rutina creada por el usuario. RLS + filtro `created_by` aseguran propiedad.
+ */
+export async function cambiarNombreRutina(rutinaId: string, nuevoNombre: string): Promise<void> {
+  const { data: auth, error: authErr } = await supabase.auth.getUser();
+  if (authErr || !auth.user?.id) {
+    console.error('[cambiarNombreRutina] auth', authErr?.message);
+    throw new Error('Debes iniciar sesión para cambiar el nombre de la rutina.');
+  }
+  const userId = auth.user.id;
+  const trimmed = nuevoNombre.trim();
+  if (!trimmed) {
+    throw new Error('El nombre no puede estar vacío.');
+  }
+
+  const { data, error } = await supabase
+    .from('routines')
+    .update({ nombre: trimmed, updated_at: new Date().toISOString() })
+    .eq('id', rutinaId)
+    .eq('created_by', userId)
+    .select('id');
+
+  if (error) {
+    console.error('[cambiarNombreRutina]', error.message);
+    throw new Error(error.message || 'No se pudo actualizar el nombre de la rutina.');
+  }
+  if (!data?.length) {
+    throw new Error('No se pudo actualizar la rutina o no tienes permiso.');
+  }
+}
+
+/**
+ * Elimina una rutina del usuario. Las sesiones con `routine_id` quedan con FK en NULL según esquema.
+ */
+export async function borrarRutina(rutinaId: string): Promise<void> {
+  const { data: auth, error: authErr } = await supabase.auth.getUser();
+  if (authErr || !auth.user?.id) {
+    console.error('[borrarRutina] auth', authErr?.message);
+    throw new Error('Debes iniciar sesión para borrar la rutina.');
+  }
+  const userId = auth.user.id;
+
+  const { data, error } = await supabase
+    .from('routines')
+    .delete()
+    .eq('id', rutinaId)
+    .eq('created_by', userId)
+    .select('id');
+
+  if (error) {
+    console.error('[borrarRutina]', error.message);
+    throw new Error(error.message || 'No se pudo borrar la rutina.');
+  }
+  if (!data?.length) {
+    throw new Error('No se pudo borrar la rutina o no tienes permiso.');
+  }
+}

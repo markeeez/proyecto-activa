@@ -81,6 +81,38 @@ export interface DistribucionMuscular {
   porcentaje: number;
 }
 
+/** Día agregado para gráficos de detalle de ejercicio (consulta-ejercicio). */
+export type EstadisticaEjercicioDia = {
+  fecha: string;
+  mayorPeso: number;
+  oneRepMax: number;
+  mejorVolumenSerie: number;
+  totalRepeticiones: number;
+};
+
+/** Records históricos de un ejercicio (consulta-ejercicio). */
+export type RecordsEjercicio = {
+  mayorPeso: number;
+  mejorVolumenSerie: number;
+  mejorSeriePesoKg: number;
+  mejorSerieReps: number;
+  mejorVolumenTotal: number;
+};
+
+export type SesionEjercicioHistorial = {
+  sessionId: string;
+  sessionNombre: string | null;
+  fecha: string;
+  horaInicio: string | null;
+  sets: {
+    numeroSerie: number;
+    tipoSerie: string;
+    pesoKg: number | null;
+    repeticiones: number | null;
+    tipoPeso: string;
+  }[];
+};
+
 /** Claves canónicas de grupo (orden fijo para UI). */
 const GRUPOS_MUSCULARES_ORDEN = ['PECHO', 'ESPALDA', 'PIERNAS', 'BRAZOS', 'HOMBRO', 'CORE'] as const;
 
@@ -713,7 +745,245 @@ export const progresoService = {
     out.sort((a, b) => b.porcentaje - a.porcentaje);
     return out;
   },
+
+  /**
+   * Series completadas de un ejercicio, agregadas por día (métricas en cliente).
+   */
+  async obtenerEstadisticasEjercicioDetalle(
+    exerciseId: string,
+    userId: string,
+    periodo: 'trimestre' | 'anio' | 'todo',
+  ): Promise<EstadisticaEjercicioDia[]> {
+    const fechaMin = fechaMinimaPeriodoEjercicioDetalle(periodo);
+    let q = supabase
+      .from('workout_sets')
+      .select(
+        'peso_kg, repeticiones, tipo_peso, workout_session_exercises!inner ( exercise_id, workout_sessions!inner ( user_id, fecha ) )',
+      )
+      .eq('completada', true)
+      .eq('workout_session_exercises.exercise_id', exerciseId)
+      .eq('workout_session_exercises.workout_sessions.user_id', userId);
+    if (fechaMin != null) {
+      q = q.gte('workout_session_exercises.workout_sessions.fecha', fechaMin);
+    }
+    const { data, error } = await q;
+    if (error) throw error;
+
+    type Agg = {
+      pesos: number[];
+      epleys: number[];
+      volSeries: number[];
+      totalReps: number;
+    };
+    const byDay = new Map<string, Agg>();
+
+    for (const row of data ?? []) {
+      const wse = (row as {
+        peso_kg?: unknown;
+        repeticiones?: unknown;
+        workout_session_exercises?: {
+          workout_sessions?: { fecha?: string };
+        };
+      }).workout_session_exercises;
+      const fecha = wse?.workout_sessions?.fecha;
+      if (!fecha) continue;
+
+      const pesoRaw = (row as { peso_kg?: unknown }).peso_kg;
+      const repsRaw = (row as { repeticiones?: unknown }).repeticiones;
+      const peso = pesoRaw != null && pesoRaw !== '' ? Number(pesoRaw) : null;
+      const reps = repsRaw != null && repsRaw !== '' ? Number(repsRaw) : null;
+
+      let agg = byDay.get(fecha);
+      if (!agg) {
+        agg = { pesos: [], epleys: [], volSeries: [], totalReps: 0 };
+        byDay.set(fecha, agg);
+      }
+
+      const r = reps != null && !Number.isNaN(reps) ? reps : 0;
+      agg.totalReps += r;
+
+      if (peso != null && !Number.isNaN(peso)) {
+        agg.pesos.push(peso);
+      }
+
+      const pEpley = peso != null && !Number.isNaN(peso) ? peso : 0;
+      if (reps != null && !Number.isNaN(reps)) {
+        agg.epleys.push(pEpley * (1 + reps / 30));
+      }
+
+      const pVol = peso != null && !Number.isNaN(peso) ? peso : 0;
+      agg.volSeries.push(pVol * r);
+    }
+
+    const out: EstadisticaEjercicioDia[] = [...byDay.entries()]
+      .map(([fecha, agg]) => {
+        const mayorPeso = agg.pesos.length ? Math.max(...agg.pesos) : 0;
+        const oneRepMax = agg.epleys.length ? Math.max(...agg.epleys) : 0;
+        const mejorVolumenSerie = agg.volSeries.length ? Math.max(...agg.volSeries) : 0;
+        return {
+          fecha,
+          mayorPeso,
+          oneRepMax,
+          mejorVolumenSerie,
+          totalRepeticiones: agg.totalReps,
+        };
+      })
+      .filter((row) => row.totalRepeticiones > 0 || row.mayorPeso > 0 || row.oneRepMax > 0 || row.mejorVolumenSerie > 0)
+      .sort((a, b) => a.fecha.localeCompare(b.fecha));
+
+    return out;
+  },
+
+  async obtenerRecordsEjercicio(exerciseId: string, userId: string): Promise<RecordsEjercicio> {
+    const { data, error } = await supabase
+      .from('workout_sets')
+      .select(
+        'peso_kg, repeticiones, workout_session_exercises!inner ( exercise_id, session_id, workout_sessions!inner ( user_id ) )',
+      )
+      .eq('completada', true)
+      .eq('workout_session_exercises.exercise_id', exerciseId)
+      .eq('workout_session_exercises.workout_sessions.user_id', userId);
+    if (error) throw error;
+
+    let mayorPeso = 0;
+    let mejorVolumenSerie = 0;
+    let mejorSeriePesoKg = 0;
+    let mejorSerieReps = 0;
+    const volPorSesion = new Map<string, number>();
+
+    for (const row of data ?? []) {
+      const wse = (row as {
+        peso_kg?: unknown;
+        repeticiones?: unknown;
+        workout_session_exercises?: { session_id?: string };
+      }).workout_session_exercises;
+      const sessionId = wse?.session_id;
+      const pesoRaw = (row as { peso_kg?: unknown }).peso_kg;
+      const repsRaw = (row as { repeticiones?: unknown }).repeticiones;
+      const peso = pesoRaw != null && pesoRaw !== '' ? Number(pesoRaw) : null;
+      const reps = repsRaw != null && repsRaw !== '' ? Number(repsRaw) : null;
+      const p = peso != null && !Number.isNaN(peso) ? peso : 0;
+      const r = reps != null && !Number.isNaN(reps) ? reps : 0;
+
+      if (peso != null && !Number.isNaN(peso)) {
+        mayorPeso = mayorPeso === 0 ? peso : Math.max(mayorPeso, peso);
+      }
+
+      const volSerie = p * r;
+      if (volSerie > mejorVolumenSerie) {
+        mejorVolumenSerie = volSerie;
+        mejorSeriePesoKg = p;
+        mejorSerieReps = r;
+      }
+
+      if (sessionId) {
+        volPorSesion.set(sessionId, (volPorSesion.get(sessionId) ?? 0) + volSerie);
+      }
+    }
+
+    let mejorVolumenTotal = 0;
+    for (const v of volPorSesion.values()) {
+      if (v > mejorVolumenTotal) mejorVolumenTotal = v;
+    }
+
+    return {
+      mayorPeso,
+      mejorVolumenSerie,
+      mejorSeriePesoKg,
+      mejorSerieReps,
+      mejorVolumenTotal,
+    };
+  },
+
+  async obtenerHistorialEjercicio(
+    exerciseId: string,
+    userId: string,
+  ): Promise<SesionEjercicioHistorial[]> {
+    const { data, error } = await supabase
+      .from('workout_sessions')
+      .select(
+        'id, nombre, fecha, hora_inicio, workout_session_exercises!inner ( exercise_id, workout_sets ( numero_serie, tipo_serie, peso_kg, repeticiones, tipo_peso, completada ) )',
+      )
+      .eq('user_id', userId)
+      .eq('workout_session_exercises.exercise_id', exerciseId);
+    if (error) throw error;
+
+    type WseRow = {
+      exercise_id?: string;
+      workout_sets?: {
+        numero_serie?: number;
+        tipo_serie?: string;
+        peso_kg?: unknown;
+        repeticiones?: unknown;
+        tipo_peso?: string;
+        completada?: boolean;
+      }[];
+    };
+
+    const sesiones: SesionEjercicioHistorial[] = [];
+
+    for (const sess of data ?? []) {
+      const sessionId = String((sess as { id?: string }).id ?? '');
+      const nombre = (sess as { nombre?: string | null }).nombre ?? null;
+      const fecha = String((sess as { fecha?: string }).fecha ?? '');
+      const horaInicio = (sess as { hora_inicio?: string | null }).hora_inicio ?? null;
+      const wseList = (sess as { workout_session_exercises?: WseRow | WseRow[] }).workout_session_exercises;
+      const list = Array.isArray(wseList) ? wseList : wseList != null ? [wseList] : [];
+
+      const setsFlat: SesionEjercicioHistorial['sets'] = [];
+      for (const wse of list) {
+        const sets = wse.workout_sets ?? [];
+        for (const st of sets) {
+          if (!st.completada) continue;
+          setsFlat.push({
+            numeroSerie: Number(st.numero_serie ?? 0),
+            tipoSerie: String(st.tipo_serie ?? 'lineal'),
+            pesoKg: st.peso_kg != null && st.peso_kg !== '' ? Number(st.peso_kg) : null,
+            repeticiones: st.repeticiones != null && st.repeticiones !== '' ? Number(st.repeticiones) : null,
+            tipoPeso: String(st.tipo_peso ?? 'kg'),
+          });
+        }
+      }
+
+      setsFlat.sort((a, b) => a.numeroSerie - b.numeroSerie);
+
+      if (setsFlat.length === 0) continue;
+
+      sesiones.push({
+        sessionId,
+        sessionNombre: nombre,
+        fecha,
+        horaInicio,
+        sets: setsFlat,
+      });
+    }
+
+    function cmpHora(a: string | null, b: string | null): number {
+      const sa = a ?? '';
+      const sb = b ?? '';
+      return sb.localeCompare(sa);
+    }
+
+    sesiones.sort((a, b) => {
+      const cf = b.fecha.localeCompare(a.fecha);
+      if (cf !== 0) return cf;
+      return cmpHora(a.horaInicio, b.horaInicio);
+    });
+
+    return sesiones;
+  },
 };
+
+function fechaMinimaPeriodoEjercicioDetalle(periodo: 'trimestre' | 'anio' | 'todo'): string | null {
+  if (periodo === 'todo') return null;
+  const d = new Date();
+  if (periodo === 'trimestre') {
+    d.setMonth(d.getMonth() - 3);
+  } else {
+    d.setFullYear(d.getFullYear() - 1);
+  }
+  return fechaIsoDesdeDate(d);
+}
 
 export function fechaInicioRangoProgreso(
   tipo: '3m' | '1y' | 'all',

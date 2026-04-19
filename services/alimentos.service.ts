@@ -19,6 +19,13 @@ import {
 } from '@/constants/config';
 import { libreTranslate } from '@/lib/libretranslate';
 import { supabase } from '@/lib/supabase';
+import {
+    normalizarTexto,
+    nombreContieneTodasLasPalabras,
+    palabrasBusqueda,
+    sanitizarFragmentoIlike,
+    elegirAnclajeBusqueda,
+} from '@/lib/texto';
 import type {
     Food,
     FoodSourceKind,
@@ -214,6 +221,75 @@ async function upsertGlobalFoodsViaEdge(
   return results;
 }
 
+function aplicarIlikeNombreAndFoods(q: any, palabras: string[]): any {
+  let out = q;
+  for (const w of palabras) {
+    const s = sanitizarFragmentoIlike(w);
+    if (!s) continue;
+    out = out.ilike('nombre', `%${s}%`);
+  }
+  return out;
+}
+
+/**
+ * Búsqueda por nombre en `foods`: palabras (AND) + tildes vía filtro en cliente.
+ * `aplicarPrefiltro` recibe la query base (`select('*')`) ya encadenada con eq/is/order si aplica.
+ */
+async function buscarFoodsPorTextoLibre(
+  texto: string,
+  limite: number,
+  aplicarPrefiltro: (q: any) => any,
+): Promise<Food[]> {
+  const term = texto.trim();
+  if (!term) return [];
+
+  const palabrasNorm = palabrasBusqueda(normalizarTexto(term))
+    .map(sanitizarFragmentoIlike)
+    .filter((w) => w.length > 0);
+  const palabrasSplit = palabrasBusqueda(term);
+  const palabrasRaw = palabrasSplit.map(sanitizarFragmentoIlike).filter((w) => w.length > 0);
+
+  if (palabrasNorm.length === 0) {
+    const { data, error } = await aplicarPrefiltro(supabase.from('foods').select('*'))
+      .ilike('nombre', `%${sanitizarFragmentoIlike(term)}%`)
+      .limit(limite);
+    if (error) throw error;
+    return (data ?? []) as Food[];
+  }
+
+  const busquedaRawEquivNorm =
+    palabrasRaw.length === palabrasNorm.length &&
+    palabrasRaw.every(
+      (_, i) => sanitizarFragmentoIlike(normalizarTexto(palabrasSplit[i] ?? '')) === palabrasNorm[i],
+    );
+
+  const ancla = elegirAnclajeBusqueda(palabrasNorm);
+  const anclaSafe = ancla ? sanitizarFragmentoIlike(ancla) : '';
+  const limiteAncla = Math.min(Math.max(limite * 8, 120), 800);
+
+  const ejecutar = async (words: string[], maxRows: number) => {
+    let qq = aplicarPrefiltro(supabase.from('foods').select('*'));
+    qq = aplicarIlikeNombreAndFoods(qq, words);
+    const { data, error } = await qq.limit(maxRows);
+    if (error) throw error;
+    return (data ?? []) as Food[];
+  };
+
+  const [rNorm, rRaw, rAncla] = await Promise.all([
+    ejecutar(palabrasNorm, limite),
+    !busquedaRawEquivNorm && palabrasRaw.length > 0 ? ejecutar(palabrasRaw, limite) : Promise.resolve([] as Food[]),
+    anclaSafe ? ejecutar([anclaSafe], limiteAncla) : Promise.resolve([] as Food[]),
+  ]);
+
+  const porId = new Map<string, Food>();
+  for (const f of [...rNorm, ...rRaw, ...rAncla]) {
+    porId.set(f.id, f);
+  }
+
+  const merged = [...porId.values()].filter((f) => nombreContieneTodasLasPalabras(f.nombre, palabrasNorm));
+  return merged.slice(0, limite);
+}
+
 /** Contexto de puntuación compartido entre tramos (generic / USDA / OFF / custom). */
 type SearchScoreCtx = {
   queryVariants: string[];
@@ -250,21 +326,21 @@ export const alimentosService = {
   },
 
   async obtenerAlimentosCreados(userId: string, query = ''): Promise<Food[]> {
-    let req = supabase
-      .from('foods')
-      .select('*')
-      .eq('created_by', userId)
-      .eq('is_custom', true)
-      .order('created_at', { ascending: false })
-      .limit(30);
-
-    if (query.trim()) {
-      req = req.ilike('nombre', `%${query.trim()}%`);
+    if (!query.trim()) {
+      const { data, error } = await supabase
+        .from('foods')
+        .select('*')
+        .eq('created_by', userId)
+        .eq('is_custom', true)
+        .order('created_at', { ascending: false })
+        .limit(30);
+      if (error) throw error;
+      return (data ?? []) as Food[];
     }
 
-    const { data, error } = await req;
-    if (error) throw error;
-    return (data ?? []) as Food[];
+    return buscarFoodsPorTextoLibre(query, 30, (q) =>
+      q.eq('created_by', userId).eq('is_custom', true).order('created_at', { ascending: false }),
+    );
   },
 
   /**
@@ -360,7 +436,6 @@ export const alimentosService = {
     const queryTokens = tokensForMatchingExpanded(normalizedQuery, termLimpio);
     const nTerm = normalizeText(termLimpio);
     const singleTokenQuery = nTerm.length > 0 && !nTerm.includes(' ');
-    const patronLocal = `%${termLimpio}%`;
 
     let basicFoods: Food[] = [];
     if (INCLUIR_BASICOS_EN_BUSQUEDA) {
@@ -374,29 +449,22 @@ export const alimentosService = {
 
     let genericBd: Food[] = [];
     try {
-      const { data } = await supabase
-        .from('foods')
-        .select('*')
-        .eq('api_source', GENERIC_DB_API_SOURCE)
-        .ilike('nombre', patronLocal)
-        .eq('is_custom', false)
-        .is('created_by', null)
-        .limit(80);
-      genericBd = (data ?? []) as Food[];
+      genericBd = await buscarFoodsPorTextoLibre(termLimpio, 80, (q) =>
+        q.eq('api_source', GENERIC_DB_API_SOURCE).eq('is_custom', false).is('created_by', null),
+      );
     } catch {
       genericBd = [];
     }
 
     let personalizados: Food[] = [];
     if (userId) {
-      const { data } = await supabase
-        .from('foods')
-        .select('*')
-        .ilike('nombre', patronLocal)
-        .eq('is_custom', true)
-        .eq('created_by', userId)
-        .limit(12);
-      personalizados = (data ?? []) as Food[];
+      try {
+        personalizados = await buscarFoodsPorTextoLibre(termLimpio, 12, (q) =>
+          q.eq('is_custom', true).eq('created_by', userId),
+        );
+      } catch {
+        personalizados = [];
+      }
     }
 
     let usdaPartials: Partial<Food>[] = [];

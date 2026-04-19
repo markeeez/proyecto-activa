@@ -4,6 +4,13 @@
  * Búsqueda en tabla local `exercises` (Supabase).
  */
 
+import {
+  normalizarTexto,
+  nombreContieneTodasLasPalabras,
+  palabrasBusqueda,
+  sanitizarFragmentoIlike,
+  elegirAnclajeBusqueda,
+} from '@/lib/texto';
 import { supabase } from '@/lib/supabase';
 import type { CategoriaEjercicio, Exercise } from '@/types/database.types';
 
@@ -24,6 +31,23 @@ export type BuscarEjerciciosParams = {
 function norm(s: string | null | undefined): string | null {
   const t = s?.trim();
   return t ? t : null;
+}
+
+/** Palabras de búsqueda normalizadas (sin comodines) para AND en cliente. */
+function tokensNormBusqueda(texto: string): string[] {
+  return palabrasBusqueda(normalizarTexto(texto))
+    .map(sanitizarFragmentoIlike)
+    .filter((w) => w.length > 0);
+}
+
+function aplicarIlikeNombreAnd(q: any, palabras: string[]): any {
+  let out = q;
+  for (const w of palabras) {
+    const s = sanitizarFragmentoIlike(w);
+    if (!s) continue;
+    out = out.ilike('nombre', `%${s}%`);
+  }
+  return out;
 }
 
 export const ejerciciosService = {
@@ -50,23 +74,80 @@ export const ejerciciosService = {
       q = q.in('id', ids);
     }
 
-    if (texto) {
-      q = q.ilike('nombre', `%${texto}%`);
-    }
     if (musculo) {
       q = q.eq('musculo_primario', musculo);
     }
 
-    q = q.order('nombre').limit(limite);
+    let rows: Exercise[];
 
-    const { data, error } = await q;
+    if (!texto) {
+      const { data, error } = await q.order('nombre').limit(limite);
+      if (error) {
+        console.error('[ejerciciosService.buscarEjercicios]', error.message);
+        return [];
+      }
+      rows = (data ?? []) as Exercise[];
+    } else {
+      const palabrasNorm = tokensNormBusqueda(texto);
+      const palabrasSplit = palabrasBusqueda(texto);
+      const palabrasRaw = palabrasSplit.map(sanitizarFragmentoIlike).filter((w) => w.length > 0);
 
-    if (error) {
-      console.error('[ejerciciosService.buscarEjercicios]', error.message);
-      return [];
+      if (palabrasNorm.length === 0) {
+        const { data, error } = await q.order('nombre').limit(limite);
+        if (error) {
+          console.error('[ejerciciosService.buscarEjercicios]', error.message);
+          return [];
+        }
+        rows = (data ?? []) as Exercise[];
+      } else {
+        const busquedaRawEquivNorm =
+          palabrasRaw.length === palabrasNorm.length &&
+          palabrasRaw.every(
+            (_, i) => sanitizarFragmentoIlike(normalizarTexto(palabrasSplit[i] ?? '')) === palabrasNorm[i],
+          );
+
+        const ancla = elegirAnclajeBusqueda(palabrasNorm);
+        const anclaSafe = ancla ? sanitizarFragmentoIlike(ancla) : '';
+        const limiteAncla = Math.min(Math.max(limite * 8, 120), 800);
+
+        const ejecutar = async (words: string[], maxRows: number) => {
+          let qq = supabase.from('exercises').select('*');
+          if (modoLista === 'creados') {
+            if (!userId) return [] as Exercise[];
+            qq = qq.eq('is_custom', true).eq('created_by', userId);
+          } else if (modoLista === 'favoritos') {
+            if (!userId) return [];
+            let ids = params.idsFavoritos;
+            if (ids === undefined) ids = await this.obtenerEjerciciosFavoritos(userId);
+            if (ids.length === 0) return [];
+            qq = qq.in('id', ids);
+          }
+          if (musculo) qq = qq.eq('musculo_primario', musculo);
+          qq = aplicarIlikeNombreAnd(qq, words);
+          const { data, error } = await qq.order('nombre').limit(maxRows);
+          if (error) {
+            console.error('[ejerciciosService.buscarEjercicios]', error.message);
+            return [];
+          }
+          return (data ?? []) as Exercise[];
+        };
+
+        const [rNorm, rRaw, rAncla] = await Promise.all([
+          ejecutar(palabrasNorm, limite),
+          !busquedaRawEquivNorm && palabrasRaw.length > 0 ? ejecutar(palabrasRaw, limite) : Promise.resolve([] as Exercise[]),
+          anclaSafe ? ejecutar([anclaSafe], limiteAncla) : Promise.resolve([] as Exercise[]),
+        ]);
+
+        const porId = new Map<string, Exercise>();
+        for (const ex of [...rNorm, ...rRaw, ...rAncla]) {
+          porId.set(ex.id, ex);
+        }
+
+        rows = [...porId.values()].filter((ex) => nombreContieneTodasLasPalabras(ex.nombre, palabrasNorm));
+        rows.sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+        rows = rows.slice(0, limite);
+      }
     }
-
-    let rows = (data ?? []) as Exercise[];
 
     if (equip) {
       rows = rows.filter((r) => (r.equipamiento ?? '').trim() === equip);

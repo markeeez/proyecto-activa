@@ -18,7 +18,12 @@ import { useRouter } from 'expo-router';
 import { useEntreno } from '@/context/EntrenoContext';
 import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from '@/hooks/useTheme';
-import { entrenamientoService, type RutinaListaVista } from '@/services/entrenamiento.service';
+import {
+  borrarRutina,
+  cambiarNombreRutina,
+  entrenamientoService,
+  type RutinaListaVista,
+} from '@/services/entrenamiento.service';
 import type { Theme } from '@/constants/theme';
 
 type FiltroRutinas = 'mis' | 'favoritos';
@@ -125,12 +130,15 @@ function makeStyles(c: Theme, f: ReturnType<typeof useTheme>['f'], ts: ReturnTyp
       paddingBottom: s.xs,
       position: 'relative',
     },
-    favHit: {
+    actionHit: {
       position: 'absolute',
       top: s.xs,
       right: s.xs,
       zIndex: 2,
-      padding: s.xs,
+      width: 44,
+      height: 44,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     cardTitle: {
       ...ts.body,
@@ -246,6 +254,185 @@ function makeStyles(c: Theme, f: ReturnType<typeof useTheme>['f'], ts: ReturnTyp
     startBtnTextMuted: {
       color: c.textMuted,
     },
+    renameModalOverlay: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.5)',
+      justifyContent: 'center',
+      paddingHorizontal: s.lg,
+    },
+    renameModalCard: {
+      backgroundColor: c.surface,
+      borderRadius: 12,
+      padding: s.md,
+      borderWidth: 1,
+      borderColor: c.borderVisible,
+    },
+    renameModalTitle: {
+      fontSize: 11,
+      fontFamily: f.mono,
+      color: c.textSecondary,
+      textTransform: 'uppercase',
+      letterSpacing: 0.6,
+      marginBottom: s.sm,
+    },
+    renameModalInput: {
+      ...ts.body,
+      fontFamily: f.sans,
+      color: c.textDisplay,
+      borderBottomWidth: 1,
+      borderBottomColor: c.borderVisible,
+      paddingVertical: s.xs,
+      marginBottom: s.md,
+    },
+    renameModalRow: {
+      flexDirection: 'row',
+      justifyContent: 'flex-end',
+      gap: s.sm,
+    },
+    renameBtnGhost: {
+      paddingVertical: s.sm,
+      paddingHorizontal: s.md,
+      borderRadius: r.technical,
+      borderWidth: 1,
+      borderColor: c.borderVisible,
+      backgroundColor: 'transparent',
+    },
+    renameBtnGhostTxt: {
+      ...ts.bodySm,
+      fontFamily: f.sans,
+      color: c.textDisplay,
+    },
+    renameBtnPrimary: {
+      paddingVertical: s.sm,
+      paddingHorizontal: s.md,
+      borderRadius: r.technical,
+      backgroundColor: c.primary,
+      borderWidth: 1,
+      borderColor: c.primary,
+    },
+    renameBtnPrimaryTxt: {
+      ...ts.bodySm,
+      fontFamily: f.sansMedium,
+      color: c.textOnPrimary,
+    },
+    dsModalOverlay: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.5)',
+      justifyContent: 'center',
+      paddingHorizontal: s.lg,
+    },
+    dsModalCard: {
+      backgroundColor: c.surface,
+      borderRadius: 12,
+      padding: s.md,
+      borderWidth: 1,
+      borderColor: c.borderVisible,
+    },
+    menuModalTitle: {
+      ...ts.body,
+      fontFamily: f.sansMedium,
+      color: c.textDisplay,
+      marginBottom: s.md,
+    },
+    menuOption: {
+      paddingVertical: s.md,
+      alignSelf: 'stretch',
+    },
+    menuOptionTxt: {
+      ...ts.body,
+      fontFamily: f.sans,
+      color: c.textDisplay,
+      textAlign: 'left',
+    },
+    menuOptionDestructiveTxt: {
+      ...ts.body,
+      fontFamily: f.sans,
+      color: c.danger,
+      textAlign: 'left',
+    },
+    menuSep: {
+      height: StyleSheet.hairlineWidth,
+      backgroundColor: c.border,
+      alignSelf: 'stretch',
+    },
+    menuCancel: {
+      marginTop: s.sm,
+      paddingVertical: s.sm,
+      alignSelf: 'stretch',
+      alignItems: 'center',
+    },
+    menuCancelTxt: {
+      fontSize: 11,
+      fontFamily: f.mono,
+      color: c.textSecondary,
+      textTransform: 'uppercase',
+      letterSpacing: 0.5,
+    },
+    borrarModalTitle: {
+      fontSize: 11,
+      fontFamily: f.mono,
+      color: c.textSecondary,
+      textTransform: 'uppercase',
+      letterSpacing: 0.6,
+      marginBottom: s.xs,
+    },
+    borrarModalBody: {
+      ...ts.bodySm,
+      fontFamily: f.sans,
+      color: c.text,
+      marginBottom: s.lg,
+    },
+    borrarModalRow: {
+      flexDirection: 'row',
+      gap: s.sm,
+      alignItems: 'stretch',
+    },
+    borrarBtnSecondary: {
+      flex: 1,
+      paddingVertical: s.sm,
+      paddingHorizontal: s.md,
+      borderRadius: r.pill,
+      borderWidth: 1,
+      borderColor: c.borderVisible,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    borrarBtnSecondaryTxt: {
+      ...ts.bodySm,
+      fontFamily: f.sansMedium,
+      color: c.text,
+    },
+    borrarBtnDestructive: {
+      flex: 1,
+      paddingVertical: s.sm,
+      paddingHorizontal: s.md,
+      borderRadius: r.pill,
+      borderWidth: 1,
+      borderColor: c.danger,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    borrarBtnDestructiveTxt: {
+      ...ts.bodySm,
+      fontFamily: f.sansMedium,
+      color: c.danger,
+    },
+    errorModalBody: {
+      ...ts.bodySm,
+      fontFamily: f.sans,
+      color: c.text,
+      marginBottom: s.md,
+    },
+    errorModalOk: {
+      alignSelf: 'flex-end',
+      paddingVertical: s.sm,
+      paddingHorizontal: s.md,
+    },
+    errorModalOkTxt: {
+      ...ts.bodySm,
+      fontFamily: f.sansMedium,
+      color: c.primary,
+    },
   });
 }
 
@@ -268,6 +455,25 @@ export function RutinasListadoTab() {
   const [lista, setLista] = useState<RutinaListaVista[]>([]);
   const [favIds, setFavIds] = useState<Set<string>>(new Set());
   const [cargando, setCargando] = useState(false);
+
+  const [modalMenuVisible, setModalMenuVisible] = useState(false);
+  const [modalBorrarVisible, setModalBorrarVisible] = useState(false);
+  const [modalNombreVisible, setModalNombreVisible] = useState(false);
+  const [modalErrorVisible, setModalErrorVisible] = useState(false);
+  const [errorModalMensaje, setErrorModalMensaje] = useState('');
+  const [rutinaSeleccionada, setRutinaSeleccionada] = useState<RutinaListaVista | null>(null);
+  const [textoRenombrarDraft, setTextoRenombrarDraft] = useState('');
+  const [guardandoNombre, setGuardandoNombre] = useState(false);
+  const [borrandoRutina, setBorrandoRutina] = useState(false);
+
+  const listaRef = useRef<RutinaListaVista[]>([]);
+  const favIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    listaRef.current = lista;
+  }, [lista]);
+  useEffect(() => {
+    favIdsRef.current = favIds;
+  }, [favIds]);
 
   const cargar = useCallback(async () => {
     if (!user?.id) {
@@ -365,6 +571,110 @@ export function RutinasListadoTab() {
     [hayEntrenoActivo, iniciarDesdeRutina, router],
   );
 
+  const mostrarErrorModal = useCallback((mensaje: string) => {
+    setErrorModalMensaje(mensaje);
+    setModalErrorVisible(true);
+  }, []);
+
+  const cerrarErrorModal = useCallback(() => {
+    setModalErrorVisible(false);
+    setErrorModalMensaje('');
+  }, []);
+
+  const ejecutarCambiarNombre = useCallback(
+    async (rut: RutinaListaVista, nuevoNombre: string): Promise<boolean> => {
+      const snapshot = listaRef.current.map((r) => ({ ...r, ejercicios: [...r.ejercicios] }));
+      setLista((prev) => prev.map((r) => (r.id === rut.id ? { ...r, nombre: nuevoNombre } : r)));
+      try {
+        await cambiarNombreRutina(rut.id, nuevoNombre);
+        return true;
+      } catch (e) {
+        setLista(snapshot);
+        mostrarErrorModal(e instanceof Error ? e.message : 'No se pudo cambiar el nombre.');
+        return false;
+      }
+    },
+    [mostrarErrorModal],
+  );
+
+  const cerrarModalNombre = useCallback(() => {
+    setModalNombreVisible(false);
+    setTextoRenombrarDraft('');
+    setGuardandoNombre(false);
+    setRutinaSeleccionada(null);
+  }, []);
+
+  const guardarNombreRutina = useCallback(async () => {
+    const rut = rutinaSeleccionada;
+    const v = textoRenombrarDraft.trim();
+    if (!rut || !v) return;
+    setGuardandoNombre(true);
+    try {
+      const ok = await ejecutarCambiarNombre(rut, v);
+      if (ok) cerrarModalNombre();
+    } finally {
+      setGuardandoNombre(false);
+    }
+  }, [textoRenombrarDraft, rutinaSeleccionada, ejecutarCambiarNombre, cerrarModalNombre]);
+
+  const cerrarMenuModal = useCallback(() => {
+    setModalMenuVisible(false);
+    setRutinaSeleccionada(null);
+  }, []);
+
+  const onMenuCambiarNombre = useCallback(() => {
+    const r = rutinaSeleccionada;
+    if (!r) return;
+    setModalMenuVisible(false);
+    setTextoRenombrarDraft(r.nombre);
+    setModalNombreVisible(true);
+  }, [rutinaSeleccionada]);
+
+  const onMenuBorrarRutina = useCallback(() => {
+    setModalMenuVisible(false);
+    setModalBorrarVisible(true);
+  }, []);
+
+  const cerrarModalBorrar = useCallback(() => {
+    setModalBorrarVisible(false);
+    setRutinaSeleccionada(null);
+  }, []);
+
+  const ejecutarBorrarRutina = useCallback(
+    async (rut: RutinaListaVista): Promise<boolean> => {
+      const snapshotLista = listaRef.current.map((r) => ({ ...r, ejercicios: [...r.ejercicios] }));
+      const snapshotFav = new Set(favIdsRef.current);
+      setLista((prev) => prev.filter((x) => x.id !== rut.id));
+      setFavIds((prev) => {
+        const n = new Set(prev);
+        n.delete(rut.id);
+        return n;
+      });
+      try {
+        await borrarRutina(rut.id);
+        return true;
+      } catch (e) {
+        setLista(snapshotLista);
+        setFavIds(snapshotFav);
+        mostrarErrorModal(e instanceof Error ? e.message : 'No se pudo borrar la rutina.');
+        return false;
+      }
+    },
+    [mostrarErrorModal],
+  );
+
+  const confirmarBorrarRutina = useCallback(async () => {
+    const rut = rutinaSeleccionada;
+    if (!rut) return;
+    setBorrandoRutina(true);
+    try {
+      const ok = await ejecutarBorrarRutina(rut);
+      if (ok) cerrarModalBorrar();
+    } finally {
+      setBorrandoRutina(false);
+    }
+  }, [rutinaSeleccionada, ejecutarBorrarRutina, cerrarModalBorrar]);
+
   return (
     <View style={styles.root}>
       <Pressable
@@ -433,15 +743,28 @@ export function RutinasListadoTab() {
               const esFav = favIds.has(rut.id);
               return (
                 <View key={rut.id} style={styles.card}>
-                  <Pressable
-                    style={styles.favHit}
-                    onPress={() => onToggleFavorito(rut.id)}
-                    hitSlop={8}
-                    accessibilityRole="button"
-                    accessibilityLabel={esFav ? 'Quitar de favoritos' : 'Añadir a favoritos'}
-                  >
-                    <Ionicons name={esFav ? 'star' : 'star-outline'} size={22} color={esFav ? c.warning : c.textMuted} />
-                  </Pressable>
+                  {filtro === 'favoritos' ? (
+                    <Pressable
+                      style={styles.actionHit}
+                      onPress={() => onToggleFavorito(rut.id)}
+                      accessibilityRole="button"
+                      accessibilityLabel={esFav ? 'Quitar de favoritos' : 'Añadir a favoritos'}
+                    >
+                      <Ionicons name={esFav ? 'star' : 'star-outline'} size={22} color={esFav ? c.warning : c.textMuted} />
+                    </Pressable>
+                  ) : (
+                    <Pressable
+                      style={styles.actionHit}
+                      onPress={() => {
+                        setRutinaSeleccionada(rut);
+                        setModalMenuVisible(true);
+                      }}
+                      accessibilityRole="button"
+                      accessibilityLabel="Opciones de rutina"
+                    >
+                      <Ionicons name="ellipsis-horizontal" size={22} color={c.textMuted} />
+                    </Pressable>
+                  )}
                   <Pressable
                     onPress={() =>
                       router.push(`/(tabs)/(entrenamiento)/rutina/${rut.id}` as Parameters<typeof router.push>[0])
@@ -480,6 +803,108 @@ export function RutinasListadoTab() {
           )}
         </View>
       )}
+
+      <Modal visible={modalMenuVisible && rutinaSeleccionada != null} transparent animationType="fade" onRequestClose={cerrarMenuModal}>
+        <Pressable style={styles.dsModalOverlay} onPress={cerrarMenuModal}>
+          <Pressable style={styles.dsModalCard} onPress={(e) => e.stopPropagation()}>
+            {rutinaSeleccionada ? (
+              <>
+                <Text style={styles.menuModalTitle} numberOfLines={2}>
+                  {rutinaSeleccionada.nombre}
+                </Text>
+                <Pressable style={styles.menuOption} onPress={onMenuCambiarNombre} accessibilityRole="button">
+                  <Text style={styles.menuOptionTxt}>Cambiar nombre</Text>
+                </Pressable>
+                <View style={styles.menuSep} />
+                <Pressable style={styles.menuOption} onPress={onMenuBorrarRutina} accessibilityRole="button">
+                  <Text style={styles.menuOptionDestructiveTxt}>Borrar rutina</Text>
+                </Pressable>
+                <Pressable style={styles.menuCancel} onPress={cerrarMenuModal} accessibilityRole="button">
+                  <Text style={styles.menuCancelTxt}>Cancelar</Text>
+                </Pressable>
+              </>
+            ) : null}
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal visible={modalBorrarVisible && rutinaSeleccionada != null} transparent animationType="fade" onRequestClose={cerrarModalBorrar}>
+        <Pressable style={styles.dsModalOverlay} onPress={cerrarModalBorrar}>
+          <Pressable style={styles.dsModalCard} onPress={(e) => e.stopPropagation()}>
+            {rutinaSeleccionada ? (
+              <>
+                <Text style={styles.borrarModalTitle}>BORRAR RUTINA</Text>
+                <Text style={styles.borrarModalBody}>
+                  {`¿Seguro que quieres borrar «${rutinaSeleccionada.nombre}»? Esta acción no se puede deshacer.`}
+                </Text>
+                <View style={styles.borrarModalRow}>
+                  <Pressable style={styles.borrarBtnSecondary} onPress={cerrarModalBorrar} accessibilityRole="button">
+                    <Text style={styles.borrarBtnSecondaryTxt}>Cancelar</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.borrarBtnDestructive, borrandoRutina && { opacity: 0.6 }]}
+                    onPress={() => void confirmarBorrarRutina()}
+                    disabled={borrandoRutina}
+                    accessibilityRole="button"
+                  >
+                    {borrandoRutina ? (
+                      <ActivityIndicator color={c.danger} size="small" />
+                    ) : (
+                      <Text style={styles.borrarBtnDestructiveTxt}>Borrar</Text>
+                    )}
+                  </Pressable>
+                </View>
+              </>
+            ) : null}
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal visible={modalNombreVisible && rutinaSeleccionada != null} transparent animationType="fade" onRequestClose={cerrarModalNombre}>
+        <Pressable style={styles.renameModalOverlay} onPress={cerrarModalNombre}>
+          <Pressable style={styles.renameModalCard} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.renameModalTitle}>CAMBIAR NOMBRE</Text>
+            <TextInput
+              style={styles.renameModalInput}
+              value={textoRenombrarDraft}
+              onChangeText={setTextoRenombrarDraft}
+              placeholder="Nombre de la rutina"
+              placeholderTextColor={c.textMuted}
+              autoFocus
+              autoCorrect={false}
+            />
+            <View style={styles.renameModalRow}>
+              <Pressable style={styles.renameBtnGhost} onPress={cerrarModalNombre} accessibilityRole="button">
+                <Text style={styles.renameBtnGhostTxt}>Cancelar</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.renameBtnPrimary, (guardandoNombre || textoRenombrarDraft.trim() === '') && { opacity: 0.5 }]}
+                onPress={() => void guardarNombreRutina()}
+                disabled={guardandoNombre || textoRenombrarDraft.trim() === ''}
+                accessibilityRole="button"
+              >
+                {guardandoNombre ? (
+                  <ActivityIndicator color={c.textOnPrimary} size="small" />
+                ) : (
+                  <Text style={styles.renameBtnPrimaryTxt}>Guardar</Text>
+                )}
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal visible={modalErrorVisible} transparent animationType="fade" onRequestClose={cerrarErrorModal}>
+        <Pressable style={styles.dsModalOverlay} onPress={cerrarErrorModal}>
+          <Pressable style={styles.dsModalCard} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.renameModalTitle}>ERROR</Text>
+            <Text style={styles.errorModalBody}>{errorModalMensaje}</Text>
+            <Pressable style={styles.errorModalOk} onPress={cerrarErrorModal} accessibilityRole="button">
+              <Text style={styles.errorModalOkTxt}>OK</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       <Modal visible={modalEntrenoVacio} transparent animationType="fade" onRequestClose={cerrarModalEntrenoVacio}>
         <View style={styles.modalOverlay}>
