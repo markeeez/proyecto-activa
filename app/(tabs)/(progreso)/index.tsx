@@ -902,7 +902,7 @@ function makeStyles(
       paddingHorizontal: s.md,
       paddingBottom: s.md,
       gap: s.xs,
-      justifyContent: 'space-between',
+      justifyContent: 'flex-start',
     },
     headerBlock: {
       flexShrink: 0,
@@ -946,7 +946,7 @@ function makeStyles(
       flex: 1,
       minHeight: 0,
       justifyContent: 'flex-start',
-      paddingTop: s.md,
+      paddingTop: s.sm,
       gap: s.sm,
     },
     planCargando: {

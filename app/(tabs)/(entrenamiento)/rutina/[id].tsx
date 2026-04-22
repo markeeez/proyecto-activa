@@ -3,6 +3,7 @@
  */
 
 import { Ionicons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -320,17 +321,42 @@ function makeStyles(c: Theme, f: ReturnType<typeof useTheme>['f'], ts: ReturnTyp
       padding: s.md,
       marginBottom: s.md,
     },
+    ejRowHead: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: s.sm,
+      marginBottom: s.sm,
+    },
+    ejImg48: {
+      width: 48,
+      height: 48,
+      borderRadius: 8,
+    },
+    ejImgPh: {
+      width: 48,
+      height: 48,
+      borderRadius: 8,
+      backgroundColor: c.surface,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    ejCabTextCol: {
+      flex: 1,
+      minWidth: 0,
+    },
     ejTitulo: {
       ...ts.body,
       fontFamily: f.sansMedium,
       color: c.textDisplay,
       marginBottom: 2,
     },
+    ejNombreLink: {
+      color: c.primary,
+    },
     ejMusculo: {
       ...ts.caption,
       fontFamily: f.mono,
       color: c.textSecondary,
-      marginBottom: s.sm,
     },
     tablaHead: {
       flexDirection: 'row',
@@ -1045,10 +1071,40 @@ export default function RutinaDetallePantalla() {
                     <View key={ej.id}>
                       {i > 0 ? <View style={styles.sep} /> : null}
                       <View style={styles.cardEj}>
-                        <Text style={styles.ejTitulo}>{ej.exercises.nombre}</Text>
-                        {ej.exercises.musculo_primario ? (
-                          <Text style={styles.ejMusculo}>{ej.exercises.musculo_primario}</Text>
-                        ) : null}
+                        <View style={styles.ejRowHead}>
+                          {ej.exercises.foto_url != null && ej.exercises.foto_url.trim() !== '' ? (
+                            <Image
+                              source={{ uri: ej.exercises.foto_url.trim() }}
+                              style={styles.ejImg48}
+                              contentFit="cover"
+                              cachePolicy="memory-disk"
+                              autoplay={false}
+                              recyclingKey={ej.exercise_id}
+                            />
+                          ) : (
+                            <View style={styles.ejImgPh}>
+                              <Ionicons name="barbell-outline" size={20} color={c.textMuted} />
+                            </View>
+                          )}
+                          <View style={styles.ejCabTextCol}>
+                            <Pressable
+                              onPress={() =>
+                                router.push({
+                                  pathname: '/(tabs)/(entrenamiento)/consulta-ejercicio',
+                                  params: { id: ej.exercise_id },
+                                })
+                              }
+                              hitSlop={4}
+                              accessibilityRole="button"
+                              accessibilityLabel={`Ver ficha de ${ej.exercises.nombre}`}
+                            >
+                              <Text style={[styles.ejTitulo, styles.ejNombreLink]}>{ej.exercises.nombre}</Text>
+                            </Pressable>
+                            {ej.exercises.musculo_primario ? (
+                              <Text style={styles.ejMusculo}>{ej.exercises.musculo_primario}</Text>
+                            ) : null}
+                          </View>
+                        </View>
                         {ej.routine_sets.length === 0 ? (
                           <Text style={[styles.emptyText, { textAlign: 'left', marginTop: s.xs }]}>Sin series</Text>
                         ) : (

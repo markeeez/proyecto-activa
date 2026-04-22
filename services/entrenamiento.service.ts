@@ -35,7 +35,7 @@ export type DetalleRutinaEjercicio = {
   exercise_id: string;
   orden: number;
   notas: string | null;
-  exercises: { nombre: string; musculo_primario: string };
+  exercises: { nombre: string; musculo_primario: string; foto_url: string | null };
   routine_sets: DetalleRutinaSet[];
 };
 
@@ -121,6 +121,23 @@ export type SesionResumen = {
   hora_fin: string | null;
 };
 
+export type EntrenoResumen = {
+  id: string;
+  nombre: string | null;
+  rutinaNombre: string | null;
+  fecha: string;
+  horaInicio: string | null;
+  horaFin: string | null;
+  ejercicios: {
+    ejercicioId: string;
+    nombre: string;
+    fotoUrl: string | null;
+    numSeries: number;
+  }[];
+  totalEjercicios: number;
+  volumenKg: number;
+};
+
 export type DetalleSesionSet = {
   numero_serie: number;
   tipo_serie: TipoSerie;
@@ -132,8 +149,10 @@ export type DetalleSesionSet = {
 
 export type DetalleSesionEjercicio = {
   id: string;
+  exercise_id: string;
   nombre: string;
   musculo_primario: string;
+  foto_url: string | null;
   notas: string | null;
   sets: DetalleSesionSet[];
 };
@@ -194,12 +213,15 @@ type DetalleSesionRow = {
   fecha: string;
   hora_inicio: string | null;
   hora_fin: string | null;
-  workout_session_exercises: {
+    workout_session_exercises: {
     id: string;
     orden: number;
     exercise_id: string;
     notas: string | null;
-    exercises: { nombre: string; musculo_primario: string } | { nombre: string; musculo_primario: string }[] | null;
+    exercises:
+      | { nombre: string; musculo_primario: string; foto_url: string | null }
+      | { nombre: string; musculo_primario: string; foto_url: string | null }[]
+      | null;
     workout_sets: {
       numero_serie: number;
       tipo_serie: TipoSerie;
@@ -611,7 +633,7 @@ export const entrenamientoService = {
         `id, nombre,
         routine_exercises (
           id, exercise_id, orden, notas,
-          exercises ( nombre, musculo_primario ),
+          exercises ( nombre, musculo_primario, foto_url ),
           routine_sets ( numero_serie, tipo_serie, reps, peso_kg, tipo_peso )
         )`,
       )
@@ -629,7 +651,10 @@ export const entrenamientoService = {
       exercise_id: string;
       orden: number;
       notas: string | null;
-      exercises: { nombre: string; musculo_primario: string } | { nombre: string; musculo_primario: string }[] | null;
+      exercises:
+        | { nombre: string; musculo_primario: string; foto_url: string | null }
+        | { nombre: string; musculo_primario: string; foto_url: string | null }[]
+        | null;
       routine_sets:
         | {
             numero_serie: number;
@@ -666,6 +691,7 @@ export const entrenamientoService = {
         exercises: {
           nombre: exOne?.nombre?.trim() ?? 'Ejercicio',
           musculo_primario: exOne?.musculo_primario?.trim() ?? '',
+          foto_url: exOne?.foto_url != null && String(exOne.foto_url).trim() !== '' ? String(exOne.foto_url).trim() : null,
         },
         routine_sets,
       };
@@ -1069,7 +1095,7 @@ export const entrenamientoService = {
         `id, nombre, fecha, hora_inicio, hora_fin,
         workout_session_exercises (
           id, orden, exercise_id, notas,
-          exercises ( nombre, musculo_primario ),
+          exercises ( nombre, musculo_primario, foto_url ),
           workout_sets ( numero_serie, tipo_serie, peso_kg, repeticiones, tipo_peso, completada )
         )`,
       )
@@ -1090,6 +1116,9 @@ export const entrenamientoService = {
       const exOne = Array.isArray(exRaw) ? exRaw[0] : exRaw;
       const nombre = exOne?.nombre?.trim() ?? 'Ejercicio';
       const musculo = exOne?.musculo_primario?.trim() ?? '';
+      const fotoRaw = exOne?.foto_url;
+      const foto_url =
+        fotoRaw != null && String(fotoRaw).trim() !== '' ? String(fotoRaw).trim() : null;
       const setsRaw = wse.workout_sets ?? [];
       const sets: DetalleSesionSet[] = setsRaw
         .slice()
@@ -1104,8 +1133,10 @@ export const entrenamientoService = {
         }));
       return {
         id: wse.id,
+        exercise_id: wse.exercise_id,
         nombre,
         musculo_primario: musculo,
+        foto_url,
         notas: wse.notas ?? null,
         sets,
       };
@@ -1185,6 +1216,134 @@ export const entrenamientoService = {
     });
 
     return { sessionId, ejercicios };
+  },
+
+  async obtenerEntrenosPaginados(userId: string, pagina: number, porPagina: number): Promise<EntrenoResumen[]> {
+    const from = pagina * porPagina;
+    const to = (pagina + 1) * porPagina - 1;
+
+    type EntrenoRow = {
+      id: string;
+      nombre: string | null;
+      fecha: string;
+      hora_inicio: string | null;
+      hora_fin: string | null;
+      routines: { nombre: string | null } | { nombre: string | null }[] | null;
+      workout_session_exercises:
+        | {
+            exercise_id: string;
+            exercises: { nombre: string; foto_url: string | null } | { nombre: string; foto_url: string | null }[] | null;
+            workout_sets:
+              | { peso_kg: number | null; repeticiones: number | null; completada: boolean }[]
+              | null;
+          }[]
+        | null;
+    };
+
+    const { data, error } = await supabase
+      .from('workout_sessions')
+      .select(
+        `id, nombre, fecha, hora_inicio, hora_fin,
+        routines ( nombre ),
+        workout_session_exercises (
+          exercise_id,
+          exercises ( nombre, foto_url ),
+          workout_sets ( peso_kg, repeticiones, completada )
+        )`,
+      )
+      .eq('user_id', userId)
+      .order('fecha', { ascending: false })
+      .order('hora_inicio', { ascending: false })
+      .range(from, to);
+
+    if (error) {
+      console.error('[obtenerEntrenosPaginados]', error.message);
+      return [];
+    }
+
+    return ((data ?? []) as EntrenoRow[]).map((row) => {
+      const routineRaw = row.routines;
+      const routineOne = Array.isArray(routineRaw) ? routineRaw[0] : routineRaw;
+      const ejerciciosRaw = row.workout_session_exercises ?? [];
+      let volumenKg = 0;
+
+      const ejercicios = ejerciciosRaw.map((ex) => {
+        const exJoin = Array.isArray(ex.exercises) ? ex.exercises[0] : ex.exercises;
+        const nombre = exJoin?.nombre?.trim() ?? 'Ejercicio';
+        const fotoUrl = exJoin?.foto_url?.trim() ? exJoin.foto_url.trim() : null;
+        const sets = ex.workout_sets ?? [];
+        for (const st of sets) {
+          if (!st.completada) continue;
+          const peso = st.peso_kg != null ? Number(st.peso_kg) : 0;
+          const reps = st.repeticiones != null ? Number(st.repeticiones) : 0;
+          volumenKg += peso * reps;
+        }
+        return {
+          ejercicioId: ex.exercise_id,
+          nombre,
+          fotoUrl,
+          numSeries: sets.length,
+        };
+      });
+
+      return {
+        id: row.id,
+        nombre: row.nombre,
+        rutinaNombre: routineOne?.nombre ?? null,
+        fecha: row.fecha,
+        horaInicio: row.hora_inicio,
+        horaFin: row.hora_fin,
+        ejercicios,
+        totalEjercicios: ejercicios.length,
+        volumenKg,
+      };
+    });
+  },
+
+  async eliminarEntreno(sessionId: string): Promise<void> {
+    const { error } = await supabase.from('workout_sessions').delete().eq('id', sessionId);
+    if (!error) return;
+
+    const msg = (error.message ?? '').toLowerCase();
+    const requiereManual =
+      msg.includes('violates foreign key constraint') ||
+      msg.includes('foreign key') ||
+      msg.includes('constraint');
+
+    if (!requiereManual) {
+      console.error('[eliminarEntreno]', error.message);
+      throw new Error(error.message);
+    }
+
+    const { data: relRows, error: relErr } = await supabase
+      .from('workout_session_exercises')
+      .select('id')
+      .eq('session_id', sessionId);
+    if (relErr) {
+      console.error('[eliminarEntreno] select workout_session_exercises', relErr.message);
+      throw new Error(relErr.message);
+    }
+
+    const relIds = (relRows ?? []).map((x: { id: string }) => x.id);
+    if (relIds.length > 0) {
+      const { error: setErr } = await supabase.from('workout_sets').delete().in('session_exercise_id', relIds);
+      if (setErr) {
+        console.error('[eliminarEntreno] delete workout_sets', setErr.message);
+        throw new Error(setErr.message);
+      }
+    }
+
+    const { error: exErr } = await supabase.from('workout_session_exercises').delete().eq('session_id', sessionId);
+    if (exErr) {
+      console.error('[eliminarEntreno] delete workout_session_exercises', exErr.message);
+      throw new Error(exErr.message);
+    }
+
+    const { error: sessionErr } = await supabase.from('workout_sessions').delete().eq('id', sessionId);
+    if (sessionErr) {
+      console.error('[eliminarEntreno] delete workout_sessions', sessionErr.message);
+      throw new Error(sessionErr.message);
+    }
   },
 
   async obtenerRutinasPredeterminadas(): Promise<RutinaExplorar[]> {

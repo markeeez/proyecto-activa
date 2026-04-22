@@ -824,6 +824,28 @@ export default function PerfilIndex() {
               )}
             </View>
 
+            <View style={styles.card}>
+              <View style={[styles.cardHead, { marginBottom: s.sm }]}>
+                <Text style={styles.cardTitulo}>MIS DATOS</Text>
+              </View>
+              <Pressable
+                style={styles.cuentaRow}
+                onPress={() => router.push('/(tabs)/(perfil)/perfil-ejercicios')}
+                accessibilityRole="button"
+              >
+                <Text style={styles.cuentaRowLabel}>Ejercicios</Text>
+                <Ionicons name="chevron-forward" size={16} color={c.textMuted} />
+              </Pressable>
+              <Pressable
+                style={[styles.cuentaRow, styles.cuentaRowLast]}
+                onPress={() => router.push('/(tabs)/(perfil)/perfil-entrenos')}
+                accessibilityRole="button"
+              >
+                <Text style={styles.cuentaRowLabel}>Entrenos</Text>
+                <Ionicons name="chevron-forward" size={16} color={c.textMuted} />
+              </Pressable>
+            </View>
+
             {/* BLOQUE 4 — Cuenta */}
             <View style={styles.card}>
               <View style={[styles.cardHead, { marginBottom: s.sm }]}>

@@ -14,6 +14,7 @@ import {
   View,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -230,17 +231,42 @@ export default function DetalleSesionPantalla() {
           padding: s.md,
           marginBottom: s.md,
         },
+        ejRowHead: {
+          flexDirection: 'row',
+          alignItems: 'flex-start',
+          gap: s.sm,
+          marginBottom: s.sm,
+        },
+        ejImg48: {
+          width: 48,
+          height: 48,
+          borderRadius: 8,
+        },
+        ejImgPh: {
+          width: 48,
+          height: 48,
+          borderRadius: 8,
+          backgroundColor: c.surface,
+          alignItems: 'center',
+          justifyContent: 'center',
+        },
+        ejCabTextCol: {
+          flex: 1,
+          minWidth: 0,
+        },
         ejTitulo: {
           ...ts.body,
           fontFamily: f.sansMedium,
           color: c.textDisplay,
           marginBottom: 2,
         },
+        ejNombreLink: {
+          color: c.primary,
+        },
         ejMusculo: {
           ...ts.caption,
           fontFamily: f.mono,
           color: c.textSecondary,
-          marginBottom: s.sm,
         },
         ejNotaFila: {
           flexDirection: 'row',
@@ -751,10 +777,40 @@ export default function DetalleSesionPantalla() {
             const setsHechas = ej.sets.filter((st) => st.completada);
             return (
               <View key={ej.id} style={styles.cardEj}>
-                <Text style={styles.ejTitulo}>{ej.nombre}</Text>
-                {ej.musculo_primario ? (
-                  <Text style={styles.ejMusculo}>{ej.musculo_primario}</Text>
-                ) : null}
+                <View style={styles.ejRowHead}>
+                  {ej.foto_url != null && ej.foto_url.trim() !== '' ? (
+                    <Image
+                      source={{ uri: ej.foto_url.trim() }}
+                      style={styles.ejImg48}
+                      contentFit="cover"
+                      cachePolicy="memory-disk"
+                      autoplay={false}
+                      recyclingKey={ej.exercise_id}
+                    />
+                  ) : (
+                    <View style={styles.ejImgPh}>
+                      <Ionicons name="barbell-outline" size={20} color={c.textMuted} />
+                    </View>
+                  )}
+                  <View style={styles.ejCabTextCol}>
+                    <Pressable
+                      onPress={() =>
+                        router.push({
+                          pathname: '/(tabs)/(entrenamiento)/consulta-ejercicio',
+                          params: { id: ej.exercise_id },
+                        })
+                      }
+                      hitSlop={4}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Ver ficha de ${ej.nombre}`}
+                    >
+                      <Text style={[styles.ejTitulo, styles.ejNombreLink]}>{ej.nombre}</Text>
+                    </Pressable>
+                    {ej.musculo_primario ? (
+                      <Text style={styles.ejMusculo}>{ej.musculo_primario}</Text>
+                    ) : null}
+                  </View>
+                </View>
                 {ej.notas != null && ej.notas.trim() !== '' ? (
                   <View style={styles.ejNotaFila}>
                     <Ionicons name="document-text-outline" size={14} color={c.textSecondary} />

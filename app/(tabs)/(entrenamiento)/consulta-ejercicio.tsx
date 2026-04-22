@@ -7,6 +7,7 @@ import { Image } from 'expo-image';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   FlatList,
   Modal,
   Pressable,
@@ -791,7 +792,9 @@ export default function ConsultaEjercicioPantalla() {
         <Stack.Screen options={{ headerShown: false }} />
         <View style={[styles.root, { paddingTop: insets.top }]}>
           <View style={styles.centerMsg}>
-            <Text style={styles.loadingTxt}>[CARGANDO...]</Text>
+            <View style={{ padding: s.lg, alignItems: 'center' }}>
+              <ActivityIndicator color={c.primary} />
+            </View>
           </View>
         </View>
       </>
@@ -927,7 +930,9 @@ export default function ConsultaEjercicioPantalla() {
 
                 {cargandoStats ? (
                   <View style={[styles.centerMsg, { minHeight: CHART_H }]}>
-                    <Text style={styles.loadingTxt}>[CARGANDO...]</Text>
+                    <View style={{ padding: s.lg, alignItems: 'center' }}>
+                      <ActivityIndicator color={c.primary} />
+                    </View>
                   </View>
                 ) : (
                   <View style={styles.chartBlock}>
@@ -991,7 +996,9 @@ export default function ConsultaEjercicioPantalla() {
             </View>
           ) : cargandoHist ? (
             <View style={[styles.centerMsg, { flex: 1 }]}>
-              <Text style={styles.loadingTxt}>[CARGANDO...]</Text>
+              <View style={{ padding: s.lg, alignItems: 'center' }}>
+                <ActivityIndicator color={c.primary} />
+              </View>
             </View>
           ) : (
             <FlatList

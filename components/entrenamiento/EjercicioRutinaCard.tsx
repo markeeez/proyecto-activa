@@ -17,6 +17,8 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
+import { useRouter } from 'expo-router';
 
 import { useTheme } from '@/hooks/useTheme';
 import type { Theme } from '@/constants/theme';
@@ -73,6 +75,19 @@ function makeStyles(c: Theme, f: ReturnType<typeof useTheme>['f'], ts: ReturnTyp
       alignItems: 'center',
       justifyContent: 'center',
     },
+    thumbEntreno: {
+      width: 48,
+      height: 48,
+      borderRadius: 8,
+      backgroundColor: c.surface,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    thumbEntrenoImg: {
+      width: 48,
+      height: 48,
+      borderRadius: 8,
+    },
     headText: {
       flex: 1,
       minWidth: 0,
@@ -81,6 +96,9 @@ function makeStyles(c: Theme, f: ReturnType<typeof useTheme>['f'], ts: ReturnTyp
       ...ts.body,
       fontFamily: f.sansMedium,
       color: c.textDisplay,
+    },
+    nombreEntrenoLink: {
+      color: c.primary,
     },
     menuHit: {
       padding: s.xs,
@@ -357,6 +375,7 @@ export function EjercicioRutinaCard({
   nota,
   onNotaChange,
 }: Props) {
+  const router = useRouter();
   const { c, f, ts, s, r } = useTheme();
   const styles = useMemo(() => makeStyles(c, f, ts, s, r), [c, f, ts, s, r]);
   const esEntreno = modo === 'entreno';
@@ -421,16 +440,54 @@ export function EjercicioRutinaCard({
     });
   };
 
+  const fotoEntrenoUri =
+    esEntreno && data.foto_url != null && String(data.foto_url).trim() !== '' ? String(data.foto_url).trim() : '';
+
   return (
     <View style={styles.card}>
       <View style={styles.head}>
-        <View style={styles.thumb}>
-          <Ionicons name="barbell-outline" size={22} color={c.textSecondary} />
-        </View>
+        {esEntreno ? (
+          fotoEntrenoUri ? (
+            <Image
+              source={{ uri: fotoEntrenoUri }}
+              style={styles.thumbEntrenoImg}
+              contentFit="cover"
+              cachePolicy="memory-disk"
+              autoplay={false}
+              recyclingKey={data.exerciseId}
+            />
+          ) : (
+            <View style={styles.thumbEntreno}>
+              <Ionicons name="barbell-outline" size={20} color={c.textMuted} />
+            </View>
+          )
+        ) : (
+          <View style={styles.thumb}>
+            <Ionicons name="barbell-outline" size={22} color={c.textSecondary} />
+          </View>
+        )}
         <View style={styles.headText}>
-          <Text style={styles.nombre} numberOfLines={2}>
-            {data.nombre}
-          </Text>
+          {esEntreno ? (
+            <Pressable
+              onPress={() =>
+                router.push({
+                  pathname: '/(tabs)/(entrenamiento)/consulta-ejercicio',
+                  params: { id: data.exerciseId },
+                })
+              }
+              hitSlop={4}
+              accessibilityRole="button"
+              accessibilityLabel={`Ver ficha de ${data.nombre}`}
+            >
+              <Text style={[styles.nombre, styles.nombreEntrenoLink]} numberOfLines={2}>
+                {data.nombre}
+              </Text>
+            </Pressable>
+          ) : (
+            <Text style={styles.nombre} numberOfLines={2}>
+              {data.nombre}
+            </Text>
+          )}
         </View>
         <Pressable
           style={styles.chatHit}

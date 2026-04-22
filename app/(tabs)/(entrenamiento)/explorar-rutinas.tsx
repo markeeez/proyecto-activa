@@ -6,6 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   FlatList,
   Pressable,
   ScrollView,
@@ -15,6 +16,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { ExplorarEjerciciosTab } from '@/components/ExplorarEjerciciosTab';
 import type { Theme } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from '@/hooks/useTheme';
@@ -249,6 +251,45 @@ function makeStyles(c: Theme, f: ReturnType<typeof useTheme>['f'], ts: ReturnTyp
       textAlign: 'center',
       padding: s.md,
     },
+    loading: {
+      padding: s.lg,
+    },
+    tabRow: {
+      flexDirection: 'row',
+      backgroundColor: c.background,
+      borderBottomWidth: 1,
+      borderBottomColor: c.border,
+    },
+    tabBtn: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: s.sm,
+      borderBottomWidth: 2,
+      borderBottomColor: 'transparent',
+    },
+    tabBtnActive: {
+      borderBottomColor: c.primary,
+    },
+    tabTxt: {
+      fontSize: 11,
+      lineHeight: 14,
+      fontFamily: f.mono,
+      color: c.textSecondary,
+      textTransform: 'uppercase',
+      letterSpacing: 0.6,
+    },
+    tabTxtActive: {
+      fontSize: 11,
+      lineHeight: 14,
+      fontFamily: f.sansMedium,
+      color: c.textDisplay,
+      textTransform: 'uppercase',
+      letterSpacing: 0.6,
+    },
+    tabContent: {
+      flex: 1,
+    },
   });
 }
 
@@ -264,6 +305,7 @@ export default function ExplorarRutinasScreen() {
   const [error, setError] = useState<string | null>(null);
   const [difSel, setDifSel] = useState<string | null>(null);
   const [musculoSel, setMusculoSel] = useState<EtiquetaFiltroMusculo[]>([]);
+  const [tabExplorar, setTabExplorar] = useState(0);
 
   const cargar = useCallback(async () => {
     setCargando(true);
@@ -339,108 +381,132 @@ export default function ExplorarRutinasScreen() {
             </Pressable>
           </View>
           <Text style={styles.headerTitle} numberOfLines={1}>
-            Explorar rutinas
+            Explorar
           </Text>
           <View style={styles.headerSide} />
         </View>
 
-        <View style={styles.filtersOuter}>
-          <Text style={styles.filterGroupLabel}>DIFICULTAD</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipsScroll}>
-            <View style={styles.chipsRow}>
-              {DIFICULTADES.map((d) => {
-                const on = difSel === d;
-                return (
-                  <Pressable
-                    key={d}
-                    style={[styles.chip, on && styles.chipOn]}
-                    onPress={() => onToggleDificultad(d)}
-                  >
-                    <Text style={[styles.chipText, on && styles.chipTextOn]}>{d}</Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-          </ScrollView>
-
-          <View style={styles.groupDivider} />
-
-          <Text style={styles.filterGroupLabel}>MÚSCULO</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipsScroll}>
-            <View style={styles.chipsRow}>
-              {ETIQUETAS_MUSCULO.map((m) => {
-                const on = musculoSel.includes(m);
-                return (
-                  <Pressable
-                    key={m}
-                    style={[styles.chip, on && styles.chipOn]}
-                    onPress={() => onToggleMusculo(m)}
-                  >
-                    <Text style={[styles.chipText, on && styles.chipTextOn]}>{m}</Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-          </ScrollView>
+        <View style={styles.tabRow}>
+          {(['RUTINAS', 'EJERCICIOS'] as const).map((label, i) => (
+            <Pressable
+              key={label}
+              style={[styles.tabBtn, tabExplorar === i && styles.tabBtnActive]}
+              onPress={() => setTabExplorar(i)}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: tabExplorar === i }}
+            >
+              <Text style={[styles.tabTxt, tabExplorar === i && styles.tabTxtActive]}>{label}</Text>
+            </Pressable>
+          ))}
         </View>
 
-        {error ? (
-          <Text style={styles.errMono}>[ERROR AL CARGAR]</Text>
-        ) : cargando ? (
-          <Text style={styles.centerMono}>[CARGANDO...]</Text>
-        ) : (
-          <FlatList
-            style={styles.list}
-            contentContainerStyle={styles.listContent}
-            data={listaFiltrada}
-            keyExtractor={(item) => item.id}
-            ListEmptyComponent={
-              <Text style={styles.centerMono}>Sin rutinas con estos filtros</Text>
-            }
-            renderItem={({ item }) => {
-              const diffSt = estiloChipDificultad(item.dificultad, c);
-              return (
-                <View style={styles.card}>
-                  <Pressable
-                    onPress={() => router.push(`/(tabs)/(entrenamiento)/rutina/${item.id}`)}
-                    accessibilityRole="button"
-                  >
-                    <View style={styles.cardTop}>
-                      <Text style={styles.cardTitle} numberOfLines={2}>
-                        {item.nombre}
-                      </Text>
-                      <View style={[styles.diffChip, { backgroundColor: diffSt.bg, borderColor: diffSt.border }]}>
-                        <Text style={[styles.diffChipText, { color: diffSt.fg }]} numberOfLines={1}>
-                          {diffSt.label}
-                        </Text>
-                      </View>
-                    </View>
-                    <Text style={styles.musclesLine} numberOfLines={3}>
-                      {textoMusculosResumen(item)}
-                    </Text>
-                  </Pressable>
-                  <View style={styles.cardFooter}>
-                    <Pressable
-                      style={styles.favBtn}
-                      onPress={() => void onToggleFavorito(item, !item.esFavorita)}
-                      disabled={!user?.id}
-                      hitSlop={8}
-                      accessibilityRole="button"
-                      accessibilityLabel={item.esFavorita ? 'Quitar de favoritos' : 'Añadir a favoritos'}
-                    >
-                      <Ionicons
-                        name={item.esFavorita ? 'star' : 'star-outline'}
-                        size={24}
-                        color={item.esFavorita ? c.warning : c.textMuted}
-                      />
-                    </Pressable>
-                    <View style={{ flex: 1 }} />
+        <View style={styles.tabContent}>
+          {tabExplorar === 0 ? (
+            <>
+              <View style={styles.filtersOuter}>
+                <Text style={styles.filterGroupLabel}>DIFICULTAD</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipsScroll}>
+                  <View style={styles.chipsRow}>
+                    {DIFICULTADES.map((d) => {
+                      const on = difSel === d;
+                      return (
+                        <Pressable
+                          key={d}
+                          style={[styles.chip, on && styles.chipOn]}
+                          onPress={() => onToggleDificultad(d)}
+                        >
+                          <Text style={[styles.chipText, on && styles.chipTextOn]}>{d}</Text>
+                        </Pressable>
+                      );
+                    })}
                   </View>
+                </ScrollView>
+
+                <View style={styles.groupDivider} />
+
+                <Text style={styles.filterGroupLabel}>MÚSCULO</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipsScroll}>
+                  <View style={styles.chipsRow}>
+                    {ETIQUETAS_MUSCULO.map((m) => {
+                      const on = musculoSel.includes(m);
+                      return (
+                        <Pressable
+                          key={m}
+                          style={[styles.chip, on && styles.chipOn]}
+                          onPress={() => onToggleMusculo(m)}
+                        >
+                          <Text style={[styles.chipText, on && styles.chipTextOn]}>{m}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                </ScrollView>
+              </View>
+
+              {error ? (
+                <Text style={styles.errMono}>[ERROR AL CARGAR]</Text>
+              ) : cargando ? (
+                <View style={styles.loading}>
+                  <ActivityIndicator color={c.primary} />
                 </View>
-              );
-            }}
-          />
-        )}
+              ) : (
+                <FlatList
+                  style={styles.list}
+                  contentContainerStyle={styles.listContent}
+                  data={listaFiltrada}
+                  keyExtractor={(item) => item.id}
+                  ListEmptyComponent={
+                    <Text style={styles.centerMono}>Sin rutinas con estos filtros</Text>
+                  }
+                  renderItem={({ item }) => {
+                    const diffSt = estiloChipDificultad(item.dificultad, c);
+                    return (
+                      <View style={styles.card}>
+                        <Pressable
+                          onPress={() => router.push(`/(tabs)/(entrenamiento)/rutina/${item.id}`)}
+                          accessibilityRole="button"
+                        >
+                          <View style={styles.cardTop}>
+                            <Text style={styles.cardTitle} numberOfLines={2}>
+                              {item.nombre}
+                            </Text>
+                            <View style={[styles.diffChip, { backgroundColor: diffSt.bg, borderColor: diffSt.border }]}>
+                              <Text style={[styles.diffChipText, { color: diffSt.fg }]} numberOfLines={1}>
+                                {diffSt.label}
+                              </Text>
+                            </View>
+                          </View>
+                          <Text style={styles.musclesLine} numberOfLines={3}>
+                            {textoMusculosResumen(item)}
+                          </Text>
+                        </Pressable>
+                        <View style={styles.cardFooter}>
+                          <Pressable
+                            style={styles.favBtn}
+                            onPress={() => void onToggleFavorito(item, !item.esFavorita)}
+                            disabled={!user?.id}
+                            hitSlop={8}
+                            accessibilityRole="button"
+                            accessibilityLabel={item.esFavorita ? 'Quitar de favoritos' : 'Añadir a favoritos'}
+                          >
+                            <Ionicons
+                              name={item.esFavorita ? 'star' : 'star-outline'}
+                              size={24}
+                              color={item.esFavorita ? c.warning : c.textMuted}
+                            />
+                          </Pressable>
+                          <View style={{ flex: 1 }} />
+                        </View>
+                      </View>
+                    );
+                  }}
+                />
+              )}
+            </>
+          ) : (
+            <ExplorarEjerciciosTab userId={user?.id} />
+          )}
+        </View>
       </View>
     </>
   );

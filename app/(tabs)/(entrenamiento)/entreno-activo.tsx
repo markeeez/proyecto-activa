@@ -302,6 +302,46 @@ export default function EntrenoActivoScreen() {
 
   const lineas = useMemo(() => entrenoActivo?.lineas ?? [], [entrenoActivo?.lineas]);
 
+  /** Rutas/recuperación no rellenan `foto_url`; se hidrata desde catálogo sin bloquear la UI. */
+  const claveFotosPendientes = useMemo(
+    () =>
+      lineas
+        .filter((l) => l.foto_url === undefined && l.exerciseId)
+        .map((l) => l.exerciseId)
+        .sort()
+        .join(','),
+    [lineas],
+  );
+
+  useEffect(() => {
+    if (!claveFotosPendientes) return;
+    const ids = [...new Set(claveFotosPendientes.split(',').filter(Boolean))];
+    if (!ids.length) return;
+    let cancelled = false;
+    void (async () => {
+      const pairs = await Promise.all(
+        ids.map(async (id) => {
+          const ex = await ejerciciosService.obtenerEjercicio(id);
+          const u = ex?.foto_url != null && String(ex.foto_url).trim() !== '' ? String(ex.foto_url).trim() : null;
+          return [id, u] as const;
+        }),
+      );
+      if (cancelled) return;
+      setLineas((prev) =>
+        prev.map((l) => {
+          if (l.foto_url !== undefined) return l;
+          const hit = pairs.find(([id]) => id === l.exerciseId);
+          if (!hit) return { ...l, foto_url: null };
+          const [, url] = hit;
+          return { ...l, foto_url: url };
+        }),
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [claveFotosPendientes, setLineas]);
+
   useEffect(() => {
     if (!user?.id || !lineas.length) {
       setAnteriorPorEjercicio({});
@@ -347,12 +387,21 @@ export default function EntrenoActivoScreen() {
 
   const incorporarEjercicio = useCallback(
     (ex: Exercise) => {
+      const fotoRaw = ex.foto_url;
+      const foto_url =
+        fotoRaw != null && String(fotoRaw).trim() !== '' ? String(fotoRaw).trim() : null;
       setLineas((prev) => {
         const repId = replaceLineId;
         if (repId) {
           return prev.map((l) =>
             l.lineId === repId
-              ? { ...l, exerciseId: ex.id, nombre: ex.nombre, musculo_primario: ex.musculo_primario }
+              ? {
+                  ...l,
+                  exerciseId: ex.id,
+                  nombre: ex.nombre,
+                  musculo_primario: ex.musculo_primario,
+                  foto_url,
+                }
               : l,
           );
         }
@@ -363,6 +412,7 @@ export default function EntrenoActivoScreen() {
             exerciseId: ex.id,
             nombre: ex.nombre,
             musculo_primario: ex.musculo_primario,
+            foto_url,
             sets: [seriePorDefecto()],
           },
         ];
