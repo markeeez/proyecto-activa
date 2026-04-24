@@ -219,37 +219,35 @@ export const nutricionService = {
   ) {},
 
   async asegurarLogDiario(userId: string, fecha: string): Promise<NutritionLog> {
-    const { data: existente, error: e0 } = await supabase
+    // INSERT ... ON CONFLICT (user_id, fecha) DO UPDATE SET user_id = user_id
+    // Operación atómica: no hay ventana de tiempo entre el SELECT y el INSERT,
+    // así que dos llamadas simultáneas nunca provocan el error 23505.
+    const { data, error } = await supabase
       .from('nutrition_logs')
-      .select('*')
-      .eq('user_id', userId)
-      .eq('fecha', fecha)
-      .maybeSingle();
-    if (e0) throw e0;
-    if (existente) return existente as NutritionLog;
-
-    const { data: creado, error: e1 } = await supabase
-      .from('nutrition_logs')
-      .insert({ user_id: userId, fecha })
+      .upsert(
+        { user_id: userId, fecha },
+        { onConflict: 'user_id,fecha', ignoreDuplicates: false },
+      )
       .select('*')
       .single();
-    if (e1) throw e1;
-    return creado as NutritionLog;
+    if (error) throw error;
+    return data as NutritionLog;
   },
 
   /**
    * Si el log no tiene filas de comida, inserta las 4 predeterminadas.
    * En días pasados no se crean (vista solo comidas con ítems; el usuario añade comida custom si hace falta).
+   * Devuelve true si insertó las comidas, false si ya existían (o es día pasado).
    */
-  async asegurarComidasPredeterminadasSiVacias(logId: string, fecha: string): Promise<void> {
-    if (esDiaPasadoVsHoy(fecha)) return;
+  async asegurarComidasPredeterminadasSiVacias(logId: string, fecha: string): Promise<boolean> {
+    if (esDiaPasadoVsHoy(fecha)) return false;
 
     const { count, error: cErr } = await supabase
       .from('nutrition_log_meals')
       .select('*', { count: 'exact', head: true })
       .eq('log_id', logId);
     if (cErr) throw cErr;
-    if ((count ?? 0) > 0) return;
+    if ((count ?? 0) > 0) return false;
 
     const rows = COMIDAS_PREDETERMINADAS.map((d) => ({
       log_id: logId,
@@ -261,16 +259,32 @@ export const nutricionService = {
 
     const { error } = await supabase.from('nutrition_log_meals').insert(rows);
     if (error) throw error;
+    return true;
   },
 
   /**
-   * Carga el día: asegura log; en hoy/futuro inserta las 4 predeterminadas si el log está vacío.
+   * Carga el día: un único round-trip a la RPC asegurar_log_diario que crea el log
+   * y, si es hoy/futuro y está vacío, inserta las 4 comidas predeterminadas.
    * En días pasados solo filas reales; vista = comidas con al menos un ítem.
+   * La deduplicación solo se ejecuta cuando la RPC acaba de insertar las predeterminadas.
    */
   async obtenerResumenDiaNutricion(userId: string, fecha: string): Promise<ResumenDiarioNutricion | null> {
-    const log = await this.asegurarLogDiario(userId, fecha);
-    await this.asegurarComidasPredeterminadasSiVacias(log.id, fecha);
-    await consolidarDuplicadosSlotsPredeterminadosLog(log.id);
+    const { data: rpcData, error: rpcErr } = await supabase.rpc('asegurar_log_diario', {
+      p_user_id: userId,
+      p_fecha: fecha,
+    });
+    if (rpcErr) throw rpcErr;
+
+    // La función devuelve RETURNS jsonb → data es el objeto directamente (no array)
+    const row = rpcData as any;
+    if (!row) throw new Error('[nutricionService] asegurar_log_diario no devolvió filas');
+
+    const logId: string = row.id;
+    const insertoPredeterminadas: boolean = row.inserto_predeterminadas ?? false;
+
+    if (insertoPredeterminadas) {
+      await consolidarDuplicadosSlotsPredeterminadosLog(logId);
+    }
 
     const { data: mealsConItems, error } = await supabase
       .from('nutrition_log_meals')
@@ -293,7 +307,7 @@ export const nutricionService = {
           foods (*)
         )
       `)
-      .eq('log_id', log.id);
+      .eq('log_id', logId);
 
     if (error) throw error;
 
@@ -304,7 +318,7 @@ export const nutricionService = {
       comidas = comidas.filter((c) => c.items.length > 0);
     }
 
-    return resumenDesdeComidas(fecha, log.id, comidas);
+    return resumenDesdeComidas(fecha, logId, comidas);
   },
 
   async actualizarOrdenComidas(logId: string, mealIdsEnOrden: string[]): Promise<void> {

@@ -21,6 +21,6 @@ DROP POLICY IF EXISTS "El usuario actualiza sus logs de nutrición" ON public.nu
 CREATE POLICY "El usuario actualiza sus logs de nutrición"
   ON public.nutrition_logs
   FOR UPDATE
-  TO public
+  TO authenticated
   USING (auth.uid() = user_id)
   WITH CHECK (auth.uid() = user_id);

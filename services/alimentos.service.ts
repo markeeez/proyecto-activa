@@ -157,6 +157,10 @@ function dbgAlimentos(...args: unknown[]): void {
   }
 }
 
+// Caché de traducciones en sesión — evita llamar a LibreTranslate/MyMemory
+// repetidamente para los mismos términos dentro de la misma sesión.
+const _traduccionCache = new Map<string, string>();
+
 type PayloadUpsertGlobal = {
   nombre: string;
   api_source: 'builtin' | 'fatsecret' | 'openfoodfacts' | 'usda_fdc';
@@ -447,46 +451,36 @@ export const alimentosService = {
       basicFoods = await this._upsertBasicos(basicMatches);
     }
 
-    let genericBd: Food[] = [];
-    try {
-      genericBd = await buscarFoodsPorTextoLibre(termLimpio, 80, (q) =>
+    // Lanzar en paralelo: BD genérica, BD personalizada, traducción ES→EN y OFF.
+    // OFF no depende de la traducción (usa término ES directamente).
+    // USDA sí depende de qEn, por eso arranca después.
+    const [genericBd, personalizados, qEn, offPartials] = await Promise.all([
+      buscarFoodsPorTextoLibre(termLimpio, 80, (q) =>
         q.eq('api_source', GENERIC_DB_API_SOURCE).eq('is_custom', false).is('created_by', null),
-      );
-    } catch {
-      genericBd = [];
-    }
+      ).catch((): Food[] => []),
+      userId
+        ? buscarFoodsPorTextoLibre(termLimpio, 12, (q) =>
+            q.eq('is_custom', true).eq('created_by', userId),
+          ).catch((): Food[] => [])
+        : Promise.resolve([] as Food[]),
+      terminoInglesParaUsda(termLimpio),
+      this._buscarOpenFoodFacts(termLimpio, BUSQUEDA_SLOT_OFF).catch(
+        (): Partial<Food>[] => [],
+      ),
+    ]);
 
-    let personalizados: Food[] = [];
-    if (userId) {
-      try {
-        personalizados = await buscarFoodsPorTextoLibre(termLimpio, 12, (q) =>
-          q.eq('is_custom', true).eq('created_by', userId),
-        );
-      } catch {
-        personalizados = [];
-      }
-    }
+    dbgAlimentos('USDA query EN', qEn);
 
+    // USDA arranca una vez que tenemos la traducción
     let usdaPartials: Partial<Food>[] = [];
-    let offPartials: Partial<Food>[] = [];
     try {
-      const qEn = await terminoInglesParaUsda(termLimpio);
-      dbgAlimentos('USDA query EN', qEn);
-      try {
-        usdaPartials = await this._buscarUsdaFoundation(qEn, BUSQUEDA_SLOT_USDA);
-      } catch (e) {
-        dbgAlimentos('USDA excepción', e);
-      }
-      try {
-        offPartials = await this._buscarOpenFoodFacts(termLimpio, BUSQUEDA_SLOT_OFF);
-      } catch (e) {
-        dbgAlimentos('OpenFoodFacts excepción', e);
-      }
-      dbgAlimentos('USDA Foundation candidatos', usdaPartials.length);
-      dbgAlimentos('OpenFoodFacts (ES) candidatos', offPartials.length);
+      usdaPartials = await this._buscarUsdaFoundation(qEn, BUSQUEDA_SLOT_USDA);
     } catch (e) {
-      dbgAlimentos('búsqueda API (traducción / paralelo)', e);
+      dbgAlimentos('USDA excepción', e);
     }
+
+    dbgAlimentos('USDA Foundation candidatos', usdaPartials.length);
+    dbgAlimentos('OpenFoodFacts (ES) candidatos', offPartials.length);
 
     const apiCandidates = [...usdaPartials, ...offPartials];
     const apiOrderByKey = new Map<string, number>();
@@ -1170,28 +1164,44 @@ function traducirAlIngles(query: string): string {
 async function terminoInglesParaUsda(termEs: string): Promise<string> {
   const t = termEs.trim().slice(0, 200);
   if (!t) return '';
+
+  // 1. Diccionario local (instantáneo, sin red)
+  const dictResult = traducirAlIngles(t);
+  if (dictResult !== t) return dictResult.trim().slice(0, 200);
+
+  // 2. Caché de sesión (evita llamada HTTP repetida para el mismo término)
+  const cacheKey = `es>en:${t.toLowerCase()}`;
+  const cached = _traduccionCache.get(cacheKey);
+  if (cached) return cached;
+
+  // 3. LibreTranslate / MyMemory como fallback de red
   const lt = await libreTranslate(t, 'es', 'en');
-  if (lt && lt.length > 0) return lt.slice(0, 200);
-  return traducirAlIngles(t).trim().slice(0, 200);
+  if (lt && lt.length > 0) {
+    const result = lt.slice(0, 200);
+    _traduccionCache.set(cacheKey, result);
+    return result;
+  }
+
+  return t.slice(0, 200);
 }
 
 async function traducirListaEnAEs(textos: string[]): Promise<string[]> {
-  const out = [...textos];
-  const chunk = 3;
-  for (let i = 0; i < textos.length; i += chunk) {
-    const slice = textos.slice(i, i + chunk);
-    const tr = await Promise.all(
-      slice.map(async (s) => {
-        const x = await libreTranslate(s, 'en', 'es');
-        return x && x.length > 0 ? x : s;
-      }),
-    );
-    for (let j = 0; j < tr.length; j++) out[i + j] = tr[j];
-    if (i + chunk < textos.length) {
-      await new Promise((r) => setTimeout(r, 200));
-    }
-  }
-  return out;
+  if (textos.length === 0) return [];
+
+  // Traducir todas las que no estén ya en caché, en paralelo (sin delay artificial)
+  const resultado = await Promise.all(
+    textos.map(async (s) => {
+      const cacheKey = `en>es:${s.toLowerCase().slice(0, 100)}`;
+      const cached = _traduccionCache.get(cacheKey);
+      if (cached) return cached;
+      const x = await libreTranslate(s, 'en', 'es');
+      const out = x && x.length > 0 ? x : s;
+      _traduccionCache.set(cacheKey, out);
+      return out;
+    }),
+  );
+
+  return resultado;
 }
 
 /**

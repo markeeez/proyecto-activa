@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Modal,
@@ -10,9 +10,10 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import DraggableFlatList, { ScaleDecorator } from 'react-native-draggable-flatlist';
 import { Gesture, GestureDetector, Swipeable } from 'react-native-gesture-handler';
 import { runOnJS } from 'react-native-reanimated';
+
+import { SortableMealList } from '@/components/SortableMealList';
 
 import { useComidaPortapapeles } from '@/context/ComidaPortapapelesContext';
 import { useAuth } from '@/hooks/useAuth';
@@ -70,6 +71,10 @@ export default function NutricionIndex() {
   const [nombreNuevaComida, setNombreNuevaComida] = useState('');
   const [menuMealId, setMenuMealId] = useState<string | null>(null);
 
+  // Evita el parpadeo post-drag: cuando el propio onDragEnd actualiza ordenIds,
+  // el useEffect que sincroniza comidasData debe saltarse ese ciclo.
+  const skipNextSyncRef = useRef(false);
+
   useEffect(() => {
     if (!user?.id) return;
     void obtenerOrdenComidas(user.id, fecha).then(setOrdenIds);
@@ -94,6 +99,10 @@ export default function NutricionIndex() {
   );
 
   useEffect(() => {
+    if (skipNextSyncRef.current) {
+      skipNextSyncRef.current = false;
+      return;
+    }
     setComidasData(listaOrdenada);
   }, [listaOrdenada]);
 
@@ -105,6 +114,9 @@ export default function NutricionIndex() {
       month: 'short',
     });
   }, [fecha]);
+
+  // true mientras se cargan datos de un día nuevo (resumen aún no corresponde a `fecha`)
+  const cargandoDia = cargando && !resumen;
 
   const objetivoCalorias = objetivos?.calorias_objetivo ?? 2000;
   const totalCalorias = resumen?.totalCalorias ?? 0;
@@ -167,6 +179,9 @@ export default function NutricionIndex() {
 
   const onDragEnd = useCallback(
     ({ data }: { data: ComidaConAlimentos[] }) => {
+      // Marcar antes de los setState para que el useEffect de sincronización
+      // ignore el ciclo provocado por setOrdenIds y no sobreescriba el resultado del drag.
+      skipNextSyncRef.current = true;
       setComidasData(data);
       const ids = data.map((c) => c.mealId);
       setOrdenIds(ids);
@@ -231,7 +246,7 @@ export default function NutricionIndex() {
           </Pressable>
         </View>
 
-        <View style={[styles.summaryCard, styles.summaryCardBelowCalendar]}>
+        <View style={[styles.summaryCard, styles.summaryCardBelowCalendar, cargandoDia && styles.summaryCardCargando]}>
           <View style={styles.summaryTop}>
             <Text style={styles.summaryValue}>
               {Math.round(totalCalorias)}
@@ -264,6 +279,16 @@ export default function NutricionIndex() {
         </View>
 
         <Text style={styles.sectionTitle}>COMIDAS DEL DIA</Text>
+
+        {/* Skeleton: placeholders mientras carga el día nuevo */}
+        {cargandoDia && (
+          <>
+            <View style={[styles.skeletonCard, { height: 90 }]} />
+            <View style={[styles.skeletonCard, { height: 64 }]} />
+            <View style={[styles.skeletonCard, { height: 90 }]} />
+            <View style={[styles.skeletonCard, { height: 64 }]} />
+          </>
+        )}
       </>
     );
   }, [
@@ -279,10 +304,11 @@ export default function NutricionIndex() {
     progresoCalorias,
     objetivoCalorias,
     macros,
+    cargandoDia,
   ]);
 
   const renderItem = useCallback(
-    ({ item: meal, drag, isActive }: { item: ComidaConAlimentos; drag: () => void; isActive: boolean }) => {
+    ({ item: meal, drag, isActive }: { item: ComidaConAlimentos; drag: () => void; isActive: boolean; }) => {
       const logId = resumen?.logId;
 
       const leftActions = () => (
@@ -294,8 +320,8 @@ export default function NutricionIndex() {
       );
 
       return (
-        <ScaleDecorator>
-          <Swipeable
+        <Swipeable
+            enabled={!isActive}
             renderLeftActions={leftActions}
             overshootLeft={false}
             onSwipeableOpen={(direction) => {
@@ -312,7 +338,7 @@ export default function NutricionIndex() {
           >
             <View style={[styles.mealCard, isActive && styles.mealCardActive]}>
               <View style={styles.mealHeaderRow}>
-                <Pressable onLongPress={drag} delayLongPress={220} style={styles.dragHandle} hitSlop={8}>
+                <Pressable onLongPress={drag} delayLongPress={150} style={styles.dragHandle} hitSlop={12}>
                   <Text style={styles.dragHandleText}>≡</Text>
                 </Pressable>
                 <View style={styles.mealHeaderText}>
@@ -400,8 +426,7 @@ export default function NutricionIndex() {
                 </View>
               </View>
             </View>
-          </Swipeable>
-        </ScaleDecorator>
+      </Swipeable>
       );
     },
     [styles, resumen?.logId, eliminarComidaDelLog, eliminarAlimento, fecha, c.textMuted],
@@ -425,11 +450,10 @@ export default function NutricionIndex() {
         </View>
       )}
 
-      <DraggableFlatList
+      <SortableMealList
         data={comidasData}
         keyExtractor={(item) => item.mealId}
         onDragEnd={onDragEnd}
-        activationDistance={12}
         ListHeaderComponent={renderHeader}
         ListFooterComponent={renderFooter}
         renderItem={renderItem}
@@ -606,6 +630,16 @@ function makeStyles(
       paddingVertical: s.sm,
       gap: s.sm,
     },
+    summaryCardCargando: {
+      opacity: 0.45,
+    },
+    skeletonCard: {
+      borderWidth: 1,
+      borderColor: c.borderVisible,
+      borderRadius: r.md,
+      backgroundColor: c.surface,
+      opacity: 0.5,
+    },
     summaryCardBelowCalendar: {
       marginTop: s.lg,
     },
@@ -683,7 +717,13 @@ function makeStyles(
       gap: s.md,
     },
     mealCardActive: {
-      opacity: 0.92,
+      opacity: 0.97,
+      borderColor: c.primary,
+      shadowColor: c.primary,
+      shadowOpacity: 0.18,
+      shadowRadius: 10,
+      shadowOffset: { width: 0, height: 4 },
+      elevation: 8,
     },
     mealHeaderRow: {
       flexDirection: 'row',
@@ -697,7 +737,7 @@ function makeStyles(
     dragHandleText: {
       ...ts.subheading,
       fontFamily: f.mono,
-      color: c.textMuted,
+      color: c.textSecondary,
     },
     mealHeaderText: {
       flex: 1,

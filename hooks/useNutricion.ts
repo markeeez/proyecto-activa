@@ -70,6 +70,9 @@ export function useNutricion() {
   }, [cargar]);
 
   const cambiarFecha = useCallback((nueva: string) => {
+    // Limpiar datos del día anterior inmediatamente para que no se muestren
+    // macros/comidas de un día mientras carga el siguiente.
+    setResumen(null);
     setFecha(nueva);
   }, []);
 

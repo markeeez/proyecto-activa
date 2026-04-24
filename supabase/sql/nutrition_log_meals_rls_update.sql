@@ -8,7 +8,7 @@ DROP POLICY IF EXISTS "El usuario actualiza comidas de su log" ON public.nutriti
 CREATE POLICY "El usuario actualiza comidas de su log"
 ON public.nutrition_log_meals
 FOR UPDATE
-TO public
+TO authenticated
 USING (
   EXISTS (
     SELECT 1
