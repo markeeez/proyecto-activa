@@ -57,6 +57,8 @@ export default function AgregarAlimento() {
   const [favoritos, setFavoritos] = useState<Food[]>([]);
   const [favoritosIds, setFavoritosIds] = useState<string[]>([]);
   const [cargandoBase, setCargandoBase] = useState(false);
+  /** true mientras la Fase 2 (USDA/OFF) carga en background; la lista ya es visible. */
+  const [cargandoApis, setCargandoApis] = useState(false);
   const [cargandoCreados, setCargandoCreados] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [foodSeleccionado, setFoodSeleccionado] = useState<Food | null>(null);
@@ -183,33 +185,68 @@ export default function AgregarAlimento() {
 
     const timer = setTimeout(async () => {
       if (cancelado) return;
+
+      // ── Fase 1: BD local (genéricos + USDA/OFF ya cacheados) ─────────────
       setCargandoBase(true);
       setError(null);
+      let localData: Food[] = [];
       try {
-        const data = await alimentosService.buscarAlimento(term, user?.id);
+        localData = await alimentosService.buscarAlimentoLocal(term, user?.id);
         if (cancelado) return;
-        setResultados(data);
-        setUltimaBusqueda(data);
-        if (user?.id) {
-          try {
-            await AsyncStorage.setItem(storageKeyUltimaBusqueda(user.id), JSON.stringify(data));
-          } catch {
-            /* noop */
-          }
+        setResultados(localData);
+        setUltimaBusqueda(localData);
+        // Persistir ya con los datos de Fase 1 (Fase 2 actualizará si encuentra más).
+        if (user?.id && localData.length > 0) {
+          AsyncStorage.setItem(
+            storageKeyUltimaBusqueda(user.id),
+            JSON.stringify(localData),
+          ).catch(() => {});
         }
       } catch (e: any) {
-        if (!cancelado) {
-          setError(e?.message ?? 'No se pudo buscar alimentos.');
-        }
+        if (!cancelado) setError(e?.message ?? 'No se pudo buscar alimentos.');
       } finally {
         if (!cancelado) setCargandoBase(false);
       }
-    }, 350);
+
+      if (cancelado) return;
+
+      // ── Fase 2: APIs externas (USDA + OFF) en background ─────────────────
+      setCargandoApis(true);
+      try {
+        const idsLocales = new Set(localData.map((f) => f.id).filter(Boolean));
+        const apiData = await alimentosService.enriquecerConApis(term, user?.id, idsLocales);
+        if (cancelado) return;
+
+        if (apiData.length > 0) {
+          // Combinar Fase 1 + Fase 2 en memoria y re-rankear por relevancia.
+          // No re-consultamos la BD porque ilike es accent-sensitive en PostgreSQL
+          // y "jamon" no encontraría "Jamón" guardado con tilde.
+          const reranked = await alimentosService.rankearResultados(
+            term,
+            [...localData, ...apiData],
+          );
+          if (cancelado) return;
+          setResultados(reranked);
+          setUltimaBusqueda(reranked);
+          if (user?.id && reranked.length > 0) {
+            AsyncStorage.setItem(
+              storageKeyUltimaBusqueda(user.id),
+              JSON.stringify(reranked),
+            ).catch(() => {});
+          }
+        }
+      } catch {
+        // La Fase 2 falla en silencio; la Fase 1 ya está visible.
+      } finally {
+        if (!cancelado) setCargandoApis(false);
+      }
+    }, 300);
 
     return () => {
       cancelado = true;
       clearTimeout(timer);
       setCargandoBase(false);
+      setCargandoApis(false);
     };
   }, [query, tab, user?.id]);
 
@@ -409,6 +446,12 @@ export default function AgregarAlimento() {
           <ActivityIndicator color={c.primary} />
         </View>
       )}
+      {!cargandoEnPestañaActiva && cargandoApis && tab === 'base' && (
+        <View style={styles.apisRow}>
+          <ActivityIndicator size="small" color={c.textMuted} />
+          <Text style={styles.apisText}>Buscando más resultados…</Text>
+        </View>
+      )}
       {!!error && <Text style={styles.errorText}>[ERROR: {error}]</Text>}
       {!!okMsg && <Text style={styles.okText}>[{okMsg}]</Text>}
 
@@ -451,7 +494,7 @@ export default function AgregarAlimento() {
             </View>
           </Pressable>
         ))}
-        {!cargandoEnPestañaActiva && listaActual.length === 0 && (
+        {!cargandoEnPestañaActiva && !cargandoApis && listaActual.length === 0 && (
           <Text style={styles.emptyText}>
             {tab === 'base' && query.trim().length < 2
               ? 'Busca alimentos para añadir.'
@@ -603,6 +646,15 @@ function makeStyles(
     tabActive: { color: c.textDisplay },
     scrollList: { flex: 1 },
     stateRow: { marginTop: s.md },
+    apisRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      paddingHorizontal: s.md,
+      paddingVertical: 4,
+      opacity: 0.55,
+    },
+    apisText: { ...ts.caption, fontFamily: f.sans, color: c.textMuted },
     errorText: { ...ts.caption, fontFamily: f.mono, color: c.danger, marginTop: s.sm },
     okText: { ...ts.caption, fontFamily: f.mono, color: c.success, marginTop: s.sm },
     list: { paddingVertical: s.md, gap: s.sm },

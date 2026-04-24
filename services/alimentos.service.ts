@@ -291,6 +291,18 @@ async function buscarFoodsPorTextoLibre(
   }
 
   const merged = [...porId.values()].filter((f) => nombreContieneTodasLasPalabras(f.nombre, palabrasNorm));
+
+  // Fallback AND → OR: si la búsqueda estricta no encontró nada en BD pero sí
+  // hay resultados del ancla (que ya contienen al menos la palabra más relevante),
+  // aceptar cualquier resultado que incluya al menos UNA de las palabras clave.
+  // Solo se activa con queries de varias palabras; no añade consultas extra.
+  if (merged.length === 0 && palabrasNorm.length > 1) {
+    const orFallback = [...porId.values()].filter((f) =>
+      palabrasNorm.some((p) => normalizeText(f.nombre).includes(p)),
+    );
+    return orFallback.slice(0, limite);
+  }
+
   return merged.slice(0, limite);
 }
 
@@ -564,6 +576,262 @@ export const alimentosService = {
     return merged;
   },
 
+  // ---------------------------------------------------------------------------
+  // BÚSQUEDA PROGRESIVA — Fase 1: BD local (instantánea)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Fase 1 de la búsqueda progresiva.
+   *
+   * Consulta únicamente la base de datos local:
+   *   - Alimentos globales (generic + USDA/OFF ya cacheados de búsquedas anteriores).
+   *   - Personalizados del usuario (si se proporciona `userId`).
+   *   - Opcionalmente ALIMENTOS_BASICOS (si `INCLUIR_BASICOS_EN_BUSQUEDA` es true).
+   *
+   * Sin llamadas de red externas → resultado típico < 300 ms.
+   * El pool crece automáticamente con cada búsqueda previa que haya cacheado USDA/OFF.
+   */
+  async buscarAlimentoLocal(query: string, userId?: string | null): Promise<Food[]> {
+    const term = query.trim();
+    if (!term) return [];
+
+    const termLimpio = limpiarRuidoBusqueda(term) || term;
+    const normalizedQuery = normalizeText(termLimpio);
+    const queryVariants = variantesNombreParaScoring(normalizedQuery, termLimpio);
+    const queryTokens = tokensForMatchingExpanded(normalizedQuery, termLimpio);
+    const nTerm = normalizeText(termLimpio);
+    const singleTokenQuery = nTerm.length > 0 && !nTerm.includes(' ');
+
+    let basicFoods: Food[] = [];
+    if (INCLUIR_BASICOS_EN_BUSQUEDA) {
+      const basicMatches = buscarEnBasicos(normalizedQuery, queryTokens, queryVariants);
+      basicFoods = await this._upsertBasicos(basicMatches);
+    }
+
+    // Todos los alimentos globales de la BD en paralelo con los personalizados.
+    // No filtramos por api_source: incluye generic + USDA/OFF ya cacheados.
+    const [allGlobalBd, personalizados] = await Promise.all([
+      buscarFoodsPorTextoLibre(termLimpio, 120, (q) =>
+        q.eq('is_custom', false).is('created_by', null),
+      ).catch((): Food[] => []),
+      userId
+        ? buscarFoodsPorTextoLibre(termLimpio, 12, (q) =>
+            q.eq('is_custom', true).eq('created_by', userId),
+          ).catch((): Food[] => [])
+        : Promise.resolve([] as Food[]),
+    ]);
+
+    // Separar por fuente para mantener la misma distribución de slots.
+    const genericBd = allGlobalBd.filter((f) => f.api_source === GENERIC_DB_API_SOURCE);
+    const usdaCached = allGlobalBd.filter((f) => f.api_source === USDA_API_SOURCE);
+    const offCached = allGlobalBd.filter(
+      (f) => f.api_source === FOOD_API_SOURCE || f.api_source === 'openfoodfacts',
+    );
+
+    const genericPool = [...basicFoods, ...genericBd];
+
+    const popularityIds = [
+      ...genericPool.map((x) => x.id),
+      ...usdaCached.map((x) => x.id),
+      ...offCached.map((x) => x.id),
+      ...personalizados.map((x) => x.id),
+    ].filter(esUuidPostgres);
+    const popularidad = await cargarPopularidadPorIds(popularityIds);
+
+    const scoreCtx: SearchScoreCtx = {
+      queryVariants,
+      queryTokens,
+      singleTokenQuery,
+      apiOrderByKey: new Map(), // sin orden de API en fase local
+      popularidad,
+    };
+
+    const rankedGeneric = rankFoodsForBucket(genericPool, scoreCtx);
+    const rankedUsda = rankFoodsForBucket(usdaCached, scoreCtx);
+    const rankedOff = rankFoodsForBucket(offCached, scoreCtx);
+    const rankedPers = rankFoodsForBucket(personalizados, scoreCtx);
+
+    const seenKeys = new Set<string>();
+    const seenNames = new Set<string>();
+    const merged: Food[] = [];
+
+    pickSearchSlots(rankedGeneric, BUSQUEDA_SLOT_GENERICOS_BD, merged, seenKeys, seenNames);
+    pickSearchSlots(rankedUsda, BUSQUEDA_SLOT_USDA, merged, seenKeys, seenNames);
+    pickSearchSlots(rankedOff, BUSQUEDA_SLOT_OFF, merged, seenKeys, seenNames);
+    pickSearchSlots(
+      rankedPers,
+      Math.max(0, MAX_RESULTADOS_BUSQUEDA - merged.length),
+      merged,
+      seenKeys,
+      seenNames,
+    );
+
+    dbgAlimentos('buscarAlimentoLocal', { term: termLimpio, total: merged.length });
+    return merged;
+  },
+
+  // ---------------------------------------------------------------------------
+  // BÚSQUEDA PROGRESIVA — Fase 2: APIs externas (background)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Fase 2 de la búsqueda progresiva.
+   *
+   * Llama a USDA Foundation + Open Food Facts, guarda en caché global y devuelve
+   * únicamente los alimentos que NO están ya en `idsYaMostrados` (los que mostró
+   * la Fase 1). La UI puede añadirlos al listado existente sin sustituirlo.
+   *
+   * @param query          Término de búsqueda original (ES).
+   * @param userId         ID del usuario (opcional; no se usa en esta fase).
+   * @param idsYaMostrados Set con los `id` UUID de los resultados ya visibles.
+   */
+  async enriquecerConApis(
+    query: string,
+    _userId: string | null | undefined,
+    idsYaMostrados: Set<string>,
+  ): Promise<Food[]> {
+    const term = query.trim();
+    if (!term) return [];
+
+    const termLimpio = limpiarRuidoBusqueda(term) || term;
+    const normalizedQuery = normalizeText(termLimpio);
+    const queryVariants = variantesNombreParaScoring(normalizedQuery, termLimpio);
+    const queryTokens = tokensForMatchingExpanded(normalizedQuery, termLimpio);
+    const nTerm = normalizeText(termLimpio);
+    const singleTokenQuery = nTerm.length > 0 && !nTerm.includes(' ');
+
+    // Traducción + OFF en paralelo (igual que en buscarAlimento original).
+    const [qEn, offPartials] = await Promise.all([
+      terminoInglesParaUsda(termLimpio),
+      this._buscarOpenFoodFacts(termLimpio, BUSQUEDA_SLOT_OFF).catch(
+        (): Partial<Food>[] => [],
+      ),
+    ]);
+
+    dbgAlimentos('enriquecerConApis USDA query EN', qEn);
+
+    let usdaPartials: Partial<Food>[] = [];
+    try {
+      usdaPartials = await this._buscarUsdaFoundation(qEn, BUSQUEDA_SLOT_USDA);
+    } catch (e) {
+      dbgAlimentos('enriquecerConApis USDA excepción', e);
+    }
+
+    const apiCandidates = [...usdaPartials, ...offPartials];
+    const apiOrderByKey = new Map<string, number>();
+    let apiOrderIdx = 0;
+    for (const c of apiCandidates) {
+      if (!c.api_source || c.api_id == null || String(c.api_id).length === 0) continue;
+      const key = `${c.api_source}:${c.api_id}`;
+      if (!apiOrderByKey.has(key)) apiOrderByKey.set(key, apiOrderIdx++);
+    }
+
+    let cachedApiFoods: Food[] = [];
+    if (apiCandidates.length > 0) {
+      try {
+        cachedApiFoods = await this._guardarEnCache(apiCandidates);
+      } catch (e) {
+        dbgAlimentos('enriquecerConApis _guardarEnCache error', e);
+        cachedApiFoods = [];
+      }
+      if (cachedApiFoods.length === 0) {
+        cachedApiFoods = await this._cargarDesdeCachePorCandidatos(apiCandidates);
+      }
+    }
+
+    // Solo los que no están ya en pantalla (Fase 1 los mostró).
+    const nuevos = cachedApiFoods.filter((f) => !idsYaMostrados.has(f.id));
+    if (nuevos.length === 0) return [];
+
+    const usdaNuevos = nuevos.filter((f) => f.api_source === USDA_API_SOURCE);
+    const offNuevos = nuevos.filter(
+      (f) => f.api_source === FOOD_API_SOURCE || f.api_source === 'openfoodfacts',
+    );
+
+    const popularityIds = nuevos.map((x) => x.id).filter(esUuidPostgres);
+    const popularidad = await cargarPopularidadPorIds(popularityIds);
+
+    const scoreCtx: SearchScoreCtx = {
+      queryVariants,
+      queryTokens,
+      singleTokenQuery,
+      apiOrderByKey,
+      popularidad,
+    };
+
+    const rankedUsda = rankFoodsForBucket(usdaNuevos, scoreCtx);
+    const rankedOff = rankFoodsForBucket(offNuevos, scoreCtx);
+
+    const seenKeys = new Set<string>();
+    const seenNames = new Set<string>();
+    const merged: Food[] = [];
+
+    pickSearchSlots(rankedUsda, BUSQUEDA_SLOT_USDA, merged, seenKeys, seenNames);
+    pickSearchSlots(rankedOff, BUSQUEDA_SLOT_OFF, merged, seenKeys, seenNames);
+
+    dbgAlimentos('enriquecerConApis nuevos', { usda: usdaNuevos.length, off: offNuevos.length, devueltos: merged.length });
+    return merged;
+  },
+
+  /**
+   * Combina y reordena por relevancia un listado de alimentos ya obtenidos.
+   * Aplica el mismo sistema de slots y scoring que `buscarAlimento`.
+   * Uso principal: fusionar resultados de Fase 1 (BD) + Fase 2 (APIs) en la
+   * búsqueda progresiva, evitando una segunda consulta a la BD que fallaría
+   * por sensibilidad a acentos en PostgreSQL ILIKE.
+   */
+  async rankearResultados(query: string, foods: Food[]): Promise<Food[]> {
+    if (foods.length === 0) return [];
+
+    const term = query.trim();
+    if (!term) return foods.slice(0, MAX_RESULTADOS_BUSQUEDA);
+
+    const termLimpio = limpiarRuidoBusqueda(term) || term;
+    const normalizedQuery = normalizeText(termLimpio);
+    const queryVariants = variantesNombreParaScoring(normalizedQuery, termLimpio);
+    const queryTokens = tokensForMatchingExpanded(normalizedQuery, termLimpio);
+    const nTerm = normalizeText(termLimpio);
+    const singleTokenQuery = nTerm.length > 0 && !nTerm.includes(' ');
+
+    const popularityIds = foods.map((f) => f.id).filter(esUuidPostgres);
+    const popularidad = await cargarPopularidadPorIds(popularityIds);
+
+    const scoreCtx: SearchScoreCtx = {
+      queryVariants,
+      queryTokens,
+      singleTokenQuery,
+      apiOrderByKey: new Map(),
+      popularidad,
+    };
+
+    // Separar por fuente para mantener la distribución de slots original.
+    const genericPool = foods.filter(
+      (f) => f.api_source === GENERIC_DB_API_SOURCE || f.api_source === 'builtin',
+    );
+    const usdaPool = foods.filter((f) => f.api_source === USDA_API_SOURCE);
+    const offPool = foods.filter(
+      (f) => f.api_source === FOOD_API_SOURCE || f.api_source === 'openfoodfacts',
+    );
+    const persPool = foods.filter((f) => !!f.is_custom);
+
+    const seenKeys = new Set<string>();
+    const seenNames = new Set<string>();
+    const merged: Food[] = [];
+
+    pickSearchSlots(rankFoodsForBucket(genericPool, scoreCtx), BUSQUEDA_SLOT_GENERICOS_BD, merged, seenKeys, seenNames);
+    pickSearchSlots(rankFoodsForBucket(usdaPool, scoreCtx), BUSQUEDA_SLOT_USDA, merged, seenKeys, seenNames);
+    pickSearchSlots(rankFoodsForBucket(offPool, scoreCtx), BUSQUEDA_SLOT_OFF, merged, seenKeys, seenNames);
+    pickSearchSlots(
+      rankFoodsForBucket(persPool, scoreCtx),
+      Math.max(0, MAX_RESULTADOS_BUSQUEDA - merged.length),
+      merged,
+      seenKeys,
+      seenNames,
+    );
+
+    return merged;
+  },
+
   /**
    * Devuelve un Food con id UUID válido para `nutrition_log_items.food_id`.
    */
@@ -809,7 +1077,7 @@ export const alimentosService = {
         pageSize: String(n),
       }).toString();
 
-    const res = await fetchConTimeout(url, 7000);
+    const res = await fetchConTimeout(url, 15_000);
     if (!res.ok) {
       dbgAlimentos('USDA search HTTP', res.status);
       return [];
@@ -967,7 +1235,7 @@ export const alimentosService = {
     if (clean.length < 8 || clean.length > 14) return null;
     const url = `https://world.openfoodfacts.org/api/v0/product/${encodeURIComponent(clean)}.json`;
     try {
-      const res = await fetch(url);
+      const res = await fetchConTimeout(url, 30_000);
       if (!res.ok) return null;
       const j = (await res.json()) as {
         status?: number;
@@ -1145,6 +1413,11 @@ function traducirAlIngles(query: string): string {
     aguacate: 'avocado', palta: 'avocado', platano: 'banana', banano: 'banana',
     manzana: 'apple', fresa: 'strawberry', naranja: 'orange', mango: 'mango',
     limon: 'lemon', lima: 'lime',
+    pina: 'pineapple', sandia: 'watermelon', melon: 'melon',
+    uva: 'grape', uvas: 'grape', pera: 'pear', durazno: 'peach',
+    melocoton: 'peach', cereza: 'cherry', cerezas: 'cherry',
+    kiwi: 'kiwi', papaya: 'papaya', coco: 'coconut',
+    ciruela: 'plum', ciruelas: 'plum', higo: 'fig', higos: 'fig',
     frijoles: 'beans', lentejas: 'lentils', garbanzos: 'chickpeas',
     tofu: 'tofu', almendras: 'almonds', mani: 'peanut', cacahuate: 'peanut',
     proteina: 'protein powder', yogur: 'yogurt', yogurt: 'yogurt',
@@ -1426,7 +1699,7 @@ async function fetchFdcFoodNutrientRows(
 ): Promise<unknown[] | undefined> {
   try {
     const url = `https://api.nal.usda.gov/fdc/v1/food/${fdcId}?api_key=${encodeURIComponent(apiKey)}`;
-    const res = await fetchConTimeout(url, 5000);
+    const res = await fetchConTimeout(url, 10_000);
     if (!res.ok) return undefined;
     const j = (await res.json()) as { foodNutrients?: unknown[] };
     return Array.isArray(j.foodNutrients) ? j.foodNutrients : undefined;
@@ -1477,7 +1750,7 @@ function offNombreIncluyeAlgunToken(
 
 async function fetchOffSearchPlProducts(url: string): Promise<Record<string, unknown>[]> {
   try {
-    const res = await fetchConTimeout(url, 7000);
+    const res = await fetchConTimeout(url, 15_000);
     if (!res.ok) return [];
     const payload = (await res.json()) as { products?: unknown[] };
     const arr = Array.isArray(payload?.products) ? payload.products : [];
@@ -1517,7 +1790,7 @@ async function fetchOffV2EspanaConTextoEnNombre(
     for (let page = 1; page <= maxPages && collected.length < targetPool; page++) {
       const u = `${base}?search_terms=${qEnc}&page=${page}&page_size=${perPage}&fields=${fields}`;
       try {
-        const res = await fetchConTimeout(u, 5000);
+        const res = await fetchConTimeout(u, 10_000);
         if (!res.ok) continue;
         const j = (await res.json()) as { products?: unknown[] };
         const raw = Array.isArray(j?.products) ? j.products : [];
