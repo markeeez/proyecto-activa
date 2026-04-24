@@ -861,39 +861,21 @@ export const entrenamientoService = {
       });
   },
 
-  async obtenerAnteriorPorEjercicio(userId: string, exerciseId: string): Promise<string | null> {
-    const { data, error } = await supabase
-      .from('workout_sets')
-      .select(
-        'repeticiones, peso_kg, tipo_peso, workout_session_exercises!inner ( exercise_id, workout_sessions!inner ( user_id, fecha, created_at ) )',
-      )
-      .eq('completada', true)
-      .eq('workout_session_exercises.exercise_id', exerciseId);
+  async obtenerAnteriorPorEjercicio(_userId: string, exerciseId: string): Promise<string | null> {
+    // RPC: Postgres filtra por auth.uid(), ordena por sesión más reciente y devuelve 1 fila.
+    // Antes: join de 50 filas al cliente + sort en JS. Ahora: 1 fila, 0 JS.
+    const { data, error } = await supabase.rpc('obtener_anterior_ejercicio', {
+      p_exercise_id: exerciseId,
+    });
 
     if (error) {
       console.error('[obtenerAnteriorPorEjercicio]', error.message);
       return null;
     }
 
-    const rows = (data ?? [])
-      .map((r) => normalizarAnteriorJoinRow(r as AnteriorJoinRowRaw))
-      .filter((r): r is AnteriorJoinRow => r != null);
-    const mine = rows.filter(
-      (r) =>
-        r.workout_session_exercises.exercise_id === exerciseId &&
-        r.workout_session_exercises.workout_sessions.user_id === userId,
-    );
-    if (!mine.length) return null;
-
-    const scored = mine.map((r) => {
-      const sess = r.workout_session_exercises.workout_sessions;
-      const sortKey = new Date(sess.created_at).getTime() || new Date(sess.fecha).getTime() || 0;
-      return { r, sortKey };
-    });
-    scored.sort((a, b) => b.sortKey - a.sortKey);
-    const best = scored[0]?.r;
-    if (!best) return null;
-    return formatearAnteriorSet(best.peso_kg, best.repeticiones, best.tipo_peso);
+    const row = (data as any[])?.[0];
+    if (!row) return null;
+    return formatearAnteriorSet(row.peso_kg, row.repeticiones, row.tipo_peso);
   },
 
   async guardarSetsCompletados(sessionId: string, ejercicios: EntrenoEjercicioPersistido[]): Promise<void> {
@@ -1061,31 +1043,20 @@ export const entrenamientoService = {
   },
 
   /** Suma (peso_kg × repeticiones) de sets completados en sesiones de la semana. */
-  async obtenerVolumenSemanaKg(userId: string, fechaInicio: string, fechaFin: string): Promise<number> {
-    const { data, error } = await supabase
-      .from('workout_sessions')
-      .select('workout_session_exercises ( workout_sets ( peso_kg, repeticiones, completada ) )')
-      .eq('user_id', userId)
-      .gte('fecha', fechaInicio)
-      .lte('fecha', fechaFin);
+  async obtenerVolumenSemanaKg(_userId: string, fechaInicio: string, fechaFin: string): Promise<number> {
+    // RPC: Postgres calcula el SUM directamente y devuelve 1 número.
+    // Antes: join de 75–280 filas al cliente + bucle triple en JS.
+    const { data, error } = await supabase.rpc('obtener_volumen_semana_kg', {
+      p_fecha_inicio: fechaInicio,
+      p_fecha_fin: fechaFin,
+    });
 
     if (error) {
       console.error('[obtenerVolumenSemanaKg]', error.message);
       return 0;
     }
 
-    let vol = 0;
-    for (const row of (data ?? []) as VolumenSemanaRow[]) {
-      for (const ex of row.workout_session_exercises ?? []) {
-        for (const st of ex.workout_sets ?? []) {
-          if (!st.completada) continue;
-          const w = st.peso_kg != null ? Number(st.peso_kg) : 0;
-          const r = st.repeticiones != null ? Number(st.repeticiones) : 0;
-          vol += w * r;
-        }
-      }
-    }
-    return vol;
+    return Number(data ?? 0);
   },
 
   async obtenerDetalleSesion(sessionId: string): Promise<DetalleSesion | null> {
@@ -1301,49 +1272,10 @@ export const entrenamientoService = {
   },
 
   async eliminarEntreno(sessionId: string): Promise<void> {
+    // ON DELETE CASCADE en BD: borrar la sesión elimina en cascada
+    // workout_session_exercises y workout_sets automáticamente.
     const { error } = await supabase.from('workout_sessions').delete().eq('id', sessionId);
-    if (!error) return;
-
-    const msg = (error.message ?? '').toLowerCase();
-    const requiereManual =
-      msg.includes('violates foreign key constraint') ||
-      msg.includes('foreign key') ||
-      msg.includes('constraint');
-
-    if (!requiereManual) {
-      console.error('[eliminarEntreno]', error.message);
-      throw new Error(error.message);
-    }
-
-    const { data: relRows, error: relErr } = await supabase
-      .from('workout_session_exercises')
-      .select('id')
-      .eq('session_id', sessionId);
-    if (relErr) {
-      console.error('[eliminarEntreno] select workout_session_exercises', relErr.message);
-      throw new Error(relErr.message);
-    }
-
-    const relIds = (relRows ?? []).map((x: { id: string }) => x.id);
-    if (relIds.length > 0) {
-      const { error: setErr } = await supabase.from('workout_sets').delete().in('session_exercise_id', relIds);
-      if (setErr) {
-        console.error('[eliminarEntreno] delete workout_sets', setErr.message);
-        throw new Error(setErr.message);
-      }
-    }
-
-    const { error: exErr } = await supabase.from('workout_session_exercises').delete().eq('session_id', sessionId);
-    if (exErr) {
-      console.error('[eliminarEntreno] delete workout_session_exercises', exErr.message);
-      throw new Error(exErr.message);
-    }
-
-    const { error: sessionErr } = await supabase.from('workout_sessions').delete().eq('id', sessionId);
-    if (sessionErr) {
-      console.error('[eliminarEntreno] delete workout_sessions', sessionErr.message);
-      throw new Error(sessionErr.message);
-    }
+    if (error) throw error;
   },
 
   async obtenerRutinasPredeterminadas(): Promise<RutinaExplorar[]> {

@@ -809,7 +809,7 @@ export const alimentosService = {
         pageSize: String(n),
       }).toString();
 
-    const res = await fetch(url);
+    const res = await fetchConTimeout(url, 7000);
     if (!res.ok) {
       dbgAlimentos('USDA search HTTP', res.status);
       return [];
@@ -1410,13 +1410,23 @@ function macrosFromFdcNutrientRows(rows: unknown[] | undefined): {
   };
 }
 
+/**
+ * fetch con timeout via AbortController. Lanza AbortError si supera `ms` milisegundos.
+ * Evita que llamadas a USDA / OFF bloqueen la búsqueda indefinidamente en conexiones lentas.
+ */
+function fetchConTimeout(url: string, ms: number, init?: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  return fetch(url, { ...init, signal: controller.signal }).finally(() => clearTimeout(timer));
+}
+
 async function fetchFdcFoodNutrientRows(
   fdcId: number,
   apiKey: string,
 ): Promise<unknown[] | undefined> {
   try {
     const url = `https://api.nal.usda.gov/fdc/v1/food/${fdcId}?api_key=${encodeURIComponent(apiKey)}`;
-    const res = await fetch(url);
+    const res = await fetchConTimeout(url, 5000);
     if (!res.ok) return undefined;
     const j = (await res.json()) as { foodNutrients?: unknown[] };
     return Array.isArray(j.foodNutrients) ? j.foodNutrients : undefined;
@@ -1467,7 +1477,7 @@ function offNombreIncluyeAlgunToken(
 
 async function fetchOffSearchPlProducts(url: string): Promise<Record<string, unknown>[]> {
   try {
-    const res = await fetch(url);
+    const res = await fetchConTimeout(url, 7000);
     if (!res.ok) return [];
     const payload = (await res.json()) as { products?: unknown[] };
     const arr = Array.isArray(payload?.products) ? payload.products : [];
@@ -1507,7 +1517,7 @@ async function fetchOffV2EspanaConTextoEnNombre(
     for (let page = 1; page <= maxPages && collected.length < targetPool; page++) {
       const u = `${base}?search_terms=${qEnc}&page=${page}&page_size=${perPage}&fields=${fields}`;
       try {
-        const res = await fetch(u);
+        const res = await fetchConTimeout(u, 5000);
         if (!res.ok) continue;
         const j = (await res.json()) as { products?: unknown[] };
         const raw = Array.isArray(j?.products) ? j.products : [];

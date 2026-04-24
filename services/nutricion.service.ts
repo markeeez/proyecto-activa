@@ -322,18 +322,13 @@ export const nutricionService = {
   },
 
   async actualizarOrdenComidas(logId: string, mealIdsEnOrden: string[]): Promise<void> {
-    const results = await Promise.all(
-      mealIdsEnOrden.map((id, index) =>
-        supabase
-          .from('nutrition_log_meals')
-          .update({ orden: index + 1 })
-          .eq('id', id)
-          .eq('log_id', logId),
-      ),
-    );
-    for (const r of results) {
-      if (r.error) throw r.error;
-    }
+    // RPC: actualiza todos los órdenes en una sola transacción atómica.
+    // Antes: N UPDATEs paralelos sin transacción → orden parcial si uno fallaba.
+    const { error } = await supabase.rpc('actualizar_orden_comidas', {
+      p_log_id: logId,
+      p_meal_ids: mealIdsEnOrden,
+    });
+    if (error) throw error;
   },
 
   async añadirAlimentoAComida(datos: {
@@ -444,14 +439,27 @@ export const nutricionService = {
       food: { calorias: number; proteinas: number; carbohidratos: number; grasas: number };
     }[],
   ) {
-    for (const c of copias) {
-      await this.añadirAlimentoAComida({
-        mealId,
-        foodId: c.foodId,
+    if (!copias.length) return;
+
+    // Batch INSERT: un único round-trip en vez de N secuenciales.
+    const rows = copias.map((c) => {
+      const factor = c.gramos / 100;
+      return {
+        meal_id: mealId,
+        food_id: c.foodId,
         gramos: c.gramos,
-        food: c.food,
-      });
-    }
+        calorias_calculadas: c.food.calorias * factor,
+        proteinas_calculadas: c.food.proteinas * factor,
+        carbos_calculados: c.food.carbohidratos * factor,
+        grasas_calculadas: c.food.grasas * factor,
+      };
+    });
+
+    const { error } = await supabase.from('nutrition_log_items').insert(rows);
+    if (error) throw error;
+
+    // Registrar popularidad en paralelo, sin bloquear.
+    void Promise.all(copias.map((c) => alimentosService.registrarSeleccionPopularity(c.foodId)));
   },
 
   async actualizarGramosAlimento(_itemId: string, _nuevosGramos: number) {},
