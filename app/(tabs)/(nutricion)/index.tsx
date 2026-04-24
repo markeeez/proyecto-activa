@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Modal,
@@ -66,14 +66,11 @@ export default function NutricionIndex() {
   const styles = useMemo(() => makeStyles(c, f, ts, s, r), [c, f, ts, s, r]);
 
   const [ordenIds, setOrdenIds] = useState<string[] | null>(null);
-  const [comidasData, setComidasData] = useState<ComidaConAlimentos[]>([]);
+  // dragOverride: orden optimista durante/después de un drag. Se limpia cuando llegan datos frescos.
+  const [dragOverride, setDragOverride] = useState<ComidaConAlimentos[] | null>(null);
   const [modalNuevaComida, setModalNuevaComida] = useState(false);
   const [nombreNuevaComida, setNombreNuevaComida] = useState('');
   const [menuMealId, setMenuMealId] = useState<string | null>(null);
-
-  // Evita el parpadeo post-drag: cuando el propio onDragEnd actualiza ordenIds,
-  // el useEffect que sincroniza comidasData debe saltarse ese ciclo.
-  const skipNextSyncRef = useRef(false);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -98,13 +95,14 @@ export default function NutricionIndex() {
     [resumen?.comidas, ordenIds],
   );
 
+  // comidasData: usa el override del drag si existe, si no la lista ordenada del servidor.
+  // Esto evita el render extra que causaba que los macros aparecieran antes que las comidas.
+  const comidasData = dragOverride ?? listaOrdenada;
+
+  // Limpiar el override cuando llegan datos frescos del servidor.
   useEffect(() => {
-    if (skipNextSyncRef.current) {
-      skipNextSyncRef.current = false;
-      return;
-    }
-    setComidasData(listaOrdenada);
-  }, [listaOrdenada]);
+    setDragOverride(null);
+  }, [resumen]);
 
   const fechaLabel = useMemo(() => {
     const d = parseFechaLocal(fecha);
@@ -179,10 +177,7 @@ export default function NutricionIndex() {
 
   const onDragEnd = useCallback(
     ({ data }: { data: ComidaConAlimentos[] }) => {
-      // Marcar antes de los setState para que el useEffect de sincronización
-      // ignore el ciclo provocado por setOrdenIds y no sobreescriba el resultado del drag.
-      skipNextSyncRef.current = true;
-      setComidasData(data);
+      setDragOverride(data);
       const ids = data.map((c) => c.mealId);
       setOrdenIds(ids);
       if (user?.id) void guardarOrdenComidas(user.id, fecha, ids);

@@ -22,6 +22,9 @@ export function useNutricion() {
   const [cargando, setCargando] = useState(false);
   const fechaRef = useRef(fecha);
 
+  // Cache en memoria: días ya cargados → se muestran inmediatamente al volver a ellos
+  const resumenCache = useRef<Map<string, ResumenDiarioNutricion>>(new Map());
+
   useEffect(() => {
     fechaRef.current = fecha;
   }, [fecha]);
@@ -36,6 +39,7 @@ export function useNutricion() {
         nutricionService.obtenerObjetivos(user.id),
       ]);
       if (f !== fechaRef.current) return;
+      if (resumenDia) resumenCache.current.set(f, resumenDia);
       setResumen(resumenDia);
       setObjetivos(objetivosUsuario);
     } catch (e) {
@@ -70,9 +74,10 @@ export function useNutricion() {
   }, [cargar]);
 
   const cambiarFecha = useCallback((nueva: string) => {
-    // Limpiar datos del día anterior inmediatamente para que no se muestren
-    // macros/comidas de un día mientras carga el siguiente.
-    setResumen(null);
+    // Mostrar datos cacheados del día inmediatamente si existen (stale-while-revalidate).
+    // Si no hay caché, limpiar para no mostrar datos del día anterior.
+    const cached = resumenCache.current.get(nueva);
+    setResumen(cached ?? null);
     setFecha(nueva);
   }, []);
 
