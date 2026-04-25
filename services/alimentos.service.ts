@@ -406,33 +406,10 @@ export const alimentosService = {
 
   async obtenerRecientes(userId: string): Promise<Food[]> {
     const { data, error } = await supabase
-      .from('nutrition_log_items')
-      .select(`
-        id,
-        meal_id,
-        foods (*),
-        nutrition_log_meals!inner (
-          id,
-          nutrition_logs!inner (user_id, fecha)
-        )
-      `)
-      .eq('nutrition_log_meals.nutrition_logs.user_id', userId)
-      .order('id', { ascending: false })
-      .limit(80);
+      .rpc('obtener_recientes_usuario', { p_user_id: userId });
 
     if (error) throw error;
-
-    const seen = new Set<string>();
-    const recentFoods: Food[] = [];
-
-    for (const row of data ?? []) {
-      const food = (row as any).foods as Food | null;
-      if (!food || seen.has(food.id)) continue;
-      seen.add(food.id);
-      recentFoods.push(food);
-      if (recentFoods.length >= 20) break;
-    }
-    return recentFoods;
+    return (data ?? []) as Food[];
   },
 
   /**
