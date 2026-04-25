@@ -22,7 +22,9 @@ export function useNutricion() {
   const [cargando, setCargando] = useState(false);
   const fechaRef = useRef(fecha);
 
-  // Cache en memoria: días ya cargados → se muestran inmediatamente al volver a ellos
+  // Cache en memoria: días ya cargados → se muestran inmediatamente al volver a ellos.
+  // Máximo 14 entradas (2 semanas) para evitar crecimiento indefinido de memoria.
+  const CACHE_MAX = 14;
   const resumenCache = useRef<Map<string, ResumenDiarioNutricion>>(new Map());
 
   useEffect(() => {
@@ -39,7 +41,13 @@ export function useNutricion() {
         nutricionService.obtenerObjetivos(user.id),
       ]);
       if (f !== fechaRef.current) return;
-      if (resumenDia) resumenCache.current.set(f, resumenDia);
+      if (resumenDia) {
+        if (resumenCache.current.size >= CACHE_MAX) {
+          const oldest = resumenCache.current.keys().next().value;
+          if (oldest) resumenCache.current.delete(oldest);
+        }
+        resumenCache.current.set(f, resumenDia);
+      }
       setResumen(resumenDia);
       setObjetivos(objetivosUsuario);
     } catch (e) {

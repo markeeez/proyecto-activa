@@ -19,6 +19,7 @@ import { router } from 'expo-router';
 import { useAuth } from '@/context/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { tipoSerieDbAUi } from '@/lib/entrenamientoSerie';
+import { lid, seriePorDefecto } from '@/lib/entrenamientoUtils';
 import type { BorradorEjercicioLinea, BorradorSerieLinea } from '@/types/entrenamientoBorrador.types';
 import type { TipoSerie } from '@/types/database.types';
 import {
@@ -58,13 +59,6 @@ function snapshotRutinaDesdeCargados(cargados: EjercicioBorrador[]): SnapshotRut
   };
 }
 
-function lid(): string {
-  return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-}
-
-function seriePorDefecto(): BorradorSerieLinea {
-  return { setId: lid(), tipoUi: 'lineal', kg: '', reps: '', completada: false };
-}
 
 function mapCargadoALineaDesdeUltima(ej: EjercicioBorrador, ultima: UltimaSesionRutina | null): BorradorEjercicioLinea {
   const sets: BorradorSerieLinea[] =

@@ -28,6 +28,7 @@ import { useEntreno, useEntrenoDuracionTexto, type SnapshotRutina } from '@/cont
 import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from '@/hooks/useTheme';
 import { tipoSerieUiADb } from '@/lib/entrenamientoSerie';
+import { lid, seriePorDefecto } from '@/lib/entrenamientoUtils';
 import { ejerciciosService } from '@/services/ejercicios.service';
 import {
   entrenamientoService,
@@ -38,16 +39,9 @@ import {
 import type { Exercise } from '@/types/database.types';
 import type { BorradorEjercicioLinea, BorradorSerieLinea } from '@/types/entrenamientoBorrador.types';
 
-function lid(): string {
-  return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-}
-
-function seriePorDefecto(): BorradorSerieLinea {
-  return { setId: lid(), tipoUi: 'lineal', kg: '', reps: '', completada: false };
-}
 
 function parseOptFloat(s: string): number | null {
-  const t = s.trim().replace(',', '.');
+  const t = s.trim().replace(/,/g, '.');
   if (!t || t === '—') return null;
   const n = Number(t);
   return Number.isFinite(n) ? n : null;

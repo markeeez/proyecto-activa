@@ -181,8 +181,26 @@ export default function NutricionIndex() {
       const ids = data.map((c) => c.mealId);
       setOrdenIds(ids);
       if (user?.id) void guardarOrdenComidas(user.id, fecha, ids);
+
+      // Timeout de seguridad: si el servidor no responde en 10s, limpiar el override
+      // para que el estado visual vuelva a sincronizarse con lo que haya en servidor.
+      const safetyTimer = setTimeout(() => setDragOverride(null), 10_000);
+
       const lid = resumen?.logId;
-      if (lid) void nutricionService.actualizarOrdenComidas(lid, ids).catch(() => {});
+      if (lid) {
+        nutricionService
+          .actualizarOrdenComidas(lid, ids)
+          .then(() => clearTimeout(safetyTimer))
+          .catch(() => {
+            clearTimeout(safetyTimer);
+            setDragOverride(null);
+            if (typeof __DEV__ !== 'undefined' && __DEV__) {
+              console.warn('[nutricion] actualizarOrdenComidas falló — orden revertido');
+            }
+          });
+      } else {
+        clearTimeout(safetyTimer);
+      }
     },
     [user?.id, fecha, resumen?.logId],
   );
