@@ -62,7 +62,10 @@ export const ejerciciosService = {
     let q = supabase.from('exercises').select('*');
 
     if (modoLista === 'creados') {
-      if (!userId) return [];
+      if (!userId) {
+        console.warn('[ejerciciosService] buscarEjercicios modo creados llamado sin userId');
+        return [];
+      }
       q = q.eq('is_custom', true).eq('created_by', userId);
     } else if (modoLista === 'favoritos') {
       if (!userId) return [];

@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -402,6 +402,65 @@ function makeStyles(
       borderRadius: r.sm,
     },
     devOnboardingTxt: { ...ts.caption, fontFamily: f.mono, color: c.textMuted },
+    modalBackdrop: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.5)',
+      justifyContent: 'center',
+      alignItems: 'center',
+      paddingHorizontal: s.lg,
+    },
+    modalCard: {
+      backgroundColor: c.surface,
+      borderRadius: r.md,
+      padding: s.lg,
+      width: '100%',
+      borderWidth: 1,
+      borderColor: c.borderVisible,
+    },
+    modalTitulo: {
+      ...ts.subheading,
+      fontFamily: f.sansMedium,
+      color: c.textDisplay,
+      marginBottom: s.sm,
+    },
+    modalMensaje: {
+      ...ts.body,
+      fontFamily: f.sans,
+      color: c.textSecondary,
+      marginBottom: s.lg,
+    },
+    modalBtns: {
+      flexDirection: 'row',
+      gap: s.sm,
+    },
+    modalBtnGhost: {
+      flex: 1,
+      paddingVertical: s.md,
+      borderRadius: r.sm,
+      borderWidth: 1,
+      borderColor: c.borderVisible,
+      alignItems: 'center',
+    },
+    modalBtnGhostTxt: {
+      ...ts.bodySm,
+      fontFamily: f.sansMedium,
+      color: c.textDisplay,
+    },
+    modalBtnPrimary: {
+      flex: 1,
+      paddingVertical: s.md,
+      borderRadius: r.sm,
+      backgroundColor: c.primary,
+      alignItems: 'center',
+    },
+    modalBtnDanger: {
+      backgroundColor: c.danger,
+    },
+    modalBtnPrimaryTxt: {
+      ...ts.bodySm,
+      fontFamily: f.sansMedium,
+      color: c.textOnPrimary,
+    },
     themeToggleSection: {
       alignItems: 'center',
       marginVertical: s.md,
@@ -432,6 +491,19 @@ export default function PerfilIndex() {
   const [editandoDatos, setEditandoDatos] = useState(false);
   const [guardandoPerfil, setGuardandoPerfil] = useState(false);
   const [subiendoAvatar, setSubiendoAvatar] = useState(false);
+
+  type ModalState = {
+    visible: boolean;
+    titulo: string;
+    mensaje: string;
+    textoConfirmar?: string;
+    destructivo?: boolean;
+    onConfirmar?: () => void | Promise<void>;
+  };
+  const [modal, setModal] = useState<ModalState>({ visible: false, titulo: '', mensaje: '' });
+  const cerrarModal = () => setModal((prev) => ({ ...prev, visible: false }));
+  const mostrarInfo = (titulo: string, mensaje: string) =>
+    setModal({ visible: true, titulo, mensaje });
 
   const [editGenero, setEditGenero] = useState<GeneroOnboarding>('hombre');
   const [editEdad, setEditEdad] = useState('');
@@ -506,11 +578,11 @@ export default function PerfilIndex() {
     const edadN = parseInt(editEdad.trim(), 10);
     const altN = parseFloat(editAltura.trim().replace(',', '.'));
     if (!editEdad.trim() || !Number.isFinite(edadN) || edadN <= 0) {
-      Alert.alert('Error', 'Indica una edad válida.');
+      mostrarInfo('Error', 'Indica una edad válida.');
       return;
     }
     if (!editAltura.trim() || !Number.isFinite(altN) || altN <= 0) {
-      Alert.alert('Error', 'Indica una altura válida.');
+      mostrarInfo('Error', 'Indica una altura válida.');
       return;
     }
     setGuardandoPerfil(true);
@@ -524,7 +596,7 @@ export default function PerfilIndex() {
         })
         .eq('id', user.id);
       if (error) {
-        Alert.alert('Error', error.message ?? 'No se pudieron guardar los datos.');
+        mostrarInfo('Error', error.message ?? 'No se pudieron guardar los datos.');
         return;
       }
       setProfile((prev) =>
@@ -557,26 +629,56 @@ export default function PerfilIndex() {
     const contentType = a.mimeType || 'image/jpeg';
     setSubiendoAvatar(true);
     try {
+      // 1. Leer el archivo como blob a través de fetch
+      //    (expo-image-picker con allowsEditing=true devuelve un file:// URI en la caché)
       const resFetch = await fetch(a.uri);
-      const buf = await resFetch.arrayBuffer();
-      const { error: upErr } = await supabase.storage.from('avatars').upload(`${user.id}/avatar.jpg`, buf, {
-        upsert: true,
-        contentType,
+      const blob = await resFetch.blob();
+
+      // 2. Convertir blob → base64 → Uint8Array
+      //    El SDK de Supabase en React Native serializa mal un Blob nativo,
+      //    pero acepta correctamente un ArrayBuffer / Uint8Array.
+      const bytes = await new Promise<Uint8Array>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          try {
+            const dataUrl = reader.result as string;
+            const base64 = dataUrl.split(',')[1] ?? '';
+            const binary = atob(base64);
+            const buf = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) buf[i] = binary.charCodeAt(i);
+            resolve(buf);
+          } catch (err) {
+            reject(err);
+          }
+        };
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(blob);
       });
+
+      // 3. Subir al bucket
+      const { error: upErr } = await supabase.storage
+        .from('avatars')
+        .upload(`${user.id}/avatar.jpg`, bytes, { upsert: true, contentType });
       if (upErr) {
-        Alert.alert('Error', upErr.message ?? 'No se pudo subir la foto.');
+        mostrarInfo('Error', upErr.message ?? 'No se pudo subir la foto.');
         return;
       }
+
+      // 4. Actualizar avatar_url en auth metadata
+      //    Se añade ?v=<timestamp> para que expo-image no use la versión en caché.
       const { data: pub } = supabase.storage.from('avatars').getPublicUrl(`${user.id}/avatar.jpg`);
-      const publicUrl = pub.publicUrl;
+      const publicUrl = `${pub.publicUrl}?v=${Date.now()}`;
       const { error: authErr } = await supabase.auth.updateUser({
         data: { avatar_url: publicUrl },
       });
       if (authErr) {
-        Alert.alert('Error', authErr.message ?? 'No se pudo guardar la foto de perfil.');
+        mostrarInfo('Error', authErr.message ?? 'No se pudo guardar la foto de perfil.');
         return;
       }
       setAvatarUrl(publicUrl);
+    } catch (e: any) {
+      const msg = e?.message ?? 'No se pudo subir la foto.';
+      mostrarInfo('Error', msg);
     } finally {
       setSubiendoAvatar(false);
     }
@@ -602,61 +704,55 @@ export default function PerfilIndex() {
 
   const onCambiarEmail = () => {
     if (!user?.email) return;
-    Alert.alert(
-      'Cambiar email',
-      'Se enviará un email de cambio a la dirección actual.',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Confirmar',
-          onPress: async () => {
-            const { error } = await supabase.auth.updateUser({ email: user.email });
-            if (error) {
-              Alert.alert('Error', error.message ?? 'No se pudo enviar el email.');
-              return;
-            }
-            Alert.alert('Listo', 'Email de verificación enviado.');
-          },
-        },
-      ],
-    );
+    setModal({
+      visible: true,
+      titulo: 'Cambiar email',
+      mensaje: 'Se enviará un email de cambio a la dirección actual.',
+      textoConfirmar: 'Confirmar',
+      destructivo: false,
+      onConfirmar: async () => {
+        const { error } = await supabase.auth.updateUser({ email: user.email });
+        if (error) {
+          mostrarInfo('Error', error.message ?? 'No se pudo enviar el email.');
+        } else {
+          mostrarInfo('Listo', 'Email de verificación enviado.');
+        }
+      },
+    });
   };
 
   const onCambiarContrasena = () => {
     if (!user?.email) return;
     const em = user.email.trim().toLowerCase();
-    Alert.alert(
-      'Cambiar contraseña',
-      'Se enviará un email de restablecimiento a tu cuenta.',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Confirmar',
-          onPress: async () => {
-            const { error } = await supabase.auth.resetPasswordForEmail(em);
-            if (error) {
-              Alert.alert('Error', error.message ?? 'No se pudo enviar el email.');
-              return;
-            }
-            Alert.alert('Listo', 'Email enviado.');
-          },
-        },
-      ],
-    );
+    setModal({
+      visible: true,
+      titulo: 'Cambiar contraseña',
+      mensaje: 'Se enviará un email de restablecimiento a tu cuenta.',
+      textoConfirmar: 'Confirmar',
+      destructivo: false,
+      onConfirmar: async () => {
+        const { error } = await supabase.auth.resetPasswordForEmail(em);
+        if (error) {
+          mostrarInfo('Error', error.message ?? 'No se pudo enviar el email.');
+        } else {
+          mostrarInfo('Listo', 'Email enviado.');
+        }
+      },
+    });
   };
 
   const onCerrarSesion = () => {
-    Alert.alert('Cerrar sesión', '¿Seguro que quieres salir?', [
-      { text: 'Cancelar', style: 'cancel' },
-      {
-        text: 'Cerrar sesión',
-        style: 'destructive',
-        onPress: async () => {
-          await supabase.auth.signOut();
-          router.replace('/(auth)/iniciar-sesion');
-        },
+    setModal({
+      visible: true,
+      titulo: 'Cerrar sesión',
+      mensaje: '¿Seguro que quieres salir?',
+      textoConfirmar: 'Cerrar sesión',
+      destructivo: true,
+      onConfirmar: async () => {
+        await supabase.auth.signOut();
+        router.replace('/(auth)/iniciar-sesion');
       },
-    ]);
+    });
   };
 
   return (
@@ -897,6 +993,36 @@ export default function PerfilIndex() {
           </ScrollView>
         </>
       )}
+      {/* Modal custom — reemplaza Alert nativo */}
+      <Modal visible={modal.visible} transparent animationType="fade" onRequestClose={cerrarModal}>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitulo}>{modal.titulo}</Text>
+            {!!modal.mensaje && <Text style={styles.modalMensaje}>{modal.mensaje}</Text>}
+            <View style={styles.modalBtns}>
+              {!!modal.textoConfirmar && (
+                <Pressable style={styles.modalBtnGhost} onPress={cerrarModal}>
+                  <Text style={styles.modalBtnGhostTxt}>Cancelar</Text>
+                </Pressable>
+              )}
+              <Pressable
+                style={[
+                  styles.modalBtnPrimary,
+                  modal.destructivo && styles.modalBtnDanger,
+                ]}
+                onPress={async () => {
+                  cerrarModal();
+                  await modal.onConfirmar?.();
+                }}
+              >
+                <Text style={styles.modalBtnPrimaryTxt}>
+                  {modal.textoConfirmar ?? 'Aceptar'}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }

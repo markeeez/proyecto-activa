@@ -277,7 +277,9 @@ export const nutricionService = {
 
     // La función devuelve RETURNS jsonb → data es el objeto directamente (no array)
     const row = rpcData as any;
-    if (!row) throw new Error('[nutricionService] asegurar_log_diario no devolvió filas');
+    if (!row || typeof row.id !== 'string' || !row.id) {
+      throw new Error('[nutricionService] asegurar_log_diario no devolvió un log válido (id ausente)');
+    }
 
     const logId: string = row.id;
     const insertoPredeterminadas: boolean = row.inserto_predeterminadas ?? false;

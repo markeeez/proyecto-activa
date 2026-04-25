@@ -326,8 +326,10 @@ export const alimentosService = {
     if (!esUuidPostgres(foodId)) return;
     try {
       await supabase.rpc('increment_food_popularity', { p_food_id: foodId });
-    } catch {
-      /* noop */
+    } catch (e: any) {
+      if (typeof __DEV__ !== 'undefined' && __DEV__) {
+        console.warn('[registrarSeleccionPopularity]', e?.message);
+      }
     }
   },
 

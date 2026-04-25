@@ -236,5 +236,8 @@
 | 4-D | Hardcoded `DEFAULT_PLAN_LIMITS` fallback in service | 🟡 Medium | 🟢 Low | 30 |
 
 ---
+Mejorar velocidad carga
 Empezar rutina
+Buscar alimento
+Buscar ejercicio
 *Report generated from static analysis of the ACTIVA codebase. No code was modified.*

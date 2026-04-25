@@ -1043,10 +1043,11 @@ export const entrenamientoService = {
   },
 
   /** Suma (peso_kg × repeticiones) de sets completados en sesiones de la semana. */
-  async obtenerVolumenSemanaKg(_userId: string, fechaInicio: string, fechaFin: string): Promise<number> {
+  async obtenerVolumenSemanaKg(userId: string, fechaInicio: string, fechaFin: string): Promise<number> {
     // RPC: Postgres calcula el SUM directamente y devuelve 1 número.
     // Antes: join de 75–280 filas al cliente + bucle triple en JS.
     const { data, error } = await supabase.rpc('obtener_volumen_semana_kg', {
+      p_user_id: userId,
       p_fecha_inicio: fechaInicio,
       p_fecha_fin: fechaFin,
     });

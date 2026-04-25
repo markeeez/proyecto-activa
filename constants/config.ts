@@ -8,8 +8,14 @@
  * Para cambiar entre entornos (dev/prod), basta con cambiar el .env.
  */
 
-export const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL!;
-export const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
+const _supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
+const _supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+
+if (!_supabaseUrl) throw new Error('[config] EXPO_PUBLIC_SUPABASE_URL no está definida. Revisa tu archivo .env');
+if (!_supabaseAnonKey) throw new Error('[config] EXPO_PUBLIC_SUPABASE_ANON_KEY no está definida. Revisa tu archivo .env');
+
+export const SUPABASE_URL = _supabaseUrl;
+export const SUPABASE_ANON_KEY = _supabaseAnonKey;
 
 // Google Sign-In — rellenar en .env tras crear credenciales en Google Cloud Console
 export const GOOGLE_WEB_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID ?? '';
