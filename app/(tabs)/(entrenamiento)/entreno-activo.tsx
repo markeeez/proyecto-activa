@@ -64,13 +64,16 @@ function lineasAPersistido(lineas: BorradorEjercicioLinea[]): EntrenoEjercicioPe
       exercise_id: line.exerciseId,
       orden: ordenEj++,
       notas: (line.nota ?? '').trim() || null,
-      sets: setsComp.map((s, i) => ({
-        numero_serie: i + 1,
-        tipo_serie: tipoSerieUiADb(s.tipoUi),
-        repeticiones: parseOptInt(s.reps),
-        peso_kg: parseOptFloat(s.kg),
-        tipo_peso: 'kg',
-      })),
+      sets: setsComp.map((s, i) => {
+        const pesoKg = parseOptFloat(s.kg);
+        return {
+          numero_serie: i + 1,
+          tipo_serie: tipoSerieUiADb(s.tipoUi),
+          repeticiones: parseOptInt(s.reps),
+          peso_kg: pesoKg,
+          tipo_peso: pesoKg === null ? 'bodyweight' : 'kg',
+        };
+      }),
     });
   }
   return out;
@@ -85,13 +88,16 @@ function lineasARutinaSoloCompletadas(lineas: BorradorEjercicioLinea[]): Borrado
     out.push({
       exercise_id: line.exerciseId,
       orden: orden++,
-      sets: setsComp.map((s, i) => ({
-        numero_serie: i + 1,
-        tipo_serie: tipoSerieUiADb(s.tipoUi),
-        repeticiones: parseOptInt(s.reps),
-        peso_kg: parseOptFloat(s.kg),
-        tipo_peso: 'kg',
-      })),
+      sets: setsComp.map((s, i) => {
+        const pesoKg = parseOptFloat(s.kg);
+        return {
+          numero_serie: i + 1,
+          tipo_serie: tipoSerieUiADb(s.tipoUi),
+          repeticiones: parseOptInt(s.reps),
+          peso_kg: pesoKg,
+          tipo_peso: pesoKg === null ? 'bodyweight' : 'kg',
+        };
+      }),
     });
   }
   return out;

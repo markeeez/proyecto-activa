@@ -348,45 +348,56 @@ async function limpiarRutinaClonada(routineId: string): Promise<void> {
 }
 
 async function escribirRutinaEjercicios(routineId: string, ejercicios: BorradorEjercicioRutina[]): Promise<void> {
+  // Paso 0 — borrar ejercicios anteriores (cascade borra sus sets)
   const { error: delErr } = await supabase.from('routine_exercises').delete().eq('routine_id', routineId);
   if (delErr) {
     console.error('[escribirRutinaEjercicios] delete', delErr.message);
     throw new Error(delErr.message);
   }
 
-  for (const ex of ejercicios) {
-    const { data: reRow, error: errRe } = await supabase
-      .from('routine_exercises')
-      .insert({
+  if (ejercicios.length === 0) return;
+
+  // Paso 1 — batch insert de todos los ejercicios a la vez
+  const { data: reRows, error: errRe } = await supabase
+    .from('routine_exercises')
+    .insert(
+      ejercicios.map((ex) => ({
         routine_id: routineId,
         exercise_id: ex.exercise_id,
         orden: ex.orden,
         notas: null,
-      })
-      .select('id')
-      .single();
+      })),
+    )
+    .select('id, exercise_id, orden');
 
-    if (errRe || !reRow?.id) {
-      console.error('[escribirRutinaEjercicios] routine_exercises', errRe?.message);
-      throw new Error(errRe?.message ?? 'No se pudo guardar la rutina.');
-    }
+  if (errRe || !reRows?.length) {
+    console.error('[escribirRutinaEjercicios] routine_exercises', errRe?.message);
+    throw new Error(errRe?.message ?? 'No se pudo guardar la rutina.');
+  }
 
-    const routineExerciseId = reRow.id as string;
+  // Mapear exercise_id+orden → routine_exercise_id recién creado
+  const reIdMap = new Map(reRows.map((r: { id: string; exercise_id: string; orden: number }) => [`${r.exercise_id}:${r.orden}`, r.id]));
 
-    for (const set of ex.sets) {
-      const { error: errSet } = await supabase.from('routine_sets').insert({
-        routine_exercise_id: routineExerciseId,
-        numero_serie: set.numero_serie,
-        tipo_serie: set.tipo_serie,
-        reps: set.repeticiones,
-        peso_kg: set.peso_kg,
-        tipo_peso: set.tipo_peso,
-      });
-      if (errSet) {
-        console.error('[escribirRutinaEjercicios] routine_sets', errSet.message);
-        throw new Error(errSet.message);
-      }
-    }
+  // Paso 2 — batch insert de todos los sets a la vez
+  const setRows = ejercicios.flatMap((ex) => {
+    const reId = reIdMap.get(`${ex.exercise_id}:${ex.orden}`);
+    if (!reId) return [];
+    return ex.sets.map((set) => ({
+      routine_exercise_id: reId,
+      numero_serie: set.numero_serie,
+      tipo_serie: set.tipo_serie,
+      reps: set.repeticiones,
+      peso_kg: set.peso_kg,
+      tipo_peso: set.tipo_peso,
+    }));
+  });
+
+  if (setRows.length === 0) return;
+
+  const { error: errSet } = await supabase.from('routine_sets').insert(setRows);
+  if (errSet) {
+    console.error('[escribirRutinaEjercicios] routine_sets', errSet.message);
+    throw new Error(errSet.message);
   }
 }
 
@@ -514,39 +525,50 @@ export const entrenamientoService = {
 
     const routineId = routineRow.id as string;
 
-    for (const ex of ejercicios) {
-      const { data: reRow, error: errRe } = await supabase
-        .from('routine_exercises')
-        .insert({
+    // PERF-03: batch insert — 1 query para ejercicios + 1 query para sets
+    // (antes: N ejercicios × M sets = N+1+N*M round-trips)
+    const { data: reRows, error: errRe } = await supabase
+      .from('routine_exercises')
+      .insert(
+        ejercicios.map((ex) => ({
           routine_id: routineId,
           exercise_id: ex.exercise_id,
           orden: ex.orden,
           notas: null,
-        })
-        .select('id')
-        .single();
+        })),
+      )
+      .select('id, exercise_id, orden');
 
-      if (errRe || !reRow?.id) {
-        console.error('[guardarRutinaDesdeBorrador] routine_exercises', errRe?.message);
-        return { ok: false, error: errRe?.message ?? 'Error al guardar ejercicios de la rutina.' };
-      }
+    if (errRe || !reRows?.length) {
+      console.error('[guardarRutinaDesdeBorrador] routine_exercises', errRe?.message);
+      return { ok: false, error: errRe?.message ?? 'Error al guardar ejercicios de la rutina.' };
+    }
 
-      const routineExerciseId = reRow.id as string;
+    const reIdMap = new Map(
+      (reRows as { id: string; exercise_id: string; orden: number }[]).map((r) => [
+        `${r.exercise_id}:${r.orden}`,
+        r.id,
+      ]),
+    );
 
-      for (const set of ex.sets) {
-        const { error: errSet } = await supabase.from('routine_sets').insert({
-          routine_exercise_id: routineExerciseId,
-          numero_serie: set.numero_serie,
-          tipo_serie: set.tipo_serie,
-          reps: set.repeticiones,
-          peso_kg: set.peso_kg,
-          tipo_peso: set.tipo_peso,
-        });
+    const setRows = ejercicios.flatMap((ex) => {
+      const reId = reIdMap.get(`${ex.exercise_id}:${ex.orden}`);
+      if (!reId) return [];
+      return ex.sets.map((set) => ({
+        routine_exercise_id: reId,
+        numero_serie: set.numero_serie,
+        tipo_serie: set.tipo_serie,
+        reps: set.repeticiones,
+        peso_kg: set.peso_kg,
+        tipo_peso: set.tipo_peso,
+      }));
+    });
 
-        if (errSet) {
-          console.error('[guardarRutinaDesdeBorrador] routine_sets', errSet.message);
-          return { ok: false, error: errSet.message };
-        }
+    if (setRows.length > 0) {
+      const { error: errSet } = await supabase.from('routine_sets').insert(setRows);
+      if (errSet) {
+        console.error('[guardarRutinaDesdeBorrador] routine_sets', errSet.message);
+        return { ok: false, error: errSet.message };
       }
     }
 
@@ -1292,36 +1314,40 @@ export const entrenamientoService = {
       routine_exercises?: ExploreReRow[] | null;
     };
 
-    const { data, error } = await supabase
-      .from('routines')
-      .select(
-        `id, nombre, descripcion, dificultad,
-        routine_exercises ( orden, exercises ( musculo_primario ) )`,
-      )
-      .eq('is_default', true)
-      .order('nombre');
+    // Obtener uid desde la sesión cacheada (sin round-trip al servidor)
+    const { data: sessionData } = await supabase.auth.getSession();
+    const uid = sessionData.session?.user?.id ?? null;
 
-    if (error) {
-      console.error('[obtenerRutinasPredeterminadas]', error.message);
-      throw new Error(error.message);
+    // Lanzar rutinas y favoritos en paralelo
+    const [rutinaRes, favRes] = await Promise.all([
+      supabase
+        .from('routines')
+        .select(
+          `id, nombre, descripcion, dificultad,
+          routine_exercises ( orden, exercises ( musculo_primario ) )`,
+        )
+        .eq('is_default', true)
+        .order('nombre'),
+      uid
+        ? supabase
+            .from('user_favorite_routines')
+            .select('routine_id')
+            .eq('user_id', uid)
+        : Promise.resolve({ data: [], error: null }),
+    ]);
+
+    if (rutinaRes.error) {
+      console.error('[obtenerRutinasPredeterminadas]', rutinaRes.error.message);
+      throw new Error(rutinaRes.error.message);
     }
+    const data = rutinaRes.data;
 
-    const { data: auth } = await supabase.auth.getUser();
-    const uid = auth.user?.id ?? null;
-
-    let favoritos = new Set<string>();
-    if (uid) {
-      const { data: favRows, error: favErr } = await supabase
-        .from('user_favorite_routines')
-        .select('routine_id')
-        .eq('user_id', uid);
-
-      if (favErr) {
-        console.error('[obtenerRutinasPredeterminadas] favoritos', favErr.message);
-      } else {
-        favoritos = new Set((favRows ?? []).map((r: { routine_id: string }) => r.routine_id));
-      }
+    if (favRes.error) {
+      console.error('[obtenerRutinasPredeterminadas] favoritos', favRes.error.message);
     }
+    const favoritos = new Set(
+      ((favRes.data ?? []) as { routine_id: string }[]).map((r) => r.routine_id),
+    );
 
     const musculosUnicosPorFrecuencia = (primaries: string[]): string[] => {
       const counts = new Map<string, { n: number; label: string }>();

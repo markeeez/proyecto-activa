@@ -22,7 +22,7 @@ import { Image } from 'expo-image';
 
 import { useRouter } from 'expo-router';
 
-import { normalizarTexto } from '@/lib/texto';
+import { normalizarTexto, palabrasBusqueda } from '@/lib/texto';
 import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from '@/hooks/useTheme';
 import type { Theme } from '@/constants/theme';
@@ -31,6 +31,64 @@ import {
   ejerciciosService,
   type ModoListaEjercicios,
 } from '@/services/ejercicios.service';
+import { supabase } from '@/lib/supabase';
+
+// ─── Caché de módulo ──────────────────────────────────────────────────────────
+// El catálogo global (is_custom=false) es estático: se carga una sola vez por
+// sesión de app y se reutiliza entre aperturas del sheet. ~260KB en memoria.
+let catalogoCache: Exercise[] | null = null;
+let catalogoCargando: Promise<Exercise[]> | null = null;
+
+async function obtenerCatalogo(): Promise<Exercise[]> {
+  if (catalogoCache) return catalogoCache;
+  if (catalogoCargando) return catalogoCargando;
+
+  catalogoCargando = (async () => {
+    const { data, error } = await supabase
+      .from('exercises')
+      .select('id, api_id, nombre, descripcion, musculo_primario, musculos_secundarios, equipamiento, categoria, foto_url, is_custom, created_by, api_source, created_at')
+      .eq('is_custom', false)
+      .order('nombre');
+    if (error) throw new Error(error.message);
+    const ejercicios = (data ?? []) as Exercise[];
+    catalogoCache = ejercicios;
+    return ejercicios;
+  })();
+
+  try {
+    return await catalogoCargando;
+  } finally {
+    catalogoCargando = null;
+  }
+}
+
+// ─── Filtrado en cliente ──────────────────────────────────────────────────────
+function filtrarEnCliente(
+  ejercicios: Exercise[],
+  texto: string,
+  musculo: string | null,
+  equipamiento: string | null,
+): Exercise[] {
+  let result = ejercicios;
+
+  if (musculo) {
+    result = result.filter((e) => e.musculo_primario === musculo);
+  }
+  if (equipamiento) {
+    result = result.filter((e) => (e.equipamiento ?? '').trim() === equipamiento);
+  }
+  if (texto.trim()) {
+    const tokens = palabrasBusqueda(normalizarTexto(texto)).filter((t) => t.length > 0);
+    if (tokens.length > 0) {
+      result = result.filter((e) => {
+        const norm = normalizarTexto(e.nombre);
+        return tokens.every((t) => norm.includes(t));
+      });
+    }
+  }
+
+  return result.slice(0, 120);
+}
 
 type Props = {
   visible: boolean;
@@ -261,7 +319,8 @@ export function AgregarEjercicioSheet({ visible, onClose, onSeleccionar, onCrear
   const [modoGeneral, setModoGeneral] = useState<ModoListaEjercicios>('general');
   const [musculo, setMusculo] = useState<string | null>(null);
   const [equipamiento, setEquipamiento] = useState<string | null>(null);
-  const [lista, setLista] = useState<Exercise[]>([]);
+  const [listaAsync, setListaAsync] = useState<Exercise[]>([]); // favoritos / creados
+  const [catalogo, setCatalogo] = useState<Exercise[]>(catalogoCache ?? []); // catálogo global en memoria
   const [cargando, setCargando] = useState(false);
   const [favIds, setFavIds] = useState<string[]>([]);
   const [opciones, setOpciones] = useState<{ musculos: string[]; equipamientos: string[] }>({
@@ -288,35 +347,76 @@ export function AgregarEjercicioSheet({ visible, onClose, onSeleccionar, onCrear
   }, [filtroModal]);
 
   useEffect(() => {
-    const t = setTimeout(() => setDebounced(texto), 280);
+    // En modo general el filtrado es en cliente (<5ms), delay mínimo.
+    // En favoritos/creados sí hay query a BD, se mantiene debounce razonable.
+    const delay = modoGeneral === 'general' ? 50 : 280;
+    const t = setTimeout(() => setDebounced(texto), delay);
     return () => clearTimeout(t);
-  }, [texto]);
-
-  const cargarOpciones = useCallback(async () => {
-    const [musculos, equipamientos] = await Promise.all([
-      ejerciciosService.obtenerMusculosDisponibles(),
-      ejerciciosService.obtenerEquipamientoDisponible(),
-    ]);
-    setOpciones({ musculos, equipamientos });
-  }, []);
+  }, [texto, modoGeneral]);
 
   const cargarFavoritos = useCallback(async () => {
-    if (!user?.id) {
-      setFavIds([]);
-      return;
-    }
+    if (!user?.id) { setFavIds([]); return; }
     const ids = await ejerciciosService.obtenerEjerciciosFavoritos(user.id);
     setFavIds(ids);
   }, [user?.id]);
 
+  // Carga inicial del catálogo global (solo si no está ya en caché)
   useEffect(() => {
-    if (visible) {
-      void cargarOpciones();
-      void cargarFavoritos();
-    }
-  }, [visible, cargarOpciones, cargarFavoritos]);
+    if (!visible) return;
+    let cancelled = false;
 
-  const buscar = useCallback(async () => {
+    void cargarFavoritos();
+
+    if (catalogoCache) {
+      // Ya en memoria — actualizar opciones de filtro y listo
+      const cat = catalogoCache;
+      const muscSet = new Set<string>();
+      const equipSet = new Set<string>();
+      for (const ex of cat) {
+        if (ex.musculo_primario) muscSet.add(ex.musculo_primario);
+        if (ex.equipamiento?.trim()) equipSet.add(ex.equipamiento.trim());
+      }
+      setOpciones({
+        musculos: [...muscSet].sort((a, b) => a.localeCompare(b, 'es')),
+        equipamientos: [...equipSet].sort((a, b) => a.localeCompare(b, 'es')),
+      });
+      setCatalogo(cat);
+      return;
+    }
+
+    // Primera vez: cargar desde BD
+    setCargando(true);
+    obtenerCatalogo().then((cat) => {
+      if (cancelled) return;
+      const muscSet = new Set<string>();
+      const equipSet = new Set<string>();
+      for (const ex of cat) {
+        if (ex.musculo_primario) muscSet.add(ex.musculo_primario);
+        if (ex.equipamiento?.trim()) equipSet.add(ex.equipamiento.trim());
+      }
+      setOpciones({
+        musculos: [...muscSet].sort((a, b) => a.localeCompare(b, 'es')),
+        equipamientos: [...equipSet].sort((a, b) => a.localeCompare(b, 'es')),
+      });
+      setCatalogo(cat);
+      setCargando(false);
+    }).catch(() => { if (!cancelled) setCargando(false); });
+
+    return () => { cancelled = true; };
+  }, [visible, cargarFavoritos]);
+
+  // Lista para modo general: filtrado síncrono en memoria (instantáneo)
+  const listaGeneral = useMemo(
+    () => filtrarEnCliente(catalogo, debounced, musculo, equipamiento),
+    [catalogo, debounced, musculo, equipamiento],
+  );
+
+  // Lista final según modo
+  const lista = modoGeneral === 'general' ? listaGeneral : listaAsync;
+
+  // Favoritos / Creados: sí requieren query a BD
+  const buscarAsync = useCallback(async () => {
+    if (modoGeneral === 'general') return;
     setCargando(true);
     try {
       const rows = await ejerciciosService.buscarEjercicios({
@@ -328,16 +428,16 @@ export function AgregarEjercicioSheet({ visible, onClose, onSeleccionar, onCrear
         userId: user?.id ?? null,
         idsFavoritos: modoGeneral === 'favoritos' ? favIds : undefined,
       });
-      setLista(rows);
+      setListaAsync(rows);
     } finally {
       setCargando(false);
     }
   }, [debounced, musculo, equipamiento, modoGeneral, user?.id, favIds]);
 
   useEffect(() => {
-    if (!visible) return;
-    void buscar();
-  }, [visible, buscar]);
+    if (!visible || modoGeneral === 'general') return;
+    void buscarAsync();
+  }, [visible, buscarAsync, modoGeneral]);
 
   const onToggleFavorito = useCallback(
     async (exerciseId: string) => {
@@ -354,7 +454,7 @@ export function AgregarEjercicioSheet({ visible, onClose, onSeleccionar, onCrear
     setModoGeneral('general');
     setMusculo(null);
     setEquipamiento(null);
-    setLista([]);
+    setListaAsync([]);
     setFiltroModal(null);
   };
 

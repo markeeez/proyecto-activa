@@ -5,10 +5,7 @@
  * Las 4 predeterminadas se insertan al crear el día; no se usa meal_types en la app.
  */
 
-import {
-  COMIDAS_PREDETERMINADAS,
-  type ComidaDefaultDef,
-} from '@/constants/comidasPredeterminadas';
+import { COMIDAS_PREDETERMINADAS } from '@/constants/comidasPredeterminadas';
 import { esDiaPasadoVsHoy } from '@/lib/fechaNutricion';
 import { supabase } from '@/lib/supabase';
 import { alimentosService } from '@/services/alimentos.service';
@@ -38,103 +35,18 @@ function resolverNombreComida(meal: {
   return 'Comida';
 }
 
-function filaPareceSlotPredeterminado(
-  r: { nombre: string | null; orden: number; is_default: boolean },
-  def: ComidaDefaultDef,
-): boolean {
-  if (Number(r.orden) !== def.orden) return false;
-  if (r.is_default) return true;
-  const n = normalizarNombre(r.nombre ?? '');
-  if (!n || n === normalizarNombre('Comida')) return true;
-  return n === normalizarNombre(def.nombre);
-}
-
-type FilaMealWork = {
-  id: string;
-  nombre: string | null;
-  orden: number;
-  is_default: boolean;
-  itemCount: number;
-};
 
 /**
- * Une filas duplicadas del mismo slot predeterminado (mismo orden 1–4) en un solo meal
- * y mueve ítems al que se conserva. Idempotente.
+ * PERF-05: Une filas duplicadas del mismo slot predeterminado en un solo meal.
+ * Delega en el RPC `consolidar_duplicados_slots` que ejecuta todo en una
+ * transacción SQL atómica (antes: 4 queries secuenciales sin transacción).
  */
 async function consolidarDuplicadosSlotsPredeterminadosLog(logId: string): Promise<void> {
-  const { data: rows, error } = await supabase
-    .from('nutrition_log_meals')
-    .select(`id, nombre, orden, is_default, nutrition_log_items (id)`)
-    .eq('log_id', logId);
-
+  const { error } = await supabase.rpc('consolidar_duplicados_slots', {
+    p_log_id: logId,
+  });
   if (error) {
-    console.warn('[nutricionService] consolidar: lectura', error.message);
-    return;
-  }
-
-  let work: FilaMealWork[] = (rows ?? []).map((r: any) => ({
-    id: r.id as string,
-    nombre: (r.nombre as string | null) ?? null,
-    orden: Number(r.orden ?? 0),
-    is_default: Boolean(r.is_default),
-    itemCount: (r.nutrition_log_items ?? []).length,
-  }));
-
-  for (const def of COMIDAS_PREDETERMINADAS) {
-    const candidates = work.filter((r) =>
-      filaPareceSlotPredeterminado(
-        { nombre: r.nombre, orden: r.orden, is_default: r.is_default },
-        def,
-      ),
-    );
-    if (candidates.length <= 1) continue;
-
-    const sorted = [...candidates].sort(
-      (a, b) => b.itemCount - a.itemCount || a.id.localeCompare(b.id),
-    );
-    const keeper = sorted[0];
-    const losers = sorted.slice(1);
-
-    for (const loser of losers) {
-      if (loser.itemCount > 0) {
-        const { error: uErr } = await supabase
-          .from('nutrition_log_items')
-          .update({ meal_id: keeper.id })
-          .eq('meal_id', loser.id);
-        if (uErr) {
-          console.warn('[nutricionService] consolidar: mover items', uErr.message);
-          continue;
-        }
-      }
-      const { error: dErr } = await supabase.from('nutrition_log_meals').delete().eq('id', loser.id);
-      if (dErr) {
-        console.warn('[nutricionService] consolidar: borrar meal', dErr.message);
-        continue;
-      }
-      work = work.filter((r) => r.id !== loser.id);
-      keeper.itemCount += loser.itemCount;
-    }
-
-    const { error: patchErr } = await supabase
-      .from('nutrition_log_meals')
-      .update({
-        nombre: def.nombre,
-        orden: def.orden,
-        is_default: true,
-      })
-      .eq('id', keeper.id);
-    if (patchErr) console.warn('[nutricionService] consolidar: normalizar keeper', patchErr.message);
-
-    const ki = work.findIndex((x) => x.id === keeper.id);
-    if (ki >= 0) {
-      work[ki] = {
-        ...work[ki],
-        nombre: def.nombre,
-        orden: def.orden,
-        is_default: true,
-        itemCount: keeper.itemCount,
-      };
-    }
+    console.warn('[nutricionService] consolidar: rpc', error.message);
   }
 }
 

@@ -259,6 +259,7 @@ export default function CrearRutinaScreen() {
                 exerciseId: ex.id,
                 nombre: ex.nombre,
                 musculo_primario: ex.musculo_primario,
+                foto_url: ex.foto_url ?? null,
               }
             : l,
         );
@@ -270,6 +271,7 @@ export default function CrearRutinaScreen() {
           exerciseId: ex.id,
           nombre: ex.nombre,
           musculo_primario: ex.musculo_primario,
+          foto_url: ex.foto_url ?? null,
           sets: [seriePorDefecto()],
         },
       ];

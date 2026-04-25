@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFont } from '@shopify/react-native-skia';
 import { Image } from 'expo-image';
 import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Modal,
@@ -153,13 +153,27 @@ function textoTituloSemanaActual(metrica: MetricaNut, valor: number): string {
 /** Barras nutrición: x = índice 0..n-1 (único), semanaInicio = lunes ISO para etiqueta. */
 type FilaNutChart = { x: number; y: number; semanaInicio: string };
 
+/**
+ * PERF-06: Muestreo uniforme de series temporales.
+ * Reduce el array a `maxPuntos` elementos distribuidos uniformemente.
+ * Siempre conserva el primer y el último punto para que el rango sea correcto.
+ */
+function muestrear<T>(arr: T[], maxPuntos: number): T[] {
+  if (arr.length <= maxPuntos) return arr;
+  const last = arr.length - 1;
+  return Array.from({ length: maxPuntos }, (_, i) => {
+    const idx = i === maxPuntos - 1 ? last : Math.round((i / (maxPuntos - 1)) * last);
+    return arr[idx]!;
+  });
+}
+
 function pasoEtiquetasEjeX(numBarras: number): number {
   if (numBarras <= 8) return 1;
   if (numBarras <= 16) return 2;
   return 3;
 }
 
-function GraficoBarrasNutricion({
+const GraficoBarrasNutricion = memo(function GraficoBarrasNutricion({
   datos,
   colorPrimario,
   colorEtiqueta,
@@ -226,9 +240,9 @@ function GraficoBarrasNutricion({
       </CartesianChart>
     </View>
   );
-}
+});
 
-function GraficoLineaPeso({
+const GraficoLineaPeso = memo(function GraficoLineaPeso({
   datos,
   colorPrimario,
   colorEtiqueta,
@@ -284,7 +298,7 @@ function GraficoLineaPeso({
       </CartesianChart>
     </View>
   );
-}
+});
 
 const stylesChart = StyleSheet.create({
   wrap: { height: 150, width: '100%' },
@@ -479,22 +493,23 @@ export default function ProgresoIndex() {
     : 0;
   const tituloMetricaSemana = textoTituloSemanaActual(metricaNut, valorSemanaActual);
 
-  const datosBarNut: FilaNutChart[] = useMemo(
-    () =>
-      nutricionSemanal
-        .filter((row) => valorMetrica(row, metricaNut) > 0)
-        .map((row, i) => ({
-          x: i,
-          y: valorMetrica(row, metricaNut),
-          semanaInicio: row.semanaInicio,
-        })),
-    [nutricionSemanal, metricaNut],
-  );
+  const datosBarNut: FilaNutChart[] = useMemo(() => {
+    // PERF-06: máximo 52 barras (1 año de semanas). Muestreo uniforme si hay más.
+    const filtered = nutricionSemanal
+      .filter((row) => valorMetrica(row, metricaNut) > 0);
+    const sampled = muestrear(filtered, 52);
+    return sampled.map((row, i) => ({
+      x: i,
+      y: valorMetrica(row, metricaNut),
+      semanaInicio: row.semanaInicio,
+    }));
+  }, [nutricionSemanal, metricaNut]);
 
-  const datosLineaPeso = useMemo(
-    () => historialPeso.map((r) => ({ x: r.fecha, y: r.peso_kg })),
-    [historialPeso],
-  );
+  const datosLineaPeso = useMemo(() => {
+    // PERF-06: máximo 90 puntos. Muestreo uniforme si hay más (ej. "todo el tiempo").
+    const sampled = muestrear(historialPeso, 90);
+    return sampled.map((r) => ({ x: r.fecha, y: r.peso_kg }));
+  }, [historialPeso]);
 
   const numPesoIngresado = parseFloat(pesoTexto.replace(',', '.'));
   const pesoInvalido = pesoTexto.trim() === '' || Number.isNaN(numPesoIngresado);
@@ -734,100 +749,116 @@ export default function ProgresoIndex() {
               </View>
             ) : planActual ? (
               <>
-                <Text style={styles.planLabelObj}>OBJETIVO ACTUAL</Text>
-                <Text style={styles.planObjTitulo} numberOfLines={2}>
-                  {textoObjetivoLegible(planActual.objetivo)}
-                </Text>
-                <Text style={styles.planDiasConPlan} numberOfLines={1}>
-                  DÍAS CON ESTE PLAN: {textoDiasConEstePlan(planActual.created_at)}
-                </Text>
+                {/* ── Fila superior: objetivo + días ── */}
+                <View style={styles.ndPlanTopRow}>
+                  <View style={styles.ndPlanTopLeft}>
+                    <Text style={styles.ndLabel}>OBJETIVO</Text>
+                    <Text style={styles.ndObjTitulo} numberOfLines={1}>
+                      {textoObjetivoLegible(planActual.objetivo)}
+                    </Text>
+                  </View>
+                  <View style={styles.ndPlanTopRight}>
+                    <Text style={styles.ndLabel}>PLAN ACTIVO</Text>
+                    <Text style={styles.ndDiasBig}>{textoDiasConEstePlan(planActual.created_at)}</Text>
+                  </View>
+                </View>
 
-                <View style={styles.planKcalBlock}>
-                  <Text style={styles.planKcalNum}>
+                {/* ── Hero kcal ── */}
+                <View style={styles.ndKcalHero}>
+                  <Text style={styles.ndKcalNum}>
                     {Math.round(planActual.calorias_objetivo).toLocaleString('es-ES')}
                   </Text>
-                  <Text style={styles.planKcalSuf}>kcal/día</Text>
+                  <Text style={styles.ndKcalUnit}>kcal/día</Text>
                 </View>
 
-                <View style={styles.macroCardsRowPlan}>
-                  <View style={styles.macroCardPlan}>
-                    <Text style={styles.macroCardLabelPlan}>PROTEÍNAS</Text>
-                    <Text style={styles.macroCardGramsPlan}>{planActual.proteinas_objetivo}g</Text>
-                    <Text style={styles.macroCardMetaPlan}>{pctMacrosPlan.prot}%</Text>
-                    <Text style={styles.macroCardMetaPlan}>{planActual.proteinas_objetivo * 4} kcal</Text>
-                  </View>
-                  <View style={styles.macroCardPlan}>
-                    <Text style={styles.macroCardLabelPlan}>CARBOS</Text>
-                    <Text style={styles.macroCardGramsPlan}>{planActual.carbos_objetivo}g</Text>
-                    <Text style={styles.macroCardMetaPlan}>{pctMacrosPlan.carb}%</Text>
-                    <Text style={styles.macroCardMetaPlan}>{planActual.carbos_objetivo * 4} kcal</Text>
-                  </View>
-                  <View style={styles.macroCardPlan}>
-                    <Text style={styles.macroCardLabelPlan}>GRASAS</Text>
-                    <Text style={styles.macroCardGramsPlan}>{planActual.grasas_objetivo}g</Text>
-                    <Text style={styles.macroCardMetaPlan}>{pctMacrosPlan.gras}%</Text>
-                    <Text style={styles.macroCardMetaPlan}>{planActual.grasas_objetivo * 9} kcal</Text>
-                  </View>
+                {/* ── Macros como barras segmentadas ── */}
+                <View style={styles.ndMacrosBlock}>
+                  {[
+                    { label: 'PROTEÍNAS', g: planActual.proteinas_objetivo, pct: pctMacrosPlan.prot, segs: 16 },
+                    { label: 'CARBOS',    g: planActual.carbos_objetivo,    pct: pctMacrosPlan.carb, segs: 16 },
+                    { label: 'GRASAS',    g: planActual.grasas_objetivo,    pct: pctMacrosPlan.gras, segs: 16 },
+                  ].map(({ label, g, pct, segs }) => {
+                    const filled = Math.round((pct / 100) * segs);
+                    return (
+                      <View key={label} style={styles.ndMacroRow}>
+                        <View style={styles.ndMacroMeta}>
+                          <Text style={styles.ndLabel}>{label}</Text>
+                          <View style={styles.ndMacroValueRow}>
+                            <Text style={styles.ndMacroG}>{g}</Text>
+                            <Text style={styles.ndMacroUnit}>g</Text>
+                            <Text style={styles.ndMacroPct}>{pct}%</Text>
+                          </View>
+                        </View>
+                        <View style={styles.ndSegBar}>
+                          {Array.from({ length: segs }, (_, i) => (
+                            <View
+                              key={i}
+                              style={[
+                                styles.ndSeg,
+                                { backgroundColor: i < filled ? c.textDisplay : 'transparent',
+                                  borderColor: i < filled ? c.textDisplay : c.borderVisible,
+                                  borderWidth: 1 },
+                              ]}
+                            />
+                          ))}
+                        </View>
+                      </View>
+                    );
+                  })}
                 </View>
 
+                {/* ── Barra de progreso al objetivo ── */}
                 {progresoPeso ? (
-                  <View style={styles.planProgresoBlock}>
-                    <View style={styles.planProgresoTopRow}>
-                      <Text style={styles.planProgresoPesoLat}>{fmtPesoKgTabPlan(progresoPeso.pesoInicio)} kg</Text>
-                      <Text style={styles.planProgresoPesoLat}>{fmtPesoKgTabPlan(progresoPeso.pesoObjetivo)} kg</Text>
+                  <View style={styles.ndProgresoBlock}>
+                    <View style={styles.ndProgresoHeader}>
+                      <Text style={styles.ndLabel}>PROGRESO AL OBJETIVO</Text>
+                      <Text style={styles.ndPctHero}>{Math.round(progresoPeso.porcentaje)}%</Text>
                     </View>
-                    <View style={styles.planProgresoBarRow}>
-                      {Array.from({ length: 20 }, (_, i) => {
-                        const filled = Math.min(
-                          20,
-                          Math.max(0, Math.round((progresoPeso.porcentaje / 100) * 20)),
-                        );
-                        const on = i < filled;
+                    <View style={styles.ndProgresoBarRow}>
+                      {Array.from({ length: 24 }, (_, i) => {
+                        const filled = Math.min(24, Math.max(0, Math.round((progresoPeso.porcentaje / 100) * 24)));
                         return (
                           <View
                             key={i}
                             style={[
-                              styles.planProgresoSeg,
-                              on
-                                ? { backgroundColor: c.primary }
-                                : {
-                                    backgroundColor: 'transparent',
-                                    borderWidth: 1,
-                                    borderColor: c.border,
-                                  },
+                              styles.ndProgresoSeg,
+                              { backgroundColor: i < filled ? c.textDisplay : 'transparent',
+                                borderColor: i < filled ? c.textDisplay : c.borderVisible,
+                                borderWidth: 1 },
                             ]}
                           />
                         );
                       })}
                     </View>
-                    <View style={styles.planProgresoPctWrap}>
-                      <Text style={styles.planProgresoPct}>{Math.round(progresoPeso.porcentaje)}%</Text>
-                      <Text style={styles.planProgresoPctDesc}>
-                        {progresoPeso.objetivo === 'perder_peso'
-                          ? 'hacia tu objetivo de pérdida'
-                          : 'hacia tu objetivo de ganancia'}
+                    <View style={styles.ndProgresoFooter}>
+                      <Text style={styles.ndProgresoKg}>{fmtPesoKgTabPlan(progresoPeso.pesoInicio)} kg</Text>
+                      <Text style={styles.ndProgresoDesc}>
+                        {progresoPeso.objetivo === 'perder_peso' ? 'pérdida' : 'ganancia'}
                       </Text>
+                      <Text style={styles.ndProgresoKg}>{fmtPesoKgTabPlan(progresoPeso.pesoObjetivo)} kg</Text>
                     </View>
                   </View>
                 ) : null}
 
+                {/* ── CTA ── */}
                 <Pressable
                   onPress={() => router.navigate('/(tabs)/(progreso)/personalizar-plan')}
-                  accessibilityRole="link"
+                  style={styles.ndPlanCta}
+                  accessibilityRole="button"
                   accessibilityLabel="Personalizar plan"
                 >
-                  <Text style={styles.planLinkPersonalizar}>Personalizar plan</Text>
+                  <Text style={styles.ndPlanCtaTxt}>PERSONALIZAR PLAN</Text>
                 </Pressable>
               </>
             ) : (
               <>
-                <Text style={styles.muted}>Sin plan guardado.</Text>
+                <Text style={styles.ndEmptyTxt}>SIN PLAN GUARDADO</Text>
                 <Pressable
                   onPress={() => router.navigate('/(tabs)/(progreso)/personalizar-plan')}
-                  accessibilityRole="link"
-                  accessibilityLabel="Personalizar plan"
+                  style={styles.ndPlanCta}
+                  accessibilityRole="button"
                 >
-                  <Text style={styles.planLinkPersonalizar}>Personalizar plan</Text>
+                  <Text style={styles.ndPlanCtaTxt}>CONFIGURAR PLAN</Text>
                 </Pressable>
               </>
             )}
@@ -901,18 +932,17 @@ function makeStyles(
       flexDirection: 'column',
       paddingHorizontal: s.md,
       paddingBottom: s.md,
-      gap: s.xs,
-      justifyContent: 'flex-start',
+      justifyContent: 'space-between',
     },
     headerBlock: {
       flexShrink: 0,
+      paddingTop: s.sm,
     },
     tabsWrap: {
       alignSelf: 'center',
       maxWidth: 240,
       width: '100%',
       flexShrink: 0,
-      marginTop: s.sm,
     },
     tabsPill: {
       flexDirection: 'row',
@@ -955,137 +985,166 @@ function makeStyles(
       justifyContent: 'center',
       alignItems: 'center',
     },
-    planLabelObj: {
-      ...ts.caption,
+    // ── Nothing design — Plan tab ──────────────────────────────────────
+    ndPlanTopRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'flex-start',
+    },
+    ndPlanTopLeft: {
+      flex: 1,
+      minWidth: 0,
+      paddingRight: s.sm,
+    },
+    ndPlanTopRight: {
+      alignItems: 'flex-end',
+    },
+    ndLabel: {
+      fontSize: 10,
       fontFamily: f.mono,
       color: c.textSecondary,
       textTransform: 'uppercase',
-      letterSpacing: 0.6,
-      textAlign: 'center',
-      alignSelf: 'stretch',
+      letterSpacing: 1.2,
     },
-    planObjTitulo: {
+    ndObjTitulo: {
       ...ts.subheading,
       fontFamily: f.sansMedium,
       color: c.textDisplay,
-      textAlign: 'center',
-      alignSelf: 'stretch',
-      marginBottom: s.xs,
+      marginTop: 3,
     },
-    planDiasConPlan: {
-      ...ts.caption,
+    ndDiasBig: {
+      fontSize: 30,
       fontFamily: f.mono,
-      color: c.textSecondary,
-      textAlign: 'center',
-      alignSelf: 'stretch',
-      marginBottom: s.sm,
+      color: c.textDisplay,
+      marginTop: 3,
+      textAlign: 'right',
     },
-    macroCardsRowPlan: {
+    ndKcalHero: {
       flexDirection: 'row',
-      gap: s.xs,
-      flexShrink: 0,
+      alignItems: 'flex-end',
+      gap: 8,
     },
-    macroCardPlan: {
-      flex: 1,
-      borderWidth: 1,
-      borderColor: c.borderVisible,
-      borderRadius: r.sm,
-      paddingVertical: s.sm,
-      paddingHorizontal: s.xs,
-      backgroundColor: c.surface,
-      alignItems: 'center',
-    },
-    macroCardLabelPlan: {
-      ...ts.caption,
+    ndKcalNum: {
+      fontSize: 56,
       fontFamily: f.mono,
-      color: c.textSecondary,
-      letterSpacing: 0.6,
-      textAlign: 'center',
-    },
-    macroCardGramsPlan: {
-      ...ts.subheading,
-      fontFamily: f.sansMedium,
       color: c.textDisplay,
-      marginTop: s.xs,
+      lineHeight: 60,
     },
-    macroCardMetaPlan: {
-      ...ts.caption,
+    ndKcalUnit: {
+      fontSize: 13,
       fontFamily: f.mono,
       color: c.textSecondary,
-      marginTop: 4,
-      textAlign: 'center',
+      marginBottom: 8,
     },
-    planKcalBlock: {
-      alignItems: 'center',
-      alignSelf: 'stretch',
-      flexShrink: 0,
-      marginBottom: s.sm,
+    ndMacrosBlock: {
+      gap: 10,
     },
-    planKcalNum: {
-      ...ts.displayMd,
-      fontFamily: f.mono,
-      color: c.primary,
+    ndMacroRow: {
+      gap: 6,
     },
-    planKcalSuf: {
-      ...ts.caption,
-      fontFamily: f.mono,
-      color: c.textSecondary,
-      marginTop: s.xs,
-    },
-    planLinkPersonalizar: {
-      ...ts.bodySm,
-      fontFamily: f.sansMedium,
-      color: c.primary,
-      textDecorationLine: 'underline',
-      textAlign: 'center',
-    },
-    planProgresoBlock: {
-      width: '100%',
-      flexShrink: 0,
-      marginTop: s.xs,
-    },
-    planProgresoTopRow: {
+    ndMacroMeta: {
       flexDirection: 'row',
       justifyContent: 'space-between',
       alignItems: 'center',
-      marginBottom: s.sm,
     },
-    planProgresoPesoLat: {
-      ...ts.caption,
+    ndMacroValueRow: {
+      flexDirection: 'row',
+      alignItems: 'baseline',
+      gap: 3,
+    },
+    ndMacroG: {
+      fontSize: 15,
+      fontFamily: f.mono,
+      color: c.textDisplay,
+    },
+    ndMacroUnit: {
+      fontSize: 11,
       fontFamily: f.mono,
       color: c.textSecondary,
     },
-    planProgresoBarRow: {
+    ndMacroPct: {
+      fontSize: 11,
+      fontFamily: f.mono,
+      color: c.textSecondary,
+      marginLeft: 4,
+    },
+    ndSegBar: {
       flexDirection: 'row',
       gap: 2,
       height: 8,
-      alignSelf: 'stretch',
-      marginBottom: s.sm,
     },
-    planProgresoSeg: {
+    ndSeg: {
       flex: 1,
       height: 8,
       borderRadius: 0,
     },
-    planProgresoPctWrap: {
-      alignItems: 'center',
-      alignSelf: 'stretch',
+    ndProgresoBlock: {
+      gap: 6,
     },
-    planProgresoPct: {
-      ...ts.body,
+    ndProgresoHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'flex-end',
+    },
+    ndPctHero: {
+      fontSize: 28,
       fontFamily: f.mono,
-      color: c.primary,
+      color: c.textDisplay,
     },
-    planProgresoPctDesc: {
-      ...ts.caption,
-      fontFamily: f.sans,
-      color: c.textSecondary,
-      textAlign: 'center',
+    ndProgresoBarRow: {
+      flexDirection: 'row',
+      gap: 2,
+      height: 10,
+    },
+    ndProgresoSeg: {
+      flex: 1,
+      height: 10,
+      borderRadius: 0,
+    },
+    ndProgresoFooter: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
       marginTop: 2,
+    },
+    ndProgresoKg: {
+      fontSize: 11,
+      fontFamily: f.mono,
+      color: c.textSecondary,
+    },
+    ndProgresoDesc: {
+      fontSize: 10,
+      fontFamily: f.mono,
+      color: c.textSecondary,
+      textTransform: 'uppercase',
+      letterSpacing: 0.8,
+    },
+    ndPlanCta: {
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: c.borderVisible,
+      paddingVertical: 14,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    ndPlanCtaTxt: {
+      fontSize: 11,
+      fontFamily: f.mono,
+      color: c.textDisplay,
+      textTransform: 'uppercase',
+      letterSpacing: 1.4,
+    },
+    ndEmptyTxt: {
+      fontSize: 11,
+      fontFamily: f.mono,
+      color: c.textSecondary,
+      textTransform: 'uppercase',
+      letterSpacing: 1.4,
+      textAlign: 'center',
+      marginTop: s.lg,
     },
     blockNutricion: {
       flexShrink: 0,
-      marginTop: s.sm,
     },
     flexSpacer: {
       flex: 1,

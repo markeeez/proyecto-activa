@@ -59,15 +59,47 @@ export const ejerciciosService = {
     const modoLista = params.modoLista ?? 'general';
     const userId = params.userId ?? null;
 
-    let q = supabase.from('exercises').select('*');
-
+    // PERF-04: "creados" — el usuario tiene pocos ejercicios personalizados (<50 típico).
+    // Traemos todos de una vez con columnas específicas y filtramos en cliente.
+    // Así el límite se aplica DESPUÉS del filtrado (antes se aplicaba antes, dando
+    // menos resultados de los esperados si había filtro de equipamiento).
     if (modoLista === 'creados') {
       if (!userId) {
-        console.warn('[ejerciciosService] buscarEjercicios modo creados llamado sin userId');
+        console.warn('[ejerciciosService] buscarEjercicios modo creados sin userId');
         return [];
       }
-      q = q.eq('is_custom', true).eq('created_by', userId);
-    } else if (modoLista === 'favoritos') {
+      const { data, error } = await supabase
+        .from('exercises')
+        .select('id, nombre, musculo_primario, musculos_secundarios, equipamiento, categoria, foto_url, is_custom, created_by, api_source')
+        .eq('is_custom', true)
+        .eq('created_by', userId)
+        .order('nombre');
+
+      if (error) {
+        console.error('[ejerciciosService.buscarEjercicios] creados', error.message);
+        return [];
+      }
+
+      let result = (data ?? []) as Exercise[];
+
+      if (musculo) result = result.filter((e) => e.musculo_primario === musculo);
+      if (equip) result = result.filter((e) => (e.equipamiento ?? '').trim() === equip);
+      if (texto) {
+        const tokens = palabrasBusqueda(normalizarTexto(texto)).filter((t) => t.length > 0);
+        if (tokens.length > 0) {
+          result = result.filter((e) => {
+            const n = normalizarTexto(e.nombre);
+            return tokens.every((t) => n.includes(t));
+          });
+        }
+      }
+
+      return result.slice(0, limite);
+    }
+
+    let q = supabase.from('exercises').select('*');
+
+    if (modoLista === 'favoritos') {
       if (!userId) return [];
       let ids = params.idsFavoritos;
       if (ids === undefined) {
@@ -115,10 +147,7 @@ export const ejerciciosService = {
 
         const ejecutar = async (words: string[], maxRows: number) => {
           let qq = supabase.from('exercises').select('*');
-          if (modoLista === 'creados') {
-            if (!userId) return [] as Exercise[];
-            qq = qq.eq('is_custom', true).eq('created_by', userId);
-          } else if (modoLista === 'favoritos') {
+          if (modoLista === 'favoritos') {
             if (!userId) return [];
             let ids = params.idsFavoritos;
             if (ids === undefined) ids = await this.obtenerEjerciciosFavoritos(userId);

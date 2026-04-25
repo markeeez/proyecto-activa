@@ -74,6 +74,7 @@ function makeStyles(c: Theme, f: ReturnType<typeof useTheme>['f'], ts: ReturnTyp
       backgroundColor: c.surfaceElevated,
       alignItems: 'center',
       justifyContent: 'center',
+      overflow: 'hidden',
     },
     thumbEntreno: {
       width: 48,
@@ -440,16 +441,16 @@ export function EjercicioRutinaCard({
     });
   };
 
-  const fotoEntrenoUri =
-    esEntreno && data.foto_url != null && String(data.foto_url).trim() !== '' ? String(data.foto_url).trim() : '';
+  const fotoUri =
+    data.foto_url != null && String(data.foto_url).trim() !== '' ? String(data.foto_url).trim() : '';
 
   return (
     <View style={styles.card}>
       <View style={styles.head}>
         {esEntreno ? (
-          fotoEntrenoUri ? (
+          fotoUri ? (
             <Image
-              source={{ uri: fotoEntrenoUri }}
+              source={{ uri: fotoUri }}
               style={styles.thumbEntrenoImg}
               contentFit="cover"
               cachePolicy="memory-disk"
@@ -461,6 +462,15 @@ export function EjercicioRutinaCard({
               <Ionicons name="barbell-outline" size={20} color={c.textMuted} />
             </View>
           )
+        ) : fotoUri ? (
+          <Image
+            source={{ uri: fotoUri }}
+            style={styles.thumb}
+            contentFit="cover"
+            cachePolicy="memory-disk"
+            autoplay={false}
+            recyclingKey={data.exerciseId}
+          />
         ) : (
           <View style={styles.thumb}>
             <Ionicons name="barbell-outline" size={22} color={c.textSecondary} />
