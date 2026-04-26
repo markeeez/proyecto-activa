@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, FlatList, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 
@@ -142,6 +142,14 @@ export function EntrenosListado() {
       alive = false;
     };
   }, [user?.id]);
+
+  // Recargar la primera página cada vez que la pantalla entra en foco.
+  // Cubre el caso de borrar desde sesion/[id].tsx y volver aquí.
+  useFocusEffect(
+    useCallback(() => {
+      void cargarPagina(0, false);
+    }, [cargarPagina]),
+  );
 
   const onEndReached = useCallback(async () => {
     if (!user?.id || cargandoMas || cargandoInicial || !hayMas) return;

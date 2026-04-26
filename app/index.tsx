@@ -64,5 +64,5 @@ export default function Index() {
     return <Redirect href="/(onboarding)/datos" />;
   }
 
-  return <Redirect href="/(tabs)/(nutricion)" />;
+  return <Redirect href="/(tabs)/inicio" />;
 }

@@ -554,6 +554,18 @@ export default function NutricionIndex() {
   );
 }
 
+// ─── SpaceX palette ──────────────────────────────────────────────────────────
+const SX_BG           = '#000000';
+const SX_TEXT         = '#f0f0fa';
+const SX_TEXT_SUB     = 'rgba(240,240,250,0.55)';
+const SX_TEXT_MUTED   = 'rgba(240,240,250,0.30)';
+const SX_GHOST_BG     = 'rgba(240,240,250,0.08)';
+const SX_GHOST_BORDER = 'rgba(240,240,250,0.35)';
+const SX_SEPARATOR    = 'rgba(240,240,250,0.12)';
+const SX_FILL         = 'rgba(240,240,250,0.70)';
+const SX_DANGER       = '#cf4444';
+// ─────────────────────────────────────────────────────────────────────────────
+
 function makeStyles(
   c: ReturnType<typeof useTheme>['c'],
   f: ReturnType<typeof useTheme>['f'],
@@ -564,7 +576,7 @@ function makeStyles(
   return StyleSheet.create({
     root: {
       flex: 1,
-      backgroundColor: c.background,
+      backgroundColor: SX_BG,
     },
     listContainer: {
       flex: 1,
@@ -599,9 +611,9 @@ function makeStyles(
     weekCalendar: {
       flex: 1,
       borderWidth: 1,
-      borderColor: c.borderVisible,
+      borderColor: SX_SEPARATOR,
       borderRadius: r.lg,
-      backgroundColor: c.surface,
+      backgroundColor: SX_GHOST_BG,
       paddingHorizontal: s.xs,
       paddingVertical: s.sm,
       flexDirection: 'row',
@@ -615,30 +627,31 @@ function makeStyles(
       gap: 2,
     },
     dayItemActive: {
-      backgroundColor: c.textDisplay,
+      backgroundColor: SX_TEXT,
     },
     dayLetter: {
       ...ts.label,
       fontFamily: f.mono,
-      color: c.textSecondary,
-      letterSpacing: 0.7,
+      color: SX_TEXT_MUTED,
+      letterSpacing: 1.2,
+      textTransform: 'uppercase',
     },
     dayLetterActive: {
-      color: c.background,
+      color: SX_BG,
     },
     dayNumber: {
       ...ts.caption,
       fontFamily: f.monoBold,
-      color: c.textDisplay,
+      color: SX_TEXT,
     },
     dayNumberActive: {
-      color: c.background,
+      color: SX_BG,
     },
     summaryCard: {
       borderWidth: 1,
-      borderColor: c.borderVisible,
+      borderColor: SX_SEPARATOR,
       borderRadius: r.lg,
-      backgroundColor: c.surface,
+      backgroundColor: SX_GHOST_BG,
       paddingHorizontal: s.md,
       paddingVertical: s.sm,
       gap: s.sm,
@@ -648,9 +661,9 @@ function makeStyles(
     },
     skeletonCard: {
       borderWidth: 1,
-      borderColor: c.borderVisible,
+      borderColor: SX_SEPARATOR,
       borderRadius: r.md,
-      backgroundColor: c.surface,
+      backgroundColor: 'rgba(240,240,250,0.04)',
       opacity: 0.5,
     },
     summaryCardBelowCalendar: {
@@ -664,28 +677,32 @@ function makeStyles(
     summaryValue: {
       ...ts.heading,
       fontFamily: f.sansBold,
-      color: c.textDisplay,
+      color: SX_TEXT,
+      letterSpacing: 0.96,
+      textTransform: 'uppercase',
     },
     summaryUnit: {
       ...ts.caption,
       fontFamily: f.mono,
-      color: c.textSecondary,
+      color: SX_TEXT_SUB,
+      letterSpacing: 1.17,
     },
     summaryGoal: {
       ...ts.label,
       fontFamily: f.mono,
-      color: c.textSecondary,
-      letterSpacing: 0.7,
+      color: SX_TEXT_MUTED,
+      letterSpacing: 1.17,
+      textTransform: 'uppercase',
     },
     progressTrack: {
-      height: 7,
-      backgroundColor: c.primaryBg,
+      height: 2,
+      backgroundColor: SX_SEPARATOR,
       borderRadius: r.pill,
       overflow: 'hidden',
     },
     progressFill: {
       height: '100%',
-      backgroundColor: c.primary,
+      backgroundColor: SX_FILL,
       borderRadius: r.pill,
     },
     macroRow: {
@@ -694,49 +711,46 @@ function makeStyles(
     macroLabel: {
       ...ts.label,
       fontFamily: f.mono,
-      color: c.textSecondary,
-      letterSpacing: ts.label.letterSpacing,
+      color: SX_TEXT_MUTED,
+      letterSpacing: 1.17,
+      textTransform: 'uppercase',
     },
     macroValue: {
       ...ts.bodySm,
       fontFamily: f.sansMedium,
-      color: c.text,
+      color: SX_TEXT_SUB,
     },
     macroTrack: {
-      height: 6,
-      backgroundColor: c.separator,
+      height: 2,
+      backgroundColor: SX_SEPARATOR,
       borderRadius: r.pill,
       overflow: 'hidden',
     },
     macroFill: {
       height: '100%',
-      backgroundColor: c.primary,
+      backgroundColor: SX_FILL,
       borderRadius: r.pill,
     },
     sectionTitle: {
       ...ts.label,
       fontFamily: f.mono,
-      color: c.textSecondary,
-      letterSpacing: ts.label.letterSpacing,
+      color: SX_TEXT_MUTED,
+      letterSpacing: 1.5,
+      textTransform: 'uppercase',
       marginTop: s.sm,
     },
     mealCard: {
       borderWidth: 1,
-      borderColor: c.borderVisible,
+      borderColor: SX_SEPARATOR,
       borderRadius: r.md,
-      backgroundColor: c.surface,
+      backgroundColor: SX_GHOST_BG,
       paddingHorizontal: s.md,
       paddingVertical: s.md,
       gap: s.md,
     },
     mealCardActive: {
       opacity: 0.97,
-      borderColor: c.primary,
-      shadowColor: c.primary,
-      shadowOpacity: 0.18,
-      shadowRadius: 10,
-      shadowOffset: { width: 0, height: 4 },
-      elevation: 8,
+      borderColor: SX_GHOST_BORDER,
     },
     mealHeaderRow: {
       flexDirection: 'row',
@@ -750,7 +764,7 @@ function makeStyles(
     dragHandleText: {
       ...ts.subheading,
       fontFamily: f.mono,
-      color: c.textSecondary,
+      color: SX_TEXT_MUTED,
     },
     mealHeaderText: {
       flex: 1,
@@ -762,14 +776,14 @@ function makeStyles(
     menuDotsText: {
       ...ts.subheading,
       fontFamily: f.monoBold,
-      color: c.textDisplay,
+      color: SX_TEXT_SUB,
     },
     swipeLeft: {
       justifyContent: 'center',
       marginRight: s.sm,
     },
     swipeDeleteInner: {
-      backgroundColor: c.danger,
+      backgroundColor: SX_DANGER,
       justifyContent: 'center',
       alignItems: 'center',
       width: 88,
@@ -780,14 +794,16 @@ function makeStyles(
     swipeDeleteTxt: {
       ...ts.label,
       fontFamily: f.monoBold,
-      color: '#fff',
+      color: SX_TEXT,
+      letterSpacing: 1,
+      textTransform: 'uppercase',
     },
     swipeRight: {
       justifyContent: 'center',
       marginLeft: s.sm,
     },
     swipeDeleteFoodInner: {
-      backgroundColor: c.danger,
+      backgroundColor: SX_DANGER,
       justifyContent: 'center',
       alignItems: 'center',
       width: 76,
@@ -803,7 +819,7 @@ function makeStyles(
       justifyContent: 'space-between',
       alignItems: 'center',
       gap: s.md,
-      backgroundColor: c.surface,
+      backgroundColor: 'transparent',
     },
     foodMain: {
       flex: 1,
@@ -811,33 +827,38 @@ function makeStyles(
     mealTitle: {
       ...ts.subheading,
       fontFamily: f.sansMedium,
-      color: c.textDisplay,
+      color: SX_TEXT,
+      letterSpacing: 0.96,
+      textTransform: 'uppercase',
     },
     mealMeta: {
       ...ts.caption,
       fontFamily: f.mono,
-      color: c.textMuted,
-      letterSpacing: 0.4,
+      color: SX_TEXT_MUTED,
+      letterSpacing: 1,
+      textTransform: 'uppercase',
     },
     foodName: {
       ...ts.bodySm,
       fontFamily: f.sansMedium,
-      color: c.textDisplay,
+      color: SX_TEXT,
     },
     foodMeta: {
       ...ts.caption,
       fontFamily: f.mono,
-      color: c.textMuted,
+      color: SX_TEXT_MUTED,
     },
     foodMacros: {
       ...ts.caption,
       fontFamily: f.monoBold,
-      color: c.primary,
+      color: SX_TEXT_SUB,
+      letterSpacing: 0.8,
     },
     emptyMealText: {
       ...ts.caption,
       fontFamily: f.mono,
-      color: c.textMuted,
+      color: SX_TEXT_MUTED,
+      letterSpacing: 0.8,
     },
     emptyOverlay: {
       ...StyleSheet.absoluteFillObject,
@@ -854,10 +875,10 @@ function makeStyles(
     },
     addBtn: {
       width: '30%',
-      borderRadius: r.pill,
+      borderRadius: 20,
       borderWidth: 1,
-      borderColor: c.borderVisible,
-      backgroundColor: c.surfaceElevated,
+      borderColor: SX_GHOST_BORDER,
+      backgroundColor: SX_GHOST_BG,
       height: 42,
       alignItems: 'center',
       justifyContent: 'center',
@@ -865,16 +886,16 @@ function makeStyles(
     addBtnText: {
       ...ts.label,
       fontFamily: f.mono,
-      color: c.textDisplay,
+      color: SX_TEXT,
       letterSpacing: 0.8,
-      fontSize: 12,
+      fontSize: 16,
     },
     queryBox: {
       width: '70%',
-      borderRadius: r.pill,
+      borderRadius: 20,
       borderWidth: 1,
-      borderColor: c.borderVisible,
-      backgroundColor: c.surfaceElevated,
+      borderColor: SX_GHOST_BORDER,
+      backgroundColor: SX_GHOST_BG,
       height: 42,
       justifyContent: 'center',
       paddingHorizontal: s.md,
@@ -882,7 +903,7 @@ function makeStyles(
     queryInput: {
       ...ts.bodySm,
       fontFamily: f.sans,
-      color: c.text,
+      color: SX_TEXT,
     },
     footerBlock: {
       marginTop: s.md,
@@ -890,9 +911,9 @@ function makeStyles(
     },
     addMealBtn: {
       borderWidth: 1,
-      borderColor: c.borderVisible,
-      borderRadius: r.md,
-      backgroundColor: c.surfaceElevated,
+      borderColor: SX_GHOST_BORDER,
+      borderRadius: 20,
+      backgroundColor: SX_GHOST_BG,
       paddingVertical: s.md,
       alignItems: 'center',
     },
@@ -902,36 +923,41 @@ function makeStyles(
     addMealBtnText: {
       ...ts.label,
       fontFamily: f.mono,
-      color: c.primary,
+      color: SX_TEXT,
+      letterSpacing: 1.17,
+      textTransform: 'uppercase',
     },
     modalOverlay: {
       flex: 1,
-      backgroundColor: 'rgba(0,0,0,0.45)',
+      backgroundColor: 'rgba(0,0,0,0.75)',
       justifyContent: 'center',
       paddingHorizontal: s.xl,
     },
     modalCard: {
-      backgroundColor: c.surface,
+      backgroundColor: '#0c0c0c',
       borderRadius: r.lg,
       borderWidth: 1,
-      borderColor: c.borderVisible,
+      borderColor: SX_GHOST_BORDER,
       padding: s.lg,
       gap: s.md,
     },
     modalTitle: {
       ...ts.subheading,
       fontFamily: f.sansMedium,
-      color: c.textDisplay,
+      color: SX_TEXT,
+      letterSpacing: 1,
+      textTransform: 'uppercase',
     },
     modalInput: {
       ...ts.bodySm,
       fontFamily: f.sans,
-      color: c.text,
+      color: SX_TEXT,
       borderWidth: 1,
-      borderColor: c.borderVisible,
+      borderColor: SX_GHOST_BORDER,
       borderRadius: r.md,
       paddingHorizontal: s.md,
       paddingVertical: s.sm,
+      backgroundColor: SX_GHOST_BG,
     },
     modalActions: {
       flexDirection: 'row',
@@ -945,24 +971,28 @@ function makeStyles(
     modalBtnGhostText: {
       ...ts.bodySm,
       fontFamily: f.sansMedium,
-      color: c.textSecondary,
+      color: SX_TEXT_MUTED,
     },
     modalBtnPrimary: {
       paddingVertical: s.sm,
       paddingHorizontal: s.md,
-      backgroundColor: c.primary,
+      backgroundColor: SX_GHOST_BG,
       borderRadius: r.md,
+      borderWidth: 1,
+      borderColor: SX_GHOST_BORDER,
     },
     modalBtnPrimaryText: {
       ...ts.bodySm,
       fontFamily: f.sansBold,
-      color: c.background,
+      color: SX_TEXT,
+      letterSpacing: 0.8,
+      textTransform: 'uppercase',
     },
     menuCard: {
-      backgroundColor: c.surface,
+      backgroundColor: '#0c0c0c',
       borderRadius: r.lg,
       borderWidth: 1,
-      borderColor: c.borderVisible,
+      borderColor: SX_GHOST_BORDER,
       overflow: 'hidden',
       alignSelf: 'center',
       minWidth: 220,
@@ -971,7 +1001,7 @@ function makeStyles(
       paddingVertical: s.md,
       paddingHorizontal: s.lg,
       borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: c.separator,
+      borderBottomColor: SX_SEPARATOR,
     },
     menuRowDisabled: {
       opacity: 0.4,
@@ -979,13 +1009,15 @@ function makeStyles(
     menuRowText: {
       ...ts.bodySm,
       fontFamily: f.sansMedium,
-      color: c.text,
+      color: SX_TEXT,
+      letterSpacing: 0.8,
+      textTransform: 'uppercase',
     },
     menuRowTextDisabled: {
-      color: c.textMuted,
+      color: SX_TEXT_MUTED,
     },
     menuRowDanger: {
-      color: c.danger,
+      color: SX_DANGER,
     },
   });
 }

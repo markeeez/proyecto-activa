@@ -16,11 +16,12 @@
 import { View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Tabs, usePathname } from 'expo-router';
-import { BottomTabBar, type BottomTabBarProps } from '@react-navigation/bottom-tabs';
+import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 
 import { BarraEntrenoMinimizado } from '@/components/entrenamiento/BarraEntrenoMinimizado';
 import { useEntreno } from '@/context/EntrenoContext';
-import { useTheme } from '@/hooks/useTheme';
+
+import { TabBarActivia } from './TabBarActivia';
 
 function TabBarWithEntreno(props: BottomTabBarProps) {
   const { entrenoActivo } = useEntreno();
@@ -29,78 +30,80 @@ function TabBarWithEntreno(props: BottomTabBarProps) {
   return (
     <View>
       {entrenoActivo != null && !enEntrenoActivo ? <BarraEntrenoMinimizado /> : null}
-      <BottomTabBar {...props} />
+      <TabBarActivia {...props} />
     </View>
   );
 }
 
 export default function TabsLayout() {
-  const { c } = useTheme();
-
   return (
     <Tabs
       tabBar={(props) => <TabBarWithEntreno {...props} />}
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: c.textDisplay,
-        tabBarInactiveTintColor: c.textMuted,
-        tabBarStyle: {
-          backgroundColor: c.background,
-          borderTopColor: c.border,
-          borderTopWidth: 1,
-        },
-        tabBarLabelStyle: {
-          fontFamily: 'SpaceMono_400Regular',
-          fontSize: 9,
-          letterSpacing: 0.5,
-          textTransform: 'uppercase',
-        },
       }}
     >
+      {/* Posición 0 — Inicio (Home) */}
+      <Tabs.Screen
+        name="inicio"
+        options={{
+          title: 'Inicio',
+          tabBarLabel: 'Inicio',
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? 'home' : 'home-outline'} size={24} color={color} />
+          ),
+        }}
+      />
+      {/* index heredado — excluido del tab bar */}
+      <Tabs.Screen name="index" options={{ href: null } as any} />
+      {/* Posición 1 — Alimentación */}
       <Tabs.Screen
         name="(nutricion)"
         options={{
-          title: 'Nutrición',
+          title: 'Alimentación',
+          tabBarLabel: 'Alimentación',
           tabBarIcon: ({ color, focused }) => (
-            <Ionicons name={focused ? 'restaurant' : 'restaurant-outline'} size={24} color={color} />
+            <Ionicons name={focused ? 'nutrition' : 'nutrition-outline'} size={24} color={color} />
           ),
         }}
       />
-      <Tabs.Screen
-        name="(entrenamiento)"
-        options={{
-          title: 'Entreno',
-          tabBarIcon: ({ color, focused }) => (
-            <Ionicons name={focused ? 'barbell' : 'barbell-outline'} size={24} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="(progreso)"
-        options={{
-          title: 'Progreso',
-          tabBarIcon: ({ color, focused }) => (
-            <Ionicons name={focused ? 'stats-chart' : 'stats-chart-outline'} size={24} color={color} />
-          ),
-        }}
-      />
+      {/* Posición 2 — IA (centro oculto bajo el FAB; onFabPress navega aquí) */}
       <Tabs.Screen
         name="(ia)"
         options={{
           title: 'IA',
+          tabBarLabel: 'IA',
           tabBarIcon: ({ color, focused }) => (
             <Ionicons name={focused ? 'sparkles' : 'sparkles-outline'} size={24} color={color} />
           ),
         }}
       />
+      {/* Posición 3 — Entreno */}
+      <Tabs.Screen
+        name="(entrenamiento)"
+        options={{
+          title: 'Entreno',
+          tabBarLabel: 'Entreno',
+          tabBarIcon: ({ color, focused }) => (
+            <Ionicons name={focused ? 'barbell' : 'barbell-outline'} size={24} color={color} />
+          ),
+        }}
+      />
+      {/* Posición 4 — Más */}
       <Tabs.Screen
         name="(perfil)"
         options={{
-          title: 'Perfil',
+          title: 'Más',
+          tabBarLabel: 'Más',
           tabBarIcon: ({ color, focused }) => (
-            <Ionicons name={focused ? 'person' : 'person-outline'} size={24} color={color} />
+            <Ionicons name={focused ? 'ellipsis-horizontal-circle' : 'ellipsis-horizontal-circle-outline'} size={24} color={color} />
           ),
         }}
+      />
+      {/* Progreso: ruta existente, excluida del tab bar */}
+      <Tabs.Screen
+        name="(progreso)"
+        options={{ href: null } as any}
       />
     </Tabs>
   );

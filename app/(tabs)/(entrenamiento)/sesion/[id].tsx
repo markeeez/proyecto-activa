@@ -94,6 +94,10 @@ export default function DetalleSesionPantalla() {
   const sessionId = Array.isArray(idParam) ? idParam[0] : idParam;
 
   const router = useRouter();
+
+  const goBack = useCallback(() => {
+    router.back();
+  }, [router]);
   const insets = useSafeAreaInsets();
   const { c, f, ts, s, r } = useTheme();
 
@@ -575,7 +579,7 @@ export default function DetalleSesionPantalla() {
           <View style={styles.header}>
             <Pressable
               style={styles.headerSide}
-              onPress={() => router.back()}
+              onPress={goBack}
               accessibilityRole="button"
               accessibilityLabel="Volver"
             >
@@ -608,7 +612,7 @@ export default function DetalleSesionPantalla() {
         <View style={styles.header}>
           <Pressable
             style={styles.headerSide}
-            onPress={() => router.back()}
+            onPress={goBack}
             accessibilityRole="button"
             accessibilityLabel="Volver"
           >
