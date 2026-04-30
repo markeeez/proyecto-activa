@@ -21,7 +21,7 @@ import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { BarraEntrenoMinimizado } from '@/components/entrenamiento/BarraEntrenoMinimizado';
 import { useEntreno } from '@/context/EntrenoContext';
 
-import { TabBarActivia } from './TabBarActivia';
+import { TabBarActivia } from '@/components/navigation/TabBarActivia';
 
 function TabBarWithEntreno(props: BottomTabBarProps) {
   const { entrenoActivo } = useEntreno();

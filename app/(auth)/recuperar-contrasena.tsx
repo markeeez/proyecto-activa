@@ -1,32 +1,54 @@
+import { Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
 import { useState } from 'react';
 import {
-  View,
+  ActivityIndicator,
+  Dimensions,
+  KeyboardAvoidingView,
+  Linking,
+  Platform,
+  StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
-  StyleSheet,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  ActivityIndicator,
+  View,
 } from 'react-native';
-import { router } from 'expo-router';
-import { useTheme } from '@/hooks/useTheme';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import LogoSVG from '@/assets/images/logo_sb.svg';
+import { GlowBeams } from '@/components/ui/GlowBeams';
+import { GlowButton } from '@/components/ui/GlowButton';
+import { Colors } from '@/constants/theme';
 import { authService } from '@/services/auth.service';
 
+const SW = Dimensions.get('window').width;
+const HERO_H = 140;
+
+const AUTH = Colors.dark;
+const BG = AUTH.background;
+const CYAN = AUTH.primary;
+const CYAN_BORDER = `${CYAN}45`;
+const WHITE = AUTH.textDisplay;
+const SURFACE = AUTH.surfaceElevated;
+const BORDER = AUTH.borderVisible;
+const LABEL = '#777777';
+const MUTED = AUTH.textMuted;
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const SUPPORT_EMAIL = 'soporte@activa.app';
+
 export default function RecuperarContrasena() {
-  const { c, f, ts, s, r } = useTheme();
+  const insets = useSafeAreaInsets();
 
   const [email, setEmail] = useState('');
   const [cargando, setCargando] = useState(false);
-  const [enviado, setEnviado] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const handleEnviarEnlace = async () => {
     const emailNormalizado = email.trim().toLowerCase();
 
-    if (!emailNormalizado) {
-      setError('[ERROR: INTRODUCE TU EMAIL]');
+    if (!EMAIL_RE.test(emailNormalizado)) {
+      setError('Introduce un email válido.');
       return;
     }
 
@@ -38,201 +60,307 @@ export default function RecuperarContrasena() {
     setCargando(false);
 
     if (resetError) {
-      setError('[ERROR: ' + resetError.message.toUpperCase() + ']');
+      setError(resetError.message);
       return;
     }
-
-    setEnviado(true);
   };
 
-  const styles = makeStyles(c, f, ts, s, r);
+  const handleContact = () => {
+    Linking.openURL(`mailto:${SUPPORT_EMAIL}`);
+  };
 
   return (
     <KeyboardAvoidingView
-      style={styles.root}
+      style={st.root}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <ScrollView
-        contentContainerStyle={styles.scroll}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-      >
-        <View style={styles.header}>
-          <Text style={styles.title}>FORGOT{'\n'}PASSWORD</Text>
-          <Text style={styles.description}>
-            Te enviaremos un enlace para restablecer tu contraseña.
+      <View style={[st.screen, { paddingBottom: insets.bottom + 18 }]}>
+        <View style={[st.hero, { height: HERO_H, marginTop: insets.top }]}>
+          <GlowBeams width={SW} height={HERO_H} />
+
+          <LogoSVG width={70} height={80} style={st.logo} />
+        </View>
+
+        <View style={st.copyBlock}>
+          <Text style={st.title}>RECUPERA TU CONTRASEÑA</Text>
+          <Text style={st.subtitle}>
+            Te enviaremos un <Text style={st.subtitleAccent}>enlace seguro</Text> para que
+            puedas restablecer tu contraseña.
           </Text>
         </View>
 
-        <View style={styles.form}>
-          <View style={styles.fieldWrapper}>
-            <Text style={styles.fieldLabel}>EMAIL</Text>
-            <TextInput
-              style={styles.input}
-              value={email}
-              onChangeText={setEmail}
-              autoCapitalize="none"
-              keyboardType="email-address"
-              returnKeyType="done"
-              onSubmitEditing={handleEnviarEnlace}
-              placeholderTextColor={c.textMuted}
-              placeholder="tu@email.com"
-              selectionColor={c.primary}
-              editable={!enviado}
-            />
-            <View style={[styles.underline, email.length > 0 && styles.underlineFilled]} />
+        <View style={st.form}>
+          <View style={st.fieldBlock}>
+            <Text style={st.label}>EMAIL</Text>
+            <View style={[st.inputRow, error && st.inputRowError]}>
+              <Ionicons name="mail-outline" size={22} color={CYAN} style={st.inputIcon} />
+              <TextInput
+                style={st.input}
+                value={email}
+                onChangeText={(value) => {
+                  setEmail(value);
+                  if (error) setError(null);
+                }}
+                placeholder="tu@email.com"
+                placeholderTextColor={MUTED}
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="email-address"
+                returnKeyType="done"
+                onSubmitEditing={handleEnviarEnlace}
+                selectionColor={CYAN}
+                autoComplete="email"
+              />
+            </View>
+            {error != null && <Text style={st.errorTxt}>{error}</Text>}
           </View>
 
-          {error && <Text style={styles.errorText}>{error}</Text>}
-
-          {enviado ? (
-            <View style={styles.successBox}>
-              <Text style={styles.successText}>[EMAIL ENVIADO]</Text>
-              <Text style={styles.successDescription}>
-                Revisa tu bandeja de entrada y sigue el enlace para cambiar la contraseña.
-              </Text>
-            </View>
-          ) : (
+          <GlowButton borderRadius={12}>
             <TouchableOpacity
-              style={[styles.btnPrimary, cargando && styles.btnDisabled]}
+              style={[st.btnPrimary, cargando && st.btnDim]}
               onPress={handleEnviarEnlace}
               disabled={cargando}
-              activeOpacity={0.85}
+              activeOpacity={0.82}
             >
               {cargando ? (
-                <ActivityIndicator color={c.background} size="small" />
+                <ActivityIndicator color={BG} size="small" />
               ) : (
-                <Text style={styles.btnPrimaryText}>ENVIAR ENLACE</Text>
+                <>
+                  <Text style={st.btnPrimaryTxt}>ENVIAR ENLACE</Text>
+                  <Ionicons name="arrow-forward" size={20} color={BG} />
+                </>
               )}
             </TouchableOpacity>
-          )}
-        </View>
+          </GlowButton>
 
-        <View style={styles.footer}>
+          <View style={st.infoCard}>
+            <View style={st.shieldCircle}>
+              <Ionicons name="shield-checkmark-outline" size={26} color={CYAN} />
+            </View>
+            <View style={st.infoTextBlock}>
+              <Text style={st.infoTitle}>Enlace seguro y temporal</Text>
+              <Text style={st.infoText}>El enlace expirará en 15 minutos por tu seguridad.</Text>
+            </View>
+          </View>
+
+          <View style={st.dividerRow}>
+            <View style={st.dividerLine} />
+            <Text style={st.dividerTxt}>¿RECUERDAS TU CONTRASEÑA?</Text>
+            <View style={st.dividerLine} />
+          </View>
+
           <TouchableOpacity
+            style={st.loginCard}
             onPress={() => router.replace('/(auth)/iniciar-sesion')}
-            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            activeOpacity={0.82}
           >
-            <Text style={styles.footerLink}>VOLVER A INICIAR SESION</Text>
+            <Ionicons name="arrow-back" size={22} color={CYAN} />
+            <Text style={st.loginText}>Volver a iniciar sesión</Text>
           </TouchableOpacity>
+
+          <View style={st.footer}>
+            <Text style={st.footerTxt}>¿Necesitas ayuda?</Text>
+            <TouchableOpacity onPress={handleContact} hitSlop={8}>
+              <Text style={st.footerLink}>Contáctanos</Text>
+            </TouchableOpacity>
+          </View>
         </View>
-      </ScrollView>
+      </View>
     </KeyboardAvoidingView>
   );
 }
 
-function makeStyles(
-  c: ReturnType<typeof useTheme>['c'],
-  f: ReturnType<typeof useTheme>['f'],
-  ts: ReturnType<typeof useTheme>['ts'],
-  s: ReturnType<typeof useTheme>['s'],
-  r: ReturnType<typeof useTheme>['r'],
-) {
-  return StyleSheet.create({
-    root: {
-      flex: 1,
-      backgroundColor: c.background,
-    },
-    scroll: {
-      flexGrow: 1,
-      paddingHorizontal: s.lg,
-      paddingBottom: s['3xl'],
-    },
-    header: {
-      marginTop: s.xxl,
-      marginBottom: s.xxl,
-    },
-    title: {
-      ...ts.displayMd,
-      fontFamily: f.display,
-      color: c.textDisplay,
-    },
-    description: {
-      ...ts.bodySm,
-      fontFamily: f.sans,
-      color: c.textSecondary,
-      marginTop: s.md,
-      maxWidth: 320,
-    },
-    form: {
-      gap: s.lg,
-    },
-    fieldWrapper: {
-      gap: s.xs,
-    },
-    fieldLabel: {
-      ...ts.label,
-      fontFamily: f.mono,
-      color: c.textSecondary,
-      letterSpacing: ts.label.letterSpacing,
-    },
-    input: {
-      ...ts.body,
-      fontFamily: f.mono,
-      color: c.textDisplay,
-      paddingVertical: s.sm,
-      paddingHorizontal: 0,
-    },
-    underline: {
-      height: 1,
-      backgroundColor: c.borderVisible,
-    },
-    underlineFilled: {
-      backgroundColor: c.text,
-    },
-    btnPrimary: {
-      height: 52,
-      borderRadius: r.pill,
-      backgroundColor: c.textDisplay,
-      alignItems: 'center',
-      justifyContent: 'center',
-      marginTop: s.sm,
-    },
-    btnDisabled: {
-      opacity: 0.4,
-    },
-    btnPrimaryText: {
-      ...ts.label,
-      fontFamily: f.mono,
-      color: c.background,
-      letterSpacing: 1.2,
-      fontSize: 13,
-    },
-    errorText: {
-      ...ts.caption,
-      fontFamily: f.mono,
-      color: c.danger,
-      letterSpacing: 0.4,
-    },
-    successBox: {
-      borderWidth: 1,
-      borderColor: c.borderVisible,
-      borderRadius: r.md,
-      padding: s.md,
-      gap: s.sm,
-      backgroundColor: c.surface,
-    },
-    successText: {
-      ...ts.label,
-      fontFamily: f.mono,
-      color: c.success,
-      letterSpacing: 0.8,
-    },
-    successDescription: {
-      ...ts.bodySm,
-      fontFamily: f.sans,
-      color: c.textSecondary,
-    },
-    footer: {
-      marginTop: s['3xl'],
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    footerLink: {
-      ...ts.label,
-      fontFamily: f.mono,
-      color: c.textSecondary,
-      letterSpacing: ts.label.letterSpacing,
-    },
-  });
-}
+const st = StyleSheet.create({
+  root: {
+    flex: 1,
+    backgroundColor: BG,
+  },
+  screen: {
+    flex: 1,
+    paddingHorizontal: 24,
+  },
+  hero: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: -12,
+  },
+  logo: {
+    marginBottom: 0,
+    marginLeft: -5,
+  },
+  copyBlock: {
+    alignItems: 'center',
+    marginBottom: 26,
+    marginTop: 20
+  },
+  title: {
+    fontSize: 24,
+    lineHeight: 30,
+    fontWeight: '800',
+    color: WHITE,
+    letterSpacing: -0.6,
+    textAlign: 'center',
+  },
+  subtitle: {
+    maxWidth: 330,
+    marginTop: 14,
+    fontSize: 15,
+    lineHeight: 22,
+    color: WHITE,
+    textAlign: 'center',
+  },
+  subtitleAccent: {
+    color: CYAN,
+  },
+  form: {
+    gap: 20,
+  },
+  fieldBlock: {
+    gap: 8,
+  },
+  label: {
+    fontSize: 10,
+    lineHeight: 13,
+    color: LABEL,
+    letterSpacing: 1.8,
+    fontWeight: '700',
+  },
+  inputRow: {
+    minHeight: 56,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 7,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: BORDER,
+    backgroundColor: SURFACE,
+  },
+  inputRowError: {
+    borderColor: AUTH.dangerText,
+  },
+  inputIcon: {
+    width: 24,
+    textAlign: 'center',
+  },
+  input: {
+    flex: 1,
+    padding: 0,
+    fontSize: 15,
+    lineHeight: 20,
+    color: WHITE,
+  },
+  errorTxt: {
+    fontSize: 13,
+    lineHeight: 17,
+    color: AUTH.dangerText,
+  },
+  btnPrimary: {
+    height: 56,
+    borderRadius: 12,
+    backgroundColor: CYAN,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+  },
+  btnDim: {
+    opacity: 0.55,
+  },
+  btnPrimaryTxt: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: BG,
+    letterSpacing: 2.6,
+  },
+  infoCard: {
+    minHeight: 80,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: CYAN_BORDER,
+    backgroundColor: SURFACE,
+  },
+  shieldCircle: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    borderWidth: 1,
+    borderColor: CYAN,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  infoTextBlock: {
+    flex: 1,
+    gap: 5,
+  },
+  infoTitle: {
+    fontSize: 14,
+    lineHeight: 18,
+    color: WHITE,
+    fontWeight: '800',
+  },
+  infoText: {
+    fontSize: 12,
+    lineHeight: 16,
+    color: MUTED,
+  },
+  dividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginVertical: 14,
+  },
+  dividerLine: {
+    flex: 1,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: BORDER,
+  },
+  dividerTxt: {
+    fontSize: 10,
+    lineHeight: 13,
+    color: LABEL,
+    letterSpacing: 1.5,
+    fontWeight: '700',
+  },
+  loginCard: {
+    height: 56,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: BORDER,
+    backgroundColor: SURFACE,
+  },
+  loginText: {
+    flex: 1,
+    fontSize: 16,
+    lineHeight: 20,
+    color: WHITE,
+    fontWeight: '800',
+  },
+  footer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 5,
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  footerTxt: {
+    fontSize: 13,
+    color: MUTED,
+  },
+  footerLink: {
+    fontSize: 13,
+    color: CYAN,
+    fontWeight: '700',
+  },
+});
