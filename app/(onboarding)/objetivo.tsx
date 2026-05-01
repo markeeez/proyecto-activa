@@ -7,6 +7,7 @@ import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import * as Notifications from 'expo-notifications';
 import { router, useLocalSearchParams } from 'expo-router';
+import type { ComponentProps } from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -22,10 +23,13 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Svg, { G, Path, Text as SvgText } from 'react-native-svg';
 
-import type { Theme } from '@/constants/theme';
+import LogoSVG from '@/assets/images/logo_sb.svg';
+import { GlowButton } from '@/components/ui/GlowButton';
+import { Colors, FontFamily } from '@/constants/theme';
+import { useThemeMode } from '@/context/ThemeContext';
 import { useAuth } from '@/hooks/useAuth';
-import { useTheme } from '@/hooks/useTheme';
 import { fechaHoyIsoLocal } from '@/lib/fechaNutricion';
 import { supabase } from '@/lib/supabase';
 import type { Objetivo } from '@/types/database.types';
@@ -34,6 +38,7 @@ import type { GeneroOnboarding } from './datos';
 type ObjetivoUi = 'perder' | 'mantener' | 'ganar';
 
 type MacroPerfil = 'alta_proteina' | 'equilibrado' | 'alta_carbos';
+type IconName = ComponentProps<typeof Ionicons>['name'];
 
 function macrosDesdePerfil(perfil: MacroPerfil, pesoKg: number, kcalObjetivo: number): { p: number; c: number; f: number } {
   let proteinas_g: number;
@@ -77,6 +82,24 @@ function fmtKgParaMensaje(kg: number): string {
   return t.endsWith('.0') ? String(Math.round(kg)) : t;
 }
 
+function normalizarPesoObjetivoInput(value: string): string {
+  let out = '';
+  let separadorUsado = false;
+  for (const ch of value) {
+    const esDigito = ch >= '0' && ch <= '9';
+    const esSeparador = ch === '.' || ch === ',';
+    if (esDigito) {
+      out += ch;
+      continue;
+    }
+    if (esSeparador && !separadorUsado) {
+      out += ch;
+      separadorUsado = true;
+    }
+  }
+  return out;
+}
+
 function inicialesUsuario(user: { user_metadata?: Record<string, unknown>; email?: string | null } | null): string {
   if (!user) return '?';
   const meta = user.user_metadata as Record<string, string | undefined> | undefined;
@@ -110,372 +133,78 @@ function calcularKcalObjetivo(
   return tdee;
 }
 
-function makeStyles(c: Theme, f: ReturnType<typeof useTheme>['f'], ts: ReturnType<typeof useTheme>['ts'], s: ReturnType<typeof useTheme>['s'], r: ReturnType<typeof useTheme>['r']) {
-  return StyleSheet.create({
-    root: { flex: 1, backgroundColor: c.background },
-    header: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      paddingHorizontal: s.md,
-      paddingBottom: s.sm,
-    },
-    headerSide: { width: 44, alignItems: 'flex-start', justifyContent: 'center' },
-    pasoTxt: {
-      ...ts.caption,
-      fontFamily: f.mono,
-      color: c.textSecondary,
-    },
-    scroll: { flexGrow: 1, paddingHorizontal: s.md },
-    label: {
-      ...ts.label,
-      fontFamily: f.mono,
-      color: c.textSecondary,
-      marginBottom: s.sm,
-      marginTop: s.md,
-      letterSpacing: 0.6,
-    },
-    labelFirst: {
-      ...ts.label,
-      fontFamily: f.mono,
-      color: c.textSecondary,
-      marginBottom: s.sm,
-      marginTop: s.lg,
-      letterSpacing: 0.6,
-    },
-    segmentRow: {
-      flexDirection: 'row',
-      gap: s.xs,
-      marginBottom: s.sm,
-      flexWrap: 'wrap',
-      justifyContent: 'center',
-    },
-    segmentBtn: {
-      paddingVertical: s.sm,
-      paddingHorizontal: s.sm,
-      borderRadius: r.sm,
-      borderWidth: 1,
-      borderColor: c.borderVisible,
-      backgroundColor: c.surface,
-    },
-    segmentBtnOn: { borderColor: c.primary, backgroundColor: c.primaryBg },
-    segmentTxt: {
-      ...ts.caption,
-      fontFamily: f.sansMedium,
-      color: c.textSecondary,
-    },
-    segmentTxtOn: { color: c.primary },
-    macroPerfilRow: { flexDirection: 'row', gap: s.xs, marginBottom: s.md },
-    macroPerfilBtn: {
-      flex: 1,
-      paddingVertical: s.sm,
-      paddingHorizontal: s.xs,
-      borderRadius: r.sm,
-      borderWidth: 1,
-      borderColor: c.borderVisible,
-      backgroundColor: c.surface,
-      alignItems: 'center',
-      justifyContent: 'center',
-      minHeight: 48,
-    },
-    macroPerfilBtnOn: { borderColor: c.primary, backgroundColor: c.primaryBg },
-    macroPerfilTxt: {
-      ...ts.caption,
-      fontFamily: f.sansMedium,
-      color: c.textSecondary,
-      textAlign: 'center',
-    },
-    macroPerfilTxtOn: { color: c.primary },
-    input: {
-      ...ts.body,
-      fontFamily: f.sans,
-      color: c.textDisplay,
-      borderWidth: 1,
-      borderColor: c.borderVisible,
-      borderRadius: r.sm,
-      paddingHorizontal: s.md,
-      paddingVertical: s.sm,
-      backgroundColor: c.surface,
-    },
-    errorPesoObjetivo: {
-      ...ts.caption,
-      fontFamily: f.sans,
-      color: c.danger,
-      marginTop: s.xs,
-    },
-    kcalBlock: { marginVertical: s.lg, alignItems: 'center' },
-    kcalValor: {
-      ...ts.displayLg,
-      fontFamily: f.mono,
-      color: c.primary,
-    },
-    kcalHint: {
-      ...ts.caption,
-      fontFamily: f.mono,
-      color: c.textMuted,
-      marginTop: s.xs,
-    },
-    macroCardsRow: { flexDirection: 'row', gap: s.xs, marginBottom: s.md },
-    macroCard: {
-      flex: 1,
-      borderWidth: 1,
-      borderColor: c.borderVisible,
-      borderRadius: r.sm,
-      paddingVertical: s.sm,
-      paddingHorizontal: s.xs,
-      backgroundColor: c.surface,
-      alignItems: 'center',
-    },
-    macroCardLabel: {
-      ...ts.caption,
-      fontFamily: f.mono,
-      color: c.textSecondary,
-      letterSpacing: 0.6,
-      textAlign: 'center',
-    },
-    macroCardGrams: {
-      ...ts.subheading,
-      fontFamily: f.sansMedium,
-      color: c.textDisplay,
-      marginTop: s.xs,
-    },
-    macroCardMeta: {
-      ...ts.caption,
-      fontFamily: f.mono,
-      color: c.textSecondary,
-      marginTop: 4,
-      textAlign: 'center',
-    },
-    linkPlan: {
-      ...ts.bodySm,
-      fontFamily: f.sansMedium,
-      color: c.primary,
-      textDecorationLine: 'underline',
-    },
-    planLinksBlock: {
-      alignItems: 'center',
-      marginBottom: s.md,
-    },
-    planLinksColumn: {
-      gap: s.xs,
-    },
-    planLinksSeparator: {
-      ...ts.caption,
-      fontFamily: f.sans,
-      color: c.textSecondary,
-    },
-    velocidadRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: s.md,
-      marginBottom: s.sm,
-    },
-    velocidadValor: {
-      ...ts.heading,
-      fontFamily: f.mono,
-      color: c.textDisplay,
-      minWidth: 56,
-      textAlign: 'center',
-    },
-    stepBtn: {
-      width: 44,
-      height: 44,
-      borderRadius: r.technical,
-      borderWidth: 1,
-      borderColor: c.borderVisible,
-      alignItems: 'center',
-      justifyContent: 'center',
-      backgroundColor: c.surface,
-    },
-    stepBtnTxt: {
-      ...ts.subheading,
-      fontFamily: f.monoBold,
-      color: c.textDisplay,
-    },
-    footer: {
-      borderTopWidth: 1,
-      borderTopColor: c.border,
-      paddingHorizontal: s.md,
-      paddingTop: s.sm,
-      backgroundColor: c.background,
-    },
-    btnPrimary: {
-      paddingVertical: s.md,
-      borderRadius: r.sm,
-      backgroundColor: c.primary,
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderWidth: 1,
-      borderColor: c.primary,
-    },
-    btnDis: { opacity: 0.45 },
-    btnTxt: {
-      ...ts.subheading,
-      fontFamily: f.sansMedium,
-      color: c.textOnPrimary,
-      letterSpacing: 0.3,
-    },
-    btnGhost: {
-      paddingVertical: s.md,
-      borderRadius: r.sm,
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderWidth: 1,
-      borderColor: c.borderVisible,
-      backgroundColor: 'transparent',
-      marginTop: s.sm,
-    },
-    btnGhostTxt: {
-      ...ts.subheading,
-      fontFamily: f.sansMedium,
-      color: c.textDisplay,
-      letterSpacing: 0.3,
-    },
-    modalBackdrop: {
-      flex: 1,
-      backgroundColor: 'rgba(0,0,0,0.5)',
-      justifyContent: 'flex-end',
-    },
-    modalCard: {
-      backgroundColor: c.surfaceElevated,
-      borderTopLeftRadius: r.lg,
-      borderTopRightRadius: r.lg,
-      borderTopWidth: 1,
-      borderColor: c.borderVisible,
-      paddingHorizontal: s.md,
-      paddingTop: s.md,
-      maxHeight: '85%',
-    },
-    modalTitulo: {
-      ...ts.subheading,
-      fontFamily: f.sansMedium,
-      color: c.textDisplay,
-      marginBottom: s.sm,
-    },
-    modalDesc: {
-      ...ts.bodySm,
-      fontFamily: f.sans,
-      color: c.textSecondary,
-      marginBottom: s.md,
-    },
-    modalLabel: {
-      ...ts.caption,
-      fontFamily: f.mono,
-      color: c.textSecondary,
-      marginBottom: s.xs,
-      letterSpacing: 0.6,
-    },
-    modalKcalLive: {
-      ...ts.body,
-      fontFamily: f.mono,
-      color: c.primary,
-      marginTop: s.md,
-      marginBottom: s.md,
-    },
-    modalActions: { gap: s.sm, marginBottom: s.md },
-    finalModalRoot: {
-      flex: 1,
-      backgroundColor: c.background,
-    },
-    finalModalScroll: { flexGrow: 1, paddingBottom: s.md },
-    finalModalHeader: {
-      paddingTop: s.xl,
-      paddingHorizontal: s.lg,
-      paddingBottom: s.lg,
-      marginBottom: s.md,
-      borderBottomWidth: 1,
-      borderBottomColor: c.border,
-    },
-    finalModalTitulo: {
-      ...ts.heading,
-      fontFamily: f.sansMedium,
-      color: c.textDisplay,
-      marginBottom: s.xs,
-    },
-    finalModalSubtitulo: {
-      ...ts.body,
-      fontFamily: f.sans,
-      color: c.textSecondary,
-      marginTop: s.xs,
-    },
-    finalModalBody: {
-      paddingHorizontal: s.lg,
-    },
-    avatarWrap: { alignItems: 'center', marginBottom: s.lg, marginTop: s.sm },
-    avatarCircle: {
-      width: 120,
-      height: 120,
-      borderRadius: 60,
-      backgroundColor: c.surfaceElevated,
-      borderWidth: 1,
-      borderColor: c.borderVisible,
-      alignItems: 'center',
-      justifyContent: 'center',
-      overflow: 'hidden',
-    },
-    avatarImage: { width: 120, height: 120, borderRadius: 60 },
-    avatarIniciales: {
-      ...ts.displayMd,
-      fontFamily: f.sansMedium,
-      color: c.textSecondary,
-    },
-    linkAnadirFoto: {
-      ...ts.body,
-      fontFamily: f.sansMedium,
-      color: c.primary,
-      textDecorationLine: 'underline',
-      marginTop: s.md,
-    },
-    fotoAyuda: {
-      ...ts.bodySm,
-      fontFamily: f.mono,
-      color: c.textSecondary,
-      textAlign: 'center',
-      marginTop: s.sm,
-    },
-    notifRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      marginBottom: s.sm,
-      marginTop: s.xs,
-    },
-    notifRowLabel: {
-      ...ts.body,
-      fontFamily: f.sans,
-      color: c.textDisplay,
-      flex: 1,
-      paddingRight: s.md,
-    },
-    notifDesc: {
-      ...ts.bodySm,
-      fontFamily: f.mono,
-      color: c.textSecondary,
-      marginBottom: s.xl,
-    },
-    finalModalFooter: {
-      borderTopWidth: 1,
-      borderTopColor: c.border,
-      paddingHorizontal: s.md,
-      paddingTop: s.sm,
-      backgroundColor: c.background,
-    },
-    saltarLink: {
-      ...ts.bodySm,
-      fontFamily: f.sansMedium,
-      color: c.textSecondary,
-      textAlign: 'center',
-      marginTop: s.md,
-    },
-  });
+const PIE_SIZE = 90;
+const PIE_CENTER = PIE_SIZE / 2;
+const PIE_RADIUS = 38;
+const PIE_GAP_DEG = 2;
+
+const AUTH = Colors.dark;
+const BG = AUTH.background;
+const CYAN = AUTH.primary;
+const WHITE = AUTH.textDisplay;
+const SURFACE = AUTH.surface;
+const BORDER = AUTH.borderVisible;
+const BORDER_SOFT = AUTH.border;
+const MUTED = AUTH.textMuted;
+const LABEL = '#8A8A8A';
+const ERROR = AUTH.danger;
+
+const OBJETIVOS: { id: ObjetivoUi; label: string; icon: IconName }[] = [
+  { id: 'perder', label: 'Perder grasa', icon: 'trending-down-outline' },
+  { id: 'mantener', label: 'Mantener', icon: 'swap-horizontal-outline' },
+  { id: 'ganar', label: 'Ganar masa', icon: 'trophy-outline' },
+];
+
+const PERFILES: { id: MacroPerfil; label: string; icon: IconName }[] = [
+  { id: 'alta_proteina', label: 'Alta proteína', icon: 'flame-outline' },
+  { id: 'equilibrado', label: 'Equilibrado', icon: 'options-outline' },
+  { id: 'alta_carbos', label: 'Alta en carbs', icon: 'leaf-outline' },
+];
+
+function pieSlicePath(cx: number, cy: number, r: number, startAngle: number, endAngle: number): string {
+  const toRad = (deg: number) => (deg - 90) * (Math.PI / 180);
+  const x1 = cx + r * Math.cos(toRad(startAngle));
+  const y1 = cy + r * Math.sin(toRad(startAngle));
+  const x2 = cx + r * Math.cos(toRad(endAngle));
+  const y2 = cy + r * Math.sin(toRad(endAngle));
+  const largeArc = endAngle - startAngle > 180 ? 1 : 0;
+  return `M ${cx} ${cy} L ${x1} ${y1} A ${r} ${r} 0 ${largeArc} 1 ${x2} ${y2} Z`;
 }
 
-const PERFILES: { id: MacroPerfil; label: string }[] = [
-  { id: 'alta_proteina', label: 'Alta proteína' },
-  { id: 'equilibrado', label: 'Equilibrado' },
-  { id: 'alta_carbos', label: 'Alta en carbos' },
-];
+function pieLabelPosition(cx: number, cy: number, r: number, startAngle: number, endAngle: number) {
+  const midAngle = (startAngle + endAngle) / 2;
+  const toRad = (deg: number) => (deg - 90) * (Math.PI / 180);
+  return {
+    x: cx + r * Math.cos(toRad(midAngle)),
+    y: cy + r * Math.sin(toRad(midAngle)),
+  };
+}
+
+function macroPieSlices(pct: { prot: number; carb: number; gras: number }) {
+  const visible = [
+    { key: 'proteinas', label: 'P', pct: Math.max(0, pct.prot), color: CYAN },
+    { key: 'carbos', label: 'C', pct: Math.max(0, pct.carb), color: `${CYAN}B3` },
+    { key: 'grasas', label: 'G', pct: Math.max(0, pct.gras), color: `${CYAN}66` },
+  ].filter((segment) => segment.pct > 0);
+  const total = visible.reduce((sum, segment) => sum + segment.pct, 0);
+  if (total <= 0) return [];
+
+  let currentAngle = 0;
+  const gap = visible.length > 1 ? PIE_GAP_DEG : 0;
+  return visible.map((segment) => {
+    const angle = (segment.pct / total) * 360;
+    const startAngle = currentAngle + gap / 2;
+    const endAngle = currentAngle + angle - gap / 2;
+    currentAngle += angle;
+    return {
+      key: segment.key,
+      label: segment.label,
+      color: segment.color,
+      path: pieSlicePath(PIE_CENTER, PIE_CENTER, PIE_RADIUS, startAngle, Math.max(startAngle, endAngle)),
+      labelPosition: pieLabelPosition(PIE_CENTER, PIE_CENTER, PIE_RADIUS * 0.58, startAngle, Math.max(startAngle, endAngle)),
+    };
+  });
+}
 
 export default function OnboardingObjetivoPantalla() {
   const insets = useSafeAreaInsets();
@@ -487,8 +216,7 @@ export default function OnboardingObjetivoPantalla() {
     factorActividad?: string;
   }>();
   const { user } = useAuth();
-  const { c, f, ts, s, r } = useTheme();
-  const styles = useMemo(() => makeStyles(c, f, ts, s, r), [c, f, ts, s, r]);
+  const { isDark, setMode } = useThemeMode();
 
   const paso1 = useMemo(() => {
     const g = (Array.isArray(params.genero) ? params.genero[0] : params.genero) as GeneroOnboarding | undefined;
@@ -529,6 +257,7 @@ export default function OnboardingObjetivoPantalla() {
   const [velocidad, setVelocidad] = useState(0.5);
   const [macroPerfil, setMacroPerfil] = useState<MacroPerfil | null>('equilibrado');
   const [gramosPersonalizado, setGramosPersonalizado] = useState<{ p: number; c: number; f: number } | null>(null);
+  const [modoPlan, setModoPlan] = useState<'manual' | 'ia'>('manual');
   const [modalPlanOpen, setModalPlanOpen] = useState(false);
   const [modalProt, setModalProt] = useState('');
   const [modalCarb, setModalCarb] = useState('');
@@ -538,6 +267,17 @@ export default function OnboardingObjetivoPantalla() {
   const [modalFinalVisible, setModalFinalVisible] = useState(false);
   const [avatarPicked, setAvatarPicked] = useState<{ uri: string; mimeType: string } | null>(null);
   const [finalizando, setFinalizando] = useState(false);
+  const [temaElegido, setTemaElegido] = useState<'dark' | 'light'>(isDark ? 'dark' : 'light');
+
+  const temaModal = temaElegido === 'light' ? Colors.light : Colors.dark;
+  const modalBg = temaModal.background;
+  const modalSurface = temaModal.surface;
+  const modalBorder = temaModal.borderVisible;
+  const modalBorderSoft = temaModal.border;
+  const modalText = temaModal.textDisplay;
+  const modalSecondary = temaModal.textSecondary;
+  const modalMuted = temaModal.textMuted;
+  const modalInner = temaElegido === 'light' ? temaModal.surfaceElevated : '#101010';
 
   const kcalTdee = useMemo(() => {
     if (!parsed.ok || !parsed.genero) return 0;
@@ -615,6 +355,8 @@ export default function OnboardingObjetivoPantalla() {
     return true;
   }, [objetivoUi, pesoObjetivo, kcalMostrar, errorPesoObjetivo]);
 
+  const pieSegments = useMemo(() => macroPieSlices(pctMacros), [pctMacros]);
+
   const bumpVelocidad = (sign: number) => {
     if (objetivoUi === 'mantener') return;
     setVelocidad((v) => {
@@ -651,11 +393,13 @@ export default function OnboardingObjetivoPantalla() {
   const restablecerPlan = () => {
     setMacroPerfil('equilibrado');
     setGramosPersonalizado(null);
+    setModalPlanOpen(false);
   };
 
   const irANutricion = async () => {
+    setMode(temaElegido);
     await Notifications.requestPermissionsAsync();
-    router.replace('/(tabs)/(nutricion)');
+    router.replace('/(tabs)/inicio');
   };
 
   const anadirFoto = async () => {
@@ -770,205 +514,289 @@ export default function OnboardingObjetivoPantalla() {
 
   if (!parsed.ok) {
     return (
-      <View style={[styles.root, { paddingTop: insets.top, justifyContent: 'center', alignItems: 'center' }]}>
-        <ActivityIndicator color={c.primary} size="large" />
+      <View style={[st.root, { paddingTop: insets.top, justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator color={CYAN} size="large" />
       </View>
     );
   }
 
   return (
-    <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <View style={[styles.root, { paddingTop: insets.top }]}>
-        <View style={styles.header}>
-          <View style={styles.headerSide}>
+    <KeyboardAvoidingView style={st.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <View style={[st.screen, { paddingTop: insets.top + 10 }]}>
+        <View style={st.header}>
+          <View style={st.headerSide}>
             <Pressable onPress={() => router.back()} hitSlop={12} accessibilityRole="button" accessibilityLabel="Volver">
-              <Ionicons name="chevron-back" size={26} color={c.textDisplay} />
+              <Ionicons name="chevron-back" size={22} color={WHITE} />
             </Pressable>
           </View>
-          <View style={{ flex: 1 }} />
-          <Text style={styles.pasoTxt}>Paso 2 de 2</Text>
+          <View style={st.progressTrack}>
+            <View style={st.progressFill} />
+          </View>
+          <Text style={st.headerStep}>PASO 2 DE 2</Text>
         </View>
 
-        <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-          <Text style={styles.labelFirst}>OBJETIVO</Text>
-          <View style={styles.segmentRow}>
-            {(
-              [
-                ['perder', 'Perder grasa'],
-                ['mantener', 'Mantener'],
-                ['ganar', 'Ganar masa'],
-              ] as const
-            ).map(([val, label]) => (
-              <Pressable
-                key={val}
-                style={[styles.segmentBtn, objetivoUi === val && styles.segmentBtnOn]}
-                onPress={() => setObjetivoUi(val)}
-              >
-                <Text style={[styles.segmentTxt, objetivoUi === val && styles.segmentTxtOn]} numberOfLines={1}>
-                  {label}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-
-          {objetivoUi !== 'mantener' ? (
-            <>
-              <Text style={styles.label}>PESO OBJETIVO</Text>
-              <TextInput
-                style={styles.input}
-                value={pesoObjetivo}
-                onChangeText={setPesoObjetivo}
-                placeholder="kg"
-                placeholderTextColor={c.textMuted}
-                keyboardType="decimal-pad"
-              />
-              {errorPesoObjetivo ? <Text style={styles.errorPesoObjetivo}>{errorPesoObjetivo}</Text> : null}
-            </>
-          ) : null}
-
-          {objetivoUi !== 'mantener' ? (
-            <>
-              <Text style={styles.label}>VELOCIDAD (kg/semana)</Text>
-              <View style={styles.velocidadRow}>
-                <Pressable style={styles.stepBtn} onPress={() => bumpVelocidad(-1)}>
-                  <Text style={styles.stepBtnTxt}>−</Text>
-                </Pressable>
-                <Text style={styles.velocidadValor}>{velocidad.toFixed(1)}</Text>
-                <Pressable style={styles.stepBtn} onPress={() => bumpVelocidad(1)}>
-                  <Text style={styles.stepBtnTxt}>+</Text>
-                </Pressable>
+        <ScrollView
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={st.scroll}
+          showsVerticalScrollIndicator={false}
+          stickyHeaderIndices={[0]}
+        >
+          <View style={st.heroSticky}>
+            <Text style={st.kicker}>TU PLAN</Text>
+            <View style={st.titleRow}>
+              <View style={st.titleBlock}>
+                <Text style={st.title}>DEFINE TU OBJETIVO</Text>
+                <Text style={[st.title, st.titleAccent]}>Y TU PLAN IDEAL</Text>
               </View>
-            </>
-          ) : null}
+              <LogoSVG width={58} height={66} style={st.logo} />
+            </View>
+          </View>
 
-          <View style={styles.kcalBlock}>
-            <Text style={styles.label} pointerEvents="none">
-              KCAL CALCULADAS
+          <View style={st.heroCopy}>
+            <Text style={st.subtitle}>
+              {modoPlan === 'manual'
+                ? 'Calculamos tus necesidades diarias\ny te sugerimos un plan adaptado a ti.'
+                : 'Cuéntale a la IA tus preferencias\ny construye tu plan ideal.'}
             </Text>
-            <Text style={styles.kcalValor}>{kcalMostrar}</Text>
-            <Text style={styles.kcalHint}>kcal / día objetivo</Text>
+            <Pressable
+              style={st.heroModeButton}
+              onPress={() => setModoPlan((modo) => (modo === 'manual' ? 'ia' : 'manual'))}
+              accessibilityRole="button"
+              accessibilityLabel={modoPlan === 'manual' ? 'Activar modo IA' : 'Volver al modo manual'}
+            >
+              <Ionicons name={modoPlan === 'manual' ? 'sparkles' : 'create-outline'} size={16} color={CYAN} />
+              <Text style={st.heroModeButtonText}>{modoPlan === 'manual' ? 'IA' : 'Manual'}</Text>
+            </Pressable>
           </View>
 
-          <Text style={styles.label}>MACROS</Text>
-          <View style={styles.macroPerfilRow}>
-            {PERFILES.map(({ id, label }) => (
-              <Pressable
-                key={id}
-                style={[styles.macroPerfilBtn, macroPerfil === id && styles.macroPerfilBtnOn]}
-                onPress={() => seleccionarPerfil(id)}
-              >
-                <Text style={[styles.macroPerfilTxt, macroPerfil === id && styles.macroPerfilTxtOn]} numberOfLines={2}>
-                  {label}
-                </Text>
-              </Pressable>
-            ))}
+          {modoPlan === 'manual' ? (
+            <>
+          <View style={st.card}>
+            <FieldLabel>¿CUÁL ES TU OBJETIVO?</FieldLabel>
+            <View style={st.objectiveRow}>
+              {OBJETIVOS.map(({ id, label, icon }) => {
+                const selected = objetivoUi === id;
+                return (
+                  <Pressable
+                    key={id}
+                    style={[st.objectiveButton, selected && st.optionSelected]}
+                    onPress={() => setObjetivoUi(id)}
+                  >
+                    <Ionicons name={icon} size={23} color={selected ? CYAN : LABEL} />
+                    <Text style={[st.objectiveText, selected && st.selectedText]} numberOfLines={1}>
+                      {label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            {objetivoUi !== 'mantener' ? (
+              <View style={st.goalDetails}>
+                <View style={st.goalField}>
+                  <FieldLabel>PESO OBJETIVO</FieldLabel>
+                  <View style={[st.goalInputRow, errorPesoObjetivo && st.inputRowError]}>
+                    <TextInput
+                      style={st.input}
+                      value={pesoObjetivo}
+                      onChangeText={(value) => setPesoObjetivo(normalizarPesoObjetivoInput(value))}
+                      placeholder="kg"
+                      placeholderTextColor={MUTED}
+                      keyboardType="decimal-pad"
+                      selectionColor={CYAN}
+                    />
+                    <Text style={st.suffix}>kg</Text>
+                  </View>
+                  {errorPesoObjetivo ? <Text style={st.errorText}>{errorPesoObjetivo}</Text> : null}
+                </View>
+
+                <View style={st.goalField}>
+                  <FieldLabel>VELOCIDAD (kg/semana)</FieldLabel>
+                  <View style={st.velocityRow}>
+                    <Pressable style={st.stepButton} onPress={() => bumpVelocidad(-1)}>
+                      <Text style={st.stepButtonText}>−</Text>
+                    </Pressable>
+                    <Text style={st.velocityValue}>{velocidad.toFixed(1)}</Text>
+                    <Pressable style={st.stepButton} onPress={() => bumpVelocidad(1)}>
+                      <Text style={st.stepButtonText}>+</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              </View>
+            ) : null}
           </View>
 
-          <View style={styles.macroCardsRow}>
-            <View style={styles.macroCard}>
-              <Text style={styles.macroCardLabel}>PROTEÍNAS</Text>
-              <Text style={styles.macroCardGrams}>{gramos.p}g</Text>
-              <Text style={styles.macroCardMeta}>{pctMacros.prot}%</Text>
-              <Text style={styles.macroCardMeta}>{gramos.p * 4} kcal</Text>
+          <FieldLabel>TUS CALORÍAS DIARIAS</FieldLabel>
+          <View style={[st.card, st.kcalCard]}>
+            <View style={st.kcalTextBlock}>
+              <Text style={st.kcalLabel}>TU OBJETIVO</Text>
+              <Text style={st.kcalValue}>{kcalMostrar}</Text>
+              <Text style={st.kcalUnit}>kcal / día</Text>
             </View>
-            <View style={styles.macroCard}>
-              <Text style={styles.macroCardLabel}>CARBOS</Text>
-              <Text style={styles.macroCardGrams}>{gramos.c}g</Text>
-              <Text style={styles.macroCardMeta}>{pctMacros.carb}%</Text>
-              <Text style={styles.macroCardMeta}>{gramos.c * 4} kcal</Text>
-            </View>
-            <View style={styles.macroCard}>
-              <Text style={styles.macroCardLabel}>GRASAS</Text>
-              <Text style={styles.macroCardGrams}>{gramos.f}g</Text>
-              <Text style={styles.macroCardMeta}>{pctMacros.gras}%</Text>
-              <Text style={styles.macroCardMeta}>{gramos.f * 9} kcal</Text>
+            <View style={st.pieWrap}>
+              <Svg width={PIE_SIZE} height={PIE_SIZE} viewBox={`0 0 ${PIE_SIZE} ${PIE_SIZE}`}>
+                <G>
+                  {pieSegments.map((segment) => (
+                    <Path key={segment.key} d={segment.path} fill={segment.color} />
+                  ))}
+                  {pieSegments.map((segment) => (
+                    <SvgText
+                      key={`${segment.key}-label`}
+                      x={segment.labelPosition.x}
+                      y={segment.labelPosition.y}
+                      fill={WHITE}
+                      stroke={BG}
+                      strokeWidth={0.6}
+                      fontFamily={FontFamily.monoBold}
+                      fontSize={11}
+                      textAnchor="middle"
+                      alignmentBaseline="middle"
+                    >
+                      {segment.label}
+                    </SvgText>
+                  ))}
+                </G>
+              </Svg>
             </View>
           </View>
 
-          <View style={[styles.planLinksBlock, macroPerfil === null ? styles.planLinksColumn : null]}>
-            {macroPerfil !== null ? (
-              <Pressable onPress={abrirModalPlan}>
-                <Text style={styles.linkPlan}>Personalizar plan</Text>
-              </Pressable>
-            ) : (
-              <>
-                <Pressable onPress={restablecerPlan}>
-                  <Text style={styles.linkPlan}>Restablecer plan</Text>
+          <FieldLabel>DISTRIBUCIÓN DE MACROS</FieldLabel>
+          <View style={st.macroPerfilRow}>
+            {PERFILES.map(({ id, label, icon }) => {
+              const selected = macroPerfil === id;
+              return (
+                <Pressable
+                  key={id}
+                  style={[st.macroPerfilButton, selected && st.optionSelected]}
+                  onPress={() => seleccionarPerfil(id)}
+                >
+                  <Ionicons name={icon} size={20} color={selected ? CYAN : LABEL} />
+                  <Text style={[st.macroPerfilText, selected && st.selectedText]} numberOfLines={1}>
+                    {label}
+                  </Text>
                 </Pressable>
-                <Text style={styles.planLinksSeparator}>o</Text>
-                <Pressable onPress={abrirModalPlan}>
-                  <Text style={styles.linkPlan}>Personalizar plan</Text>
-                </Pressable>
-              </>
-            )}
+              );
+            })}
           </View>
+
+          <View style={st.macroCardsRow}>
+            <MacroCard title="PROTEÍNAS" grams={gramos.p} pct={pctMacros.prot} kcal={gramos.p * 4} color={CYAN} />
+            <MacroCard title="CARBOS" grams={gramos.c} pct={pctMacros.carb} kcal={gramos.c * 4} color={`${CYAN}B3`} />
+            <MacroCard title="GRASAS" grams={gramos.f} pct={pctMacros.gras} kcal={gramos.f * 9} color={`${CYAN}66`} />
+          </View>
+
+          <View style={[st.card, st.infoCard]}>
+            <Ionicons name="sparkles" size={20} color={CYAN} />
+            <View style={st.infoTextBlock}>
+              <Text style={st.infoTitle}>Estos valores están adaptados a tu perfil</Text>
+              <Text style={st.infoDescription}>Podrás ajustarlos más adelante.</Text>
+            </View>
+          </View>
+
+          <Pressable style={[st.card, st.planRow]} onPress={abrirModalPlan}>
+            <View style={st.planRowLeft}>
+              <Ionicons name="options-outline" size={20} color={CYAN} />
+              <Text style={st.planRowText}>Personalizar plan</Text>
+            </View>
+            <Ionicons name="chevron-up" size={18} color={LABEL} />
+          </Pressable>
+            </>
+          ) : (
+            <AiChatSkeleton />
+          )}
         </ScrollView>
 
-        <View style={[styles.footer, { paddingBottom: insets.bottom + s.md }]}>
-          <Pressable
-            style={[styles.btnPrimary, (!formGuardarOk || guardando) && styles.btnDis]}
-            onPress={() => void onGuardar()}
-            disabled={!formGuardarOk || guardando}
-          >
-            {guardando ? (
-              <ActivityIndicator color={c.textOnPrimary} />
-            ) : (
-              <Text style={styles.btnTxt}>GUARDAR Y EMPEZAR</Text>
-            )}
-          </Pressable>
+        <View style={[st.footer, { paddingBottom: insets.bottom + 12 }]}>
+          <View style={(!formGuardarOk || guardando || modoPlan === 'ia') && st.ctaDisabled}>
+            <GlowButton borderRadius={12} glowPadding={28}>
+              <Pressable
+                style={st.cta}
+                onPress={() => void onGuardar()}
+                disabled={!formGuardarOk || guardando || modoPlan === 'ia'}
+              >
+                {guardando ? (
+                  <ActivityIndicator color={BG} />
+                ) : (
+                  <Text style={st.ctaText}>{modoPlan === 'ia' ? 'MODO IA EN PRUEBA' : 'GUARDAR Y EMPEZAR'}</Text>
+                )}
+              </Pressable>
+            </GlowButton>
+          </View>
         </View>
       </View>
 
       <Modal visible={modalPlanOpen} transparent animationType="slide" onRequestClose={() => setModalPlanOpen(false)}>
-        <Pressable style={styles.modalBackdrop} onPress={() => setModalPlanOpen(false)}>
+        <Pressable style={st.modalBackdrop} onPress={() => setModalPlanOpen(false)}>
           <Pressable
-            style={[styles.modalCard, { paddingBottom: insets.bottom + s.md }]}
+            style={[st.modalCard, { paddingBottom: insets.bottom + 16 }]}
             onPress={(e) => e.stopPropagation()}
           >
             <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-              <Text style={styles.modalTitulo}>Personalizar plan</Text>
-              <Text style={styles.modalDesc}>
+              <Text style={st.modalTitle}>Personalizar plan</Text>
+              <Text style={st.modalDescription}>
                 Introduce los gramos diarios que quieres consumir. Las calorías se calcularán automáticamente.
               </Text>
 
-              <Text style={styles.modalLabel}>PROTEÍNAS (G)</Text>
-              <TextInput
-                style={[styles.input, { marginBottom: s.md }]}
-                value={modalProt}
-                onChangeText={setModalProt}
-                keyboardType="decimal-pad"
-                placeholder="0"
-                placeholderTextColor={c.textMuted}
-              />
+              <FieldLabel>PROTEÍNAS (G)</FieldLabel>
+              <View style={st.inputRow}>
+                <TextInput
+                  style={st.input}
+                  value={modalProt}
+                  onChangeText={setModalProt}
+                  keyboardType="decimal-pad"
+                  placeholder="0"
+                  placeholderTextColor={MUTED}
+                  selectionColor={CYAN}
+                />
+                <Text style={st.suffix}>g</Text>
+              </View>
 
-              <Text style={styles.modalLabel}>CARBOS (G)</Text>
-              <TextInput
-                style={[styles.input, { marginBottom: s.md }]}
-                value={modalCarb}
-                onChangeText={setModalCarb}
-                keyboardType="decimal-pad"
-                placeholder="0"
-                placeholderTextColor={c.textMuted}
-              />
+              <FieldLabel>CARBOS (G)</FieldLabel>
+              <View style={st.inputRow}>
+                <TextInput
+                  style={st.input}
+                  value={modalCarb}
+                  onChangeText={setModalCarb}
+                  keyboardType="decimal-pad"
+                  placeholder="0"
+                  placeholderTextColor={MUTED}
+                  selectionColor={CYAN}
+                />
+                <Text style={st.suffix}>g</Text>
+              </View>
 
-              <Text style={styles.modalLabel}>GRASAS (G)</Text>
-              <TextInput
-                style={[styles.input, { marginBottom: s.sm }]}
-                value={modalFat}
-                onChangeText={setModalFat}
-                keyboardType="decimal-pad"
-                placeholder="0"
-                placeholderTextColor={c.textMuted}
-              />
+              <FieldLabel>GRASAS (G)</FieldLabel>
+              <View style={st.inputRow}>
+                <TextInput
+                  style={st.input}
+                  value={modalFat}
+                  onChangeText={setModalFat}
+                  keyboardType="decimal-pad"
+                  placeholder="0"
+                  placeholderTextColor={MUTED}
+                  selectionColor={CYAN}
+                />
+                <Text style={st.suffix}>g</Text>
+              </View>
 
-              <Text style={styles.modalKcalLive}>{kcalModalPreview} kcal</Text>
+              <View style={st.modalKcalCard}>
+                <Text style={st.kcalLabel}>CALORÍAS ESTIMADAS</Text>
+                <Text style={st.modalKcalLive}>{kcalModalPreview} kcal</Text>
+              </View>
 
-              <View style={styles.modalActions}>
-                <Pressable style={styles.btnPrimary} onPress={aplicarPlanPersonalizado}>
-                  <Text style={styles.btnTxt}>APLICAR</Text>
-                </Pressable>
-                <Pressable style={styles.btnGhost} onPress={() => setModalPlanOpen(false)}>
-                  <Text style={styles.btnGhostTxt}>Cancelar</Text>
+              <View style={st.modalActions}>
+                <GlowButton borderRadius={12} glowPadding={24}>
+                  <Pressable style={st.cta} onPress={aplicarPlanPersonalizado}>
+                    <Text style={st.ctaText}>APLICAR</Text>
+                  </Pressable>
+                </GlowButton>
+                {macroPerfil === null ? (
+                  <Pressable style={st.ghostButton} onPress={restablecerPlan}>
+                    <Text style={st.ghostButtonText}>Restablecer plan</Text>
+                  </Pressable>
+                ) : null}
+                <Pressable style={st.ghostButton} onPress={() => setModalPlanOpen(false)}>
+                  <Text style={st.ghostButtonText}>Cancelar</Text>
                 </Pressable>
               </View>
             </KeyboardAvoidingView>
@@ -982,54 +810,86 @@ export default function OnboardingObjetivoPantalla() {
         presentationStyle="fullScreen"
         onRequestClose={() => {}}
       >
-        <View style={[styles.finalModalRoot, { paddingTop: insets.top }]}>
+        <View style={[st.finalModalRoot, { backgroundColor: modalBg, paddingTop: insets.top + 10 }]}>
           <ScrollView
             style={{ flex: 1 }}
             keyboardShouldPersistTaps="handled"
-            contentContainerStyle={styles.finalModalScroll}
+            contentContainerStyle={st.finalModalScroll}
             showsVerticalScrollIndicator={false}
           >
-            <View style={styles.finalModalHeader}>
-              <Text style={styles.finalModalTitulo}>Un último paso</Text>
-              <Text style={styles.finalModalSubtitulo}>
-                Estos ajustes son opcionales, puedes cambiarlos después en tu perfil
+            <View style={st.finalModalHeader}>
+              <Text style={st.kicker}>TU PERFIL</Text>
+              <Text style={[st.finalModalTitle, { color: modalText }]}>UN ÚLTIMO PASO</Text>
+              <Text style={[st.finalModalSubtitle, { color: modalSecondary }]}>
+                Estos ajustes son opcionales, puedes cambiarlos después en tu perfil.
               </Text>
             </View>
 
-            <View style={styles.finalModalBody}>
-              <Text style={[styles.label, { marginTop: 0 }]}>FOTO DE PERFIL</Text>
-              <View style={styles.avatarWrap}>
-                <View style={styles.avatarCircle}>
-                  {avatarPicked ? (
-                    <Image source={{ uri: avatarPicked.uri }} style={styles.avatarImage} contentFit="cover" />
-                  ) : (
-                    <Text style={styles.avatarIniciales}>{inicialesUsuario(user)}</Text>
-                  )}
+            <View style={st.finalModalBody}>
+              <View style={[st.card, { backgroundColor: modalSurface, borderColor: modalBorderSoft }]}>
+                <FieldLabel>TEMA DE LA APP</FieldLabel>
+                <View style={st.themeRow}>
+                  <Pressable
+                    style={[
+                      st.themeButton,
+                      { backgroundColor: modalInner, borderColor: modalBorderSoft },
+                      temaElegido === 'dark' && st.optionSelected,
+                    ]}
+                    onPress={() => setTemaElegido('dark')}
+                  >
+                    <Ionicons name="moon-outline" size={18} color={temaElegido === 'dark' ? CYAN : LABEL} />
+                    <Text style={[st.themeButtonText, { color: modalText }, temaElegido === 'dark' && st.selectedText]}>Oscuro</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[
+                      st.themeButton,
+                      { backgroundColor: modalInner, borderColor: modalBorderSoft },
+                      temaElegido === 'light' && st.optionSelected,
+                    ]}
+                    onPress={() => setTemaElegido('light')}
+                  >
+                    <Ionicons name="sunny-outline" size={18} color={temaElegido === 'light' ? CYAN : LABEL} />
+                    <Text style={[st.themeButtonText, { color: modalText }, temaElegido === 'light' && st.selectedText]}>Claro</Text>
+                  </Pressable>
                 </View>
-                <Pressable onPress={() => void anadirFoto()}>
-                  <Text style={styles.linkAnadirFoto}>{avatarPicked ? 'Cambiar foto' : 'Añadir foto'}</Text>
-                </Pressable>
-                {!avatarPicked ? (
-                  <Text style={styles.fotoAyuda}>Encuadra la foto y pulsa CORTAR para confirmar</Text>
-                ) : null}
+                <Text style={[st.themeHint, { color: modalMuted }]}>Se aplicará al entrar en la pantalla principal.</Text>
+              </View>
+
+              <View style={[st.card, { backgroundColor: modalSurface, borderColor: modalBorderSoft }]}>
+                <FieldLabel>FOTO DE PERFIL</FieldLabel>
+                <View style={st.avatarWrap}>
+                  <View style={[st.avatarCircle, { backgroundColor: modalInner, borderColor: modalBorder }]}>
+                    {avatarPicked ? (
+                      <Image source={{ uri: avatarPicked.uri }} style={st.avatarImage} contentFit="cover" />
+                    ) : (
+                      <Text style={[st.avatarInitials, { color: LABEL }]}>{inicialesUsuario(user)}</Text>
+                    )}
+                  </View>
+                  <Pressable onPress={() => void anadirFoto()}>
+                    <Text style={st.photoLink}>{avatarPicked ? 'Cambiar foto' : 'Añadir foto'}</Text>
+                  </Pressable>
+                  {!avatarPicked ? (
+                    <Text style={[st.photoHelp, { color: modalMuted }]}>Encuadra la foto y pulsa CORTAR para confirmar</Text>
+                  ) : null}
+                </View>
               </View>
             </View>
           </ScrollView>
 
-          <View style={[styles.finalModalFooter, { paddingBottom: insets.bottom + s.md }]}>
-            <Pressable
-              style={[styles.btnPrimary, finalizando && styles.btnDis]}
-              onPress={() => void empezarFinal()}
-              disabled={finalizando}
-            >
-              {finalizando ? (
-                <ActivityIndicator color={c.textOnPrimary} />
-              ) : (
-                <Text style={styles.btnTxt}>EMPEZAR</Text>
-              )}
-            </Pressable>
+          <View style={[st.finalModalFooter, { backgroundColor: modalBg, paddingBottom: insets.bottom + 12 }]}>
+            <View style={finalizando && st.ctaDisabled}>
+              <GlowButton borderRadius={12} glowPadding={28}>
+                <Pressable style={st.cta} onPress={() => void empezarFinal()} disabled={finalizando}>
+                  {finalizando ? (
+                    <ActivityIndicator color={modalBg} />
+                  ) : (
+                    <Text style={st.ctaText}>EMPEZAR</Text>
+                  )}
+                </Pressable>
+              </GlowButton>
+            </View>
             <Pressable onPress={saltarFinal} disabled={finalizando}>
-              <Text style={styles.saltarLink}>Saltar por ahora</Text>
+              <Text style={[st.skipLink, { color: modalMuted }]}>Saltar por ahora</Text>
             </Pressable>
           </View>
         </View>
@@ -1037,3 +897,782 @@ export default function OnboardingObjetivoPantalla() {
     </KeyboardAvoidingView>
   );
 }
+
+function FieldLabel({ children }: { children: string }) {
+  return <Text style={st.label}>{children}</Text>;
+}
+
+function AiChatSkeleton() {
+  return (
+    <View style={st.aiChatShell}>
+      <View style={st.aiChatHeader}>
+        <View style={st.aiChatIcon}>
+          <Ionicons name="sparkles" size={22} color={CYAN} />
+        </View>
+        <View style={st.aiChatHeaderText}>
+          <Text style={st.aiChatTitle}>Asistente de plan</Text>
+          <Text style={st.aiChatSubtitle}>Chat en preparación para generar tu plan con IA.</Text>
+        </View>
+      </View>
+
+      <View style={st.aiMessageStack}>
+        <View style={[st.aiBubble, st.aiBubbleAssistant]}>
+          <View style={[st.aiSkeletonLine, { width: '86%' }]} />
+          <View style={[st.aiSkeletonLine, { width: '62%' }]} />
+        </View>
+        <View style={[st.aiBubble, st.aiBubbleUser]}>
+          <View style={[st.aiSkeletonLine, st.aiSkeletonLineAccent, { width: '72%' }]} />
+        </View>
+        <View style={[st.aiBubble, st.aiBubbleAssistant]}>
+          <View style={[st.aiSkeletonLine, { width: '78%' }]} />
+          <View style={[st.aiSkeletonLine, { width: '48%' }]} />
+          <View style={st.aiOptionRow}>
+            <View style={st.aiOptionPill} />
+            <View style={st.aiOptionPill} />
+          </View>
+        </View>
+      </View>
+
+      <View style={st.aiInputPreview}>
+        <Text style={st.aiInputText}>Escribe tus horarios, gustos y objetivo...</Text>
+        <Ionicons name="send-outline" size={18} color={CYAN} />
+      </View>
+    </View>
+  );
+}
+
+function MacroCard({
+  title,
+  grams,
+  pct,
+  kcal,
+  color,
+}: {
+  title: string;
+  grams: number;
+  pct: number;
+  kcal: number;
+  color: string;
+}) {
+  return (
+    <View style={st.macroCard}>
+      <Text style={st.macroCardTitle}>{title}</Text>
+      <Text style={st.macroCardGrams}>{grams}g</Text>
+      <View style={st.macroBarTrack}>
+        <View style={[st.macroBarFill, { backgroundColor: color }]} />
+      </View>
+      <Text style={[st.macroCardPct, { color }]}>{pct}%</Text>
+      <Text style={st.macroCardKcal}>{kcal} kcal</Text>
+    </View>
+  );
+}
+
+const st = StyleSheet.create({
+  root: {
+    flex: 1,
+    backgroundColor: BG,
+  },
+  screen: {
+    flex: 1,
+    backgroundColor: BG,
+    paddingHorizontal: 20,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    marginBottom: 8,
+  },
+  headerSide: {
+    width: 24,
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+  },
+  headerStep: {
+    color: LABEL,
+    fontFamily: FontFamily.mono,
+    fontSize: 10,
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
+  },
+  progressTrack: {
+    flex: 1,
+    height: 3,
+    borderRadius: 1.5,
+    overflow: 'hidden',
+    backgroundColor: BORDER_SOFT,
+  },
+  progressFill: {
+    width: '60%',
+    height: 3,
+    borderRadius: 1.5,
+    backgroundColor: CYAN,
+  },
+  scroll: {
+    paddingBottom: 12,
+  },
+  heroSticky: {
+    backgroundColor: BG,
+    paddingTop: 8,
+    paddingBottom: 10,
+    zIndex: 10,
+    elevation: 10,
+  },
+  heroCopy: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingBottom: 10,
+  },
+  kicker: {
+    color: CYAN,
+    fontFamily: FontFamily.mono,
+    fontSize: 10,
+    letterSpacing: 2.4,
+    textTransform: 'uppercase',
+  },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 8,
+  },
+  titleBlock: {
+    flex: 1,
+    paddingRight: 10,
+  },
+  title: {
+    color: WHITE,
+    fontFamily: FontFamily.sansBold,
+    fontSize: 20,
+    lineHeight: 24,
+    letterSpacing: -0.4,
+    textTransform: 'uppercase',
+  },
+  titleAccent: {
+    color: CYAN,
+  },
+  logo: {
+    marginRight: 2,
+  },
+  subtitle: {
+    flex: 1,
+    color: AUTH.textSecondary,
+    fontFamily: FontFamily.sans,
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  heroModeButton: {
+    minHeight: 36,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: BORDER_SOFT,
+    backgroundColor: SURFACE,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+  },
+  heroModeButtonText: {
+    color: CYAN,
+    fontFamily: FontFamily.sansMedium,
+    fontSize: 12,
+  },
+  card: {
+    padding: 10,
+    borderRadius: 12,
+    backgroundColor: SURFACE,
+    borderWidth: 1,
+    borderColor: BORDER_SOFT,
+    marginBottom: 6,
+  },
+  label: {
+    marginBottom: 7,
+    color: LABEL,
+    fontFamily: FontFamily.mono,
+    fontSize: 9,
+    letterSpacing: 1.4,
+    textTransform: 'uppercase',
+  },
+  objectiveRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  objectiveButton: {
+    flex: 1,
+    minHeight: 58,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: BORDER_SOFT,
+    backgroundColor: SURFACE,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+    gap: 5,
+  },
+  optionSelected: {
+    borderColor: CYAN,
+    shadowColor: CYAN,
+    shadowOpacity: 0.4,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 3,
+  },
+  objectiveText: {
+    color: WHITE,
+    fontFamily: FontFamily.sansMedium,
+    fontSize: 11,
+  },
+  selectedText: {
+    color: CYAN,
+  },
+  aiChatShell: {
+    minHeight: 420,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: BORDER_SOFT,
+    backgroundColor: SURFACE,
+    padding: 12,
+    marginBottom: 6,
+  },
+  aiChatHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: BORDER_SOFT,
+  },
+  aiChatIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: `${CYAN}55`,
+    backgroundColor: '#101010',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  aiChatHeaderText: {
+    flex: 1,
+  },
+  aiChatTitle: {
+    color: WHITE,
+    fontFamily: FontFamily.sansBold,
+    fontSize: 16,
+    lineHeight: 20,
+    textTransform: 'uppercase',
+  },
+  aiChatSubtitle: {
+    marginTop: 2,
+    color: MUTED,
+    fontFamily: FontFamily.sans,
+    fontSize: 11,
+    lineHeight: 14,
+  },
+  aiMessageStack: {
+    gap: 10,
+    paddingVertical: 14,
+  },
+  aiBubble: {
+    maxWidth: '86%',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: BORDER_SOFT,
+    padding: 10,
+    gap: 7,
+  },
+  aiBubbleAssistant: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#101010',
+  },
+  aiBubbleUser: {
+    alignSelf: 'flex-end',
+    backgroundColor: `${CYAN}1F`,
+    borderColor: `${CYAN}55`,
+  },
+  aiSkeletonLine: {
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: BORDER,
+  },
+  aiSkeletonLineAccent: {
+    backgroundColor: `${CYAN}77`,
+  },
+  aiOptionRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 2,
+  },
+  aiOptionPill: {
+    width: 72,
+    height: 26,
+    borderRadius: 10,
+    backgroundColor: BORDER_SOFT,
+  },
+  aiInputPreview: {
+    minHeight: 44,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: BORDER_SOFT,
+    backgroundColor: '#101010',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    marginTop: 'auto',
+  },
+  aiInputText: {
+    color: MUTED,
+    fontFamily: FontFamily.sans,
+    fontSize: 12,
+  },
+  goalDetails: {
+    marginTop: 8,
+    gap: 6,
+  },
+  goalField: {
+    padding: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: BORDER_SOFT,
+    backgroundColor: '#101010',
+  },
+  inputRow: {
+    minHeight: 44,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: BORDER_SOFT,
+    backgroundColor: '#101010',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    marginBottom: 10,
+  },
+  goalInputRow: {
+    minHeight: 38,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: BORDER_SOFT,
+    backgroundColor: SURFACE,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+  },
+  inputRowError: {
+    borderColor: ERROR,
+  },
+  input: {
+    flex: 1,
+    color: WHITE,
+    fontFamily: FontFamily.sans,
+    fontSize: 13,
+    paddingVertical: Platform.select({ ios: 10, default: 6 }),
+  },
+  suffix: {
+    color: LABEL,
+    fontFamily: FontFamily.sans,
+    fontSize: 12,
+    marginLeft: 6,
+  },
+  errorText: {
+    color: ERROR,
+    fontFamily: FontFamily.sans,
+    fontSize: 11,
+    lineHeight: 15,
+    marginTop: 6,
+  },
+  velocityRow: {
+    minHeight: 38,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: BORDER_SOFT,
+    backgroundColor: SURFACE,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 16,
+    paddingVertical: 4,
+  },
+  velocityValue: {
+    minWidth: 52,
+    color: WHITE,
+    fontFamily: FontFamily.mono,
+    fontSize: 18,
+    textAlign: 'center',
+  },
+  stepButton: {
+    width: 30,
+    height: 30,
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: BORDER,
+    backgroundColor: SURFACE,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepButtonText: {
+    color: WHITE,
+    fontFamily: FontFamily.monoBold,
+    fontSize: 18,
+    lineHeight: 22,
+  },
+  kcalCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minHeight: 120,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+  },
+  pieWrap: {
+    width: PIE_SIZE,
+    height: PIE_SIZE,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 40
+  },
+  kcalTextBlock: {
+    flex: 1,
+    alignItems: 'flex-start',
+    paddingRight: 12,
+    marginLeft: 40
+  },
+  kcalLabel: {
+    color: LABEL,
+    fontFamily: FontFamily.mono,
+    fontSize: 9,
+    letterSpacing: 1.4,
+    textTransform: 'uppercase',
+  },
+  kcalValue: {
+    marginTop: 4,
+    color: CYAN,
+    fontFamily: FontFamily.monoBold,
+    fontSize: 36,
+    lineHeight: 42,
+  },
+  kcalUnit: {
+    color: MUTED,
+    fontFamily: FontFamily.mono,
+    fontSize: 11,
+  },
+  macroPerfilRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 8,
+  },
+  macroPerfilButton: {
+    flex: 1,
+    minHeight: 52,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: BORDER_SOFT,
+    backgroundColor: SURFACE,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+    gap: 4,
+  },
+  macroPerfilText: {
+    color: WHITE,
+    fontFamily: FontFamily.sansMedium,
+    fontSize: 11,
+    textAlign: 'center',
+  },
+  macroCardsRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 6,
+  },
+  macroCard: {
+    flex: 1,
+    minHeight: 122,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: BORDER_SOFT,
+    backgroundColor: SURFACE,
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 6,
+  },
+  macroCardTitle: {
+    color: LABEL,
+    fontFamily: FontFamily.mono,
+    fontSize: 9,
+    letterSpacing: 1.2,
+    textAlign: 'center',
+    textTransform: 'uppercase',
+  },
+  macroCardGrams: {
+    marginTop: 6,
+    color: WHITE,
+    fontFamily: FontFamily.sansBold,
+    fontSize: 18,
+    lineHeight: 22,
+  },
+  macroBarTrack: {
+    width: '60%',
+    height: 3,
+    borderRadius: 1.5,
+    backgroundColor: BORDER_SOFT,
+    overflow: 'hidden',
+    marginVertical: 6,
+  },
+  macroBarFill: {
+    width: '72%',
+    height: 3,
+    borderRadius: 1.5,
+  },
+  macroCardPct: {
+    fontFamily: FontFamily.mono,
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  macroCardKcal: {
+    marginTop: 3,
+    color: MUTED,
+    fontFamily: FontFamily.mono,
+    fontSize: 10,
+    lineHeight: 14,
+  },
+  infoCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  infoTextBlock: {
+    flex: 1,
+  },
+  infoTitle: {
+    color: WHITE,
+    fontFamily: FontFamily.sans,
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  infoDescription: {
+    color: MUTED,
+    fontFamily: FontFamily.sans,
+    fontSize: 11,
+    lineHeight: 14,
+  },
+  planRow: {
+    minHeight: 56,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  planRowLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  planRowText: {
+    color: WHITE,
+    fontFamily: FontFamily.sansMedium,
+    fontSize: 13,
+  },
+  footer: {
+    paddingHorizontal: 20,
+    paddingTop: 6,
+    backgroundColor: BG,
+  },
+  ctaDisabled: {
+    opacity: 0.45,
+  },
+  cta: {
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: CYAN,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  ctaText: {
+    color: BG,
+    fontFamily: FontFamily.sansBold,
+    fontSize: 12,
+    letterSpacing: 2.3,
+    textTransform: 'uppercase',
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.68)',
+    justifyContent: 'flex-end',
+  },
+  modalCard: {
+    maxHeight: '86%',
+    paddingHorizontal: 20,
+    paddingTop: 18,
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    borderTopWidth: 1,
+    borderColor: BORDER_SOFT,
+    backgroundColor: BG,
+  },
+  modalTitle: {
+    color: WHITE,
+    fontFamily: FontFamily.sansBold,
+    fontSize: 20,
+    lineHeight: 24,
+    textTransform: 'uppercase',
+  },
+  modalDescription: {
+    marginTop: 8,
+    marginBottom: 14,
+    color: AUTH.textSecondary,
+    fontFamily: FontFamily.sans,
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  modalKcalCard: {
+    padding: 10,
+    borderRadius: 12,
+    backgroundColor: SURFACE,
+    borderWidth: 1,
+    borderColor: BORDER_SOFT,
+    marginTop: 2,
+    marginBottom: 14,
+  },
+  modalKcalLive: {
+    marginTop: 4,
+    color: CYAN,
+    fontFamily: FontFamily.monoBold,
+    fontSize: 22,
+    lineHeight: 28,
+  },
+  modalActions: {
+    gap: 10,
+  },
+  ghostButton: {
+    minHeight: 44,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: BORDER_SOFT,
+    backgroundColor: SURFACE,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ghostButtonText: {
+    color: WHITE,
+    fontFamily: FontFamily.sansMedium,
+    fontSize: 13,
+  },
+  finalModalRoot: {
+    flex: 1,
+    backgroundColor: BG,
+  },
+  finalModalScroll: {
+    flexGrow: 1,
+    paddingBottom: 12,
+  },
+  finalModalHeader: {
+    paddingHorizontal: 20,
+    paddingTop: 18,
+    paddingBottom: 20,
+  },
+  finalModalTitle: {
+    marginTop: 8,
+    color: WHITE,
+    fontFamily: FontFamily.sansBold,
+    fontSize: 20,
+    lineHeight: 24,
+    textTransform: 'uppercase',
+  },
+  finalModalSubtitle: {
+    marginTop: 10,
+    color: AUTH.textSecondary,
+    fontFamily: FontFamily.sans,
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  finalModalBody: {
+    paddingHorizontal: 20,
+    gap: 6,
+  },
+  themeRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  themeButton: {
+    flex: 1,
+    minHeight: 44,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: BORDER_SOFT,
+    backgroundColor: '#101010',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+  },
+  themeButtonText: {
+    color: WHITE,
+    fontFamily: FontFamily.sansMedium,
+    fontSize: 12,
+  },
+  themeHint: {
+    marginTop: 8,
+    color: MUTED,
+    fontFamily: FontFamily.mono,
+    fontSize: 10,
+    lineHeight: 14,
+  },
+  avatarWrap: {
+    alignItems: 'center',
+    paddingVertical: 14,
+  },
+  avatarCircle: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: '#101010',
+    borderWidth: 1,
+    borderColor: BORDER,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  avatarImage: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+  },
+  avatarInitials: {
+    color: LABEL,
+    fontFamily: FontFamily.sansBold,
+    fontSize: 34,
+    letterSpacing: 1,
+  },
+  photoLink: {
+    marginTop: 14,
+    color: CYAN,
+    fontFamily: FontFamily.sansMedium,
+    fontSize: 13,
+  },
+  photoHelp: {
+    marginTop: 8,
+    color: MUTED,
+    fontFamily: FontFamily.mono,
+    fontSize: 10,
+    lineHeight: 14,
+    textAlign: 'center',
+  },
+  finalModalFooter: {
+    paddingHorizontal: 20,
+    paddingTop: 6,
+    backgroundColor: BG,
+  },
+  skipLink: {
+    marginTop: 14,
+    color: MUTED,
+    fontFamily: FontFamily.sansMedium,
+    fontSize: 12,
+    textAlign: 'center',
+  },
+});
