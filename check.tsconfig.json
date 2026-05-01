@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "components/nutricion/CalendarioNutricion.tsx",
+    "hooks/useResumenMes.ts",
+    "hooks/useNutricion.ts",
+    "lib/nutricionEstadoDia.ts",
+    "lib/fechaNutricion.ts",
+    "services/nutricion.service.ts",
+    "app/(tabs)/(nutricion)/index.tsx",
+    "constants/theme.ts",
+    "types/database.types.ts",
+    "types/app.types.ts",
+    "expo-env.d.ts"
+  ]
+}

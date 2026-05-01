@@ -1,6 +1,8 @@
+import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Animated,
   Modal,
   Pressable,
   StyleSheet,
@@ -8,30 +10,107 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import type { StyleProp, ViewStyle } from 'react-native';
 import { Gesture, GestureDetector, Swipeable } from 'react-native-gesture-handler';
 import { runOnJS } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Svg, { Circle } from 'react-native-svg';
 
+import { CalendarioNutricion } from '@/components/nutricion/CalendarioNutricion';
 import { SortableMealList } from '@/components/SortableMealList';
 
-import { useComidaPortapapeles } from '@/context/ComidaPortapapelesContext';
+import { COMIDAS_PREDETERMINADAS } from '@/constants/comidasPredeterminadas';
 import { useAuth } from '@/hooks/useAuth';
 import { useNutricion } from '@/hooks/useNutricion';
 import { useTheme } from '@/hooks/useTheme';
-import { agregarDiasIso, esDiaPasadoVsHoy, getSemanaMovil, parseFechaLocal } from '@/lib/fechaNutricion';
+import {
+  agregarDiasIso,
+  esDiaPasadoVsHoy,
+  formatRangoSemanaCortoES,
+  getSemanaMovil,
+} from '@/lib/fechaNutricion';
+import { iconoComida } from '@/lib/iconosComida';
 import { guardarOrdenComidas, obtenerOrdenComidas } from '@/lib/nutricionLogPreferencias';
 import { nutricionService } from '@/services/nutricion.service';
 import type { ComidaConAlimentos } from '@/types/app.types';
 
-type MacroKey = 'proteinas' | 'carbos' | 'grasas';
+const SKELETON_BG = '#1A1A1A';
+const SKELETON_SHIMMER = '#2A2A2A';
+const SKELETON_FADE_MS = 200;
 
-const GAUGE_SIZE = 148;
-const GAUGE_STROKE = 9;
-const GAUGE_RADIUS = (GAUGE_SIZE - GAUGE_STROKE) / 2;
-const GAUGE_CIRCUMFERENCE = 2 * Math.PI * GAUGE_RADIUS;
-const GAUGE_ARC = GAUGE_CIRCUMFERENCE * 0.78;
+type NutricionStyles = ReturnType<typeof makeStyles>;
+
+interface SkeletonProps {
+  styles: NutricionStyles;
+  shimmerOpacity: Animated.Value;
+}
+
+const stylesStatic = StyleSheet.create({
+  skeletonBlock: {
+    backgroundColor: SKELETON_BG,
+    overflow: 'hidden',
+  },
+  skeletonShimmer: {
+    backgroundColor: SKELETON_SHIMMER,
+  },
+});
+
+function SkeletonBlock({
+  style,
+  shimmerOpacity,
+}: {
+  style?: StyleProp<ViewStyle>;
+  shimmerOpacity: Animated.Value;
+}) {
+  return (
+    <View style={[stylesStatic.skeletonBlock, style]}>
+      <Animated.View style={[StyleSheet.absoluteFillObject, stylesStatic.skeletonShimmer, { opacity: shimmerOpacity }]} />
+    </View>
+  );
+}
+
+function MealCardsSkeleton({ styles, shimmerOpacity }: SkeletonProps) {
+  return (
+    <View style={styles.skeletonMealsList}>
+      {COMIDAS_PREDETERMINADAS.map((meal) => (
+        <View key={`meal-skeleton-${meal.slot}`} style={[styles.mealCard, styles.skeletonSurface]}>
+          <View style={styles.mealHeaderRow}>
+            <SkeletonBlock style={styles.skeletonMealIcon} shimmerOpacity={shimmerOpacity} />
+
+            <View style={styles.mealHeaderText}>
+              <SkeletonBlock style={styles.skeletonMealTitle} shimmerOpacity={shimmerOpacity} />
+              <View style={styles.mealMetaRow}>
+                <SkeletonBlock style={styles.skeletonMealKcal} shimmerOpacity={shimmerOpacity} />
+                <View style={styles.mealMetaDivider} />
+                <SkeletonBlock style={styles.skeletonMealMacro} shimmerOpacity={shimmerOpacity} />
+                <View style={styles.mealMetaDivider} />
+                <SkeletonBlock style={styles.skeletonMealMacro} shimmerOpacity={shimmerOpacity} />
+                <View style={styles.mealMetaDivider} />
+                <SkeletonBlock style={styles.skeletonMealMacro} shimmerOpacity={shimmerOpacity} />
+              </View>
+            </View>
+
+            <SkeletonBlock style={styles.skeletonAddBtn} shimmerOpacity={shimmerOpacity} />
+          </View>
+
+          <View style={[styles.mealItemsList, styles.skeletonMealItemsList]}>
+            <View style={styles.foodRow}>
+              <SkeletonBlock style={styles.skeletonFoodName} shimmerOpacity={shimmerOpacity} />
+              <View style={styles.foodMetaRow}>
+                <SkeletonBlock style={styles.skeletonFoodGrams} shimmerOpacity={shimmerOpacity} />
+                <View style={styles.foodMetrics}>
+                  <SkeletonBlock style={styles.skeletonFoodMetric} shimmerOpacity={shimmerOpacity} />
+                  <SkeletonBlock style={styles.skeletonFoodMetric} shimmerOpacity={shimmerOpacity} />
+                  <SkeletonBlock style={styles.skeletonFoodMetric} shimmerOpacity={shimmerOpacity} />
+                  <SkeletonBlock style={styles.skeletonFoodKcal} shimmerOpacity={shimmerOpacity} />
+                </View>
+              </View>
+            </View>
+          </View>
+        </View>
+      ))}
+    </View>
+  );
+}
 
 function ordenarComidas(comidas: ComidaConAlimentos[], ordenIds: string[] | null): ComidaConAlimentos[] {
   if (!ordenIds?.length) {
@@ -63,13 +142,10 @@ export default function NutricionIndex() {
     resumen,
     objetivos,
     cargando,
-    vaciarComida,
     eliminarComidaDelLog,
     crearComidaPersonalizada,
-    pegarAlimentosEnComida,
     eliminarAlimento,
   } = useNutricion();
-  const { copiarDesdeComida, tieneCopia, lineas, limpiarPortapapeles } = useComidaPortapapeles();
 
   const styles = useMemo(() => makeStyles(c, f, ts, s, r), [c, f, ts, s, r]);
 
@@ -78,8 +154,7 @@ export default function NutricionIndex() {
   const [dragOverride, setDragOverride] = useState<ComidaConAlimentos[] | null>(null);
   const [modalNuevaComida, setModalNuevaComida] = useState(false);
   const [nombreNuevaComida, setNombreNuevaComida] = useState('');
-  const [menuMealId, setMenuMealId] = useState<string | null>(null);
-
+  const [calendarioVisible, setCalendarioVisible] = useState(false);
   useEffect(() => {
     if (!user?.id) return;
     void obtenerOrdenComidas(user.id, fecha).then(setOrdenIds);
@@ -112,46 +187,15 @@ export default function NutricionIndex() {
     setDragOverride(null);
   }, [resumen]);
 
-  const fechaLabel = useMemo(() => {
-    const d = parseFechaLocal(fecha);
-    return d.toLocaleDateString('es-ES', {
-      weekday: 'long',
-      day: '2-digit',
-      month: 'short',
-    });
-  }, [fecha]);
-
   // true mientras se cargan datos de un día nuevo (resumen aún no corresponde a `fecha`)
   const cargandoDia = cargando && !resumen;
 
-  const objetivoCalorias = objetivos?.calorias_objetivo ?? 2000;
-  const totalCalorias = resumen?.totalCalorias ?? 0;
-  const totalProteinas = resumen?.totalProteinas ?? 0;
-  const totalCarbos = resumen?.totalCarbos ?? 0;
-  const totalGrasas = resumen?.totalGrasas ?? 0;
-  const progresoCalorias = Math.min(1, totalCalorias / Math.max(1, objetivoCalorias));
-  const caloriasRestantes = Math.max(0, objetivoCalorias - totalCalorias);
-  const progresoRestante = Math.min(1, caloriasRestantes / Math.max(1, objetivoCalorias));
-
-  const macros = {
-    proteinas: {
-      label: 'PROTEINAS',
-      actual: totalProteinas,
-      objetivo: objetivos?.proteinas_objetivo ?? 0,
-    },
-    carbos: {
-      label: 'CARBOS',
-      actual: totalCarbos,
-      objetivo: objetivos?.carbos_objetivo ?? 0,
-    },
-    grasas: {
-      label: 'GRASAS',
-      actual: totalGrasas,
-      objetivo: objetivos?.grasas_objetivo ?? 0,
-    },
-  };
-
   const semana = useMemo(() => getSemanaMovil(fecha), [fecha]);
+  const rangoSemanaLabel = useMemo(() => formatRangoSemanaCortoES(semana), [semana]);
+  const skeletonFadeOpacity = useRef(new Animated.Value(cargandoDia ? 1 : 0)).current;
+  const shimmerOpacity = useRef(new Animated.Value(0.3)).current;
+  const contentOpacity = useRef(new Animated.Value(cargandoDia ? 0 : 1)).current;
+  const [skeletonVisible, setSkeletonVisible] = useState(cargandoDia);
 
   const avanzarDia = useCallback(() => {
     cambiarFecha(agregarDiasIso(fecha, 1));
@@ -161,13 +205,21 @@ export default function NutricionIndex() {
     cambiarFecha(agregarDiasIso(fecha, -1));
   }, [fecha, cambiarFecha]);
 
-  const avanzarSemana = useCallback(() => {
-    cambiarFecha(agregarDiasIso(fecha, 7));
-  }, [fecha, cambiarFecha]);
+  const abrirCalendario = useCallback(() => {
+    setCalendarioVisible(true);
+  }, []);
 
-  const retrocederSemana = useCallback(() => {
-    cambiarFecha(agregarDiasIso(fecha, -7));
-  }, [fecha, cambiarFecha]);
+  const cerrarCalendario = useCallback(() => {
+    setCalendarioVisible(false);
+  }, []);
+
+  const seleccionarDiaCalendario = useCallback(
+    (fechaIso: string) => {
+      cambiarFecha(fechaIso);
+      setCalendarioVisible(false);
+    },
+    [cambiarFecha],
+  );
 
   const swipeCalendario = useMemo(
     () =>
@@ -215,13 +267,6 @@ export default function NutricionIndex() {
     [user?.id, fecha, resumen?.logId],
   );
 
-  const cerrarMenu = useCallback(() => setMenuMealId(null), []);
-
-  const mealDelMenu = useMemo(
-    () => comidasData.find((m) => m.mealId === menuMealId) ?? null,
-    [comidasData, menuMealId],
-  );
-
   const confirmarNuevaComida = useCallback(async () => {
     if (!nombreNuevaComida.trim()) return;
     try {
@@ -239,9 +284,49 @@ export default function NutricionIndex() {
     }
   }, [nombreNuevaComida, crearComidaPersonalizada, fecha]);
 
-  const renderHeader = useCallback(() => {
-    const gaugeProgress = Math.max(0.03, progresoRestante);
+  useEffect(() => {
+    if (cargandoDia) {
+      setSkeletonVisible(true);
+      skeletonFadeOpacity.setValue(1);
+      contentOpacity.setValue(0);
+      shimmerOpacity.setValue(0.3);
 
+      const shimmerLoop = Animated.loop(
+        Animated.sequence([
+          Animated.timing(shimmerOpacity, {
+            toValue: 0.8,
+            duration: 650,
+            useNativeDriver: true,
+          }),
+          Animated.timing(shimmerOpacity, {
+            toValue: 0.3,
+            duration: 650,
+            useNativeDriver: true,
+          }),
+        ]),
+      );
+
+      shimmerLoop.start();
+      return () => shimmerLoop.stop();
+    }
+
+    Animated.parallel([
+      Animated.timing(contentOpacity, {
+        toValue: 1,
+        duration: SKELETON_FADE_MS,
+        useNativeDriver: true,
+      }),
+      Animated.timing(skeletonFadeOpacity, {
+        toValue: 0,
+        duration: SKELETON_FADE_MS,
+        useNativeDriver: true,
+      }),
+    ]).start(({ finished }) => {
+      if (finished) setSkeletonVisible(false);
+    });
+  }, [cargandoDia, contentOpacity, shimmerOpacity, skeletonFadeOpacity]);
+
+  const renderHeader = useCallback(() => {
     return (
       <>
         <View style={styles.screenHeader}>
@@ -257,159 +342,77 @@ export default function NutricionIndex() {
           </View>
         </View>
 
-        <View style={styles.dateSelectorRow}>
-          <View style={styles.weekCalendarGestureWrap}>
-            <GestureDetector gesture={swipeCalendario}>
-              <View style={styles.weekCalendar}>
+        <View style={styles.weekStripCard}>
+          <View style={styles.weekStripLeft}>
+            <Text style={styles.weekStripTitle}>Esta semana</Text>
+            <Text style={styles.weekStripSubtitle} numberOfLines={1} ellipsizeMode="tail">
+              {rangoSemanaLabel}
+            </Text>
+          </View>
+          <GestureDetector gesture={swipeCalendario}>
+            <View style={styles.weekStripDaysGestureHost}>
+              <View style={styles.weekStripDaysWrap}>
                 {semana.map((d, index) => (
-                  <Pressable
-                    key={`${d.key}-${d.fechaIso}-${index}`}
-                    style={[styles.dayItem, d.activo && styles.dayItemActive]}
-                    onPress={() => cambiarFecha(d.fechaIso)}
-                  >
-                    <Text style={[styles.dayLetter, d.activo && styles.dayLetterActive]}>{d.key}</Text>
-                    <Text style={[styles.dayNumber, d.activo && styles.dayNumberActive]}>{d.dia}</Text>
-                  </Pressable>
+                  <View key={`${d.key}-${d.fechaIso}-${index}`} style={styles.weekDayColumn}>
+                    <Pressable
+                      style={styles.weekDayPress}
+                      onPress={() => cambiarFecha(d.fechaIso)}
+                      hitSlop={{ top: 4, bottom: 4, left: 1, right: 1 }}
+                    >
+                      <View style={[styles.weekDayCell, d.activo && styles.weekDayCellActive]}>
+                        <Text style={[styles.weekDayLetter, d.activo && styles.weekDayLetterActive]}>{d.key}</Text>
+                        <Text
+                          style={[styles.weekDayNumber, d.activo && styles.weekDayNumberActive]}
+                          allowFontScaling={false}
+                        >
+                          {d.dia}
+                        </Text>
+                      </View>
+                    </Pressable>
+                    <View style={[styles.weekDayUnderline, d.activo && styles.weekDayUnderlineActive]} />
+                  </View>
                 ))}
               </View>
-            </GestureDetector>
-          </View>
-
-          <Pressable onPress={avanzarSemana} hitSlop={8} style={styles.calendarButton}>
-            <Ionicons name="calendar-outline" size={21} color={c.textSecondary} />
+            </View>
+          </GestureDetector>
+          <Pressable
+            onPress={abrirCalendario}
+            hitSlop={8}
+            style={styles.weekStripCalendarBtn}
+            accessibilityRole="button"
+            accessibilityLabel="Abrir calendario de nutrición"
+          >
+            <Ionicons name="calendar-outline" size={18} color={c.textDisplay} />
           </Pressable>
         </View>
 
-        <View style={[styles.summaryCard, styles.summaryCardBelowCalendar, cargandoDia && styles.summaryCardCargando]}>
-          <View style={styles.summaryContent}>
-            <View style={styles.kcalPanel}>
-              <View style={styles.gaugeWrap}>
-                <Svg width={GAUGE_SIZE} height={GAUGE_SIZE} viewBox={`0 0 ${GAUGE_SIZE} ${GAUGE_SIZE}`}>
-                  <Circle
-                    cx={GAUGE_SIZE / 2}
-                    cy={GAUGE_SIZE / 2}
-                    r={GAUGE_RADIUS}
-                    stroke={c.border}
-                    strokeWidth={GAUGE_STROKE}
-                    fill="none"
-                    strokeLinecap="round"
-                    strokeDasharray={`${GAUGE_ARC} ${GAUGE_CIRCUMFERENCE}`}
-                    transform={`rotate(140 ${GAUGE_SIZE / 2} ${GAUGE_SIZE / 2})`}
-                  />
-                  <Circle
-                    cx={GAUGE_SIZE / 2}
-                    cy={GAUGE_SIZE / 2}
-                    r={GAUGE_RADIUS}
-                    stroke={c.primary}
-                    strokeWidth={GAUGE_STROKE}
-                    fill="none"
-                    strokeLinecap="round"
-                    strokeDasharray={`${GAUGE_ARC * gaugeProgress} ${GAUGE_CIRCUMFERENCE}`}
-                    transform={`rotate(140 ${GAUGE_SIZE / 2} ${GAUGE_SIZE / 2})`}
-                  />
-                  <Circle
-                    cx={GAUGE_SIZE / 2}
-                    cy={GAUGE_SIZE / 2}
-                    r={GAUGE_RADIUS - 16}
-                    stroke={c.border}
-                    strokeWidth={GAUGE_STROKE}
-                    fill="none"
-                    strokeLinecap="round"
-                    strokeDasharray={`${GAUGE_ARC * 0.92} ${GAUGE_CIRCUMFERENCE}`}
-                    transform={`rotate(150 ${GAUGE_SIZE / 2} ${GAUGE_SIZE / 2})`}
-                    opacity={0.45}
-                  />
-                </Svg>
+        <Text style={styles.sectionTitle}>COMIDAS DEL DÍA</Text>
 
-                <View style={styles.gaugeCenter}>
-                  <Text style={styles.gaugeValue}>{Math.round(totalCalorias)}</Text>
-                  <Text style={styles.gaugeUnit}>kcal</Text>
-                  <Text style={styles.gaugeOf}>consumidas</Text>
-                  <Text style={styles.gaugeOf}>de {Math.round(objetivoCalorias)} kcal</Text>
-                </View>
-              </View>
-
-              <View style={styles.remainingBadge}>
-                <Text style={styles.remainingText}>{Math.round(caloriasRestantes)} kcal restantes</Text>
-              </View>
-            </View>
-
-            <View style={styles.macrosPanel}>
-              <View style={styles.goalBlock}>
-                <Text style={styles.summaryEyebrow}>OBJETIVO DIARIO</Text>
-                <Text style={styles.summaryValue}>
-                  {Math.round(objetivoCalorias)} <Text style={styles.summaryUnit}>kcal</Text>
-                </Text>
-              </View>
-
-              {(['proteinas', 'carbos', 'grasas'] as MacroKey[]).map((macro) => {
-                const data = macros[macro];
-                const porcentaje = data.objetivo > 0 ? Math.min(1, data.actual / data.objetivo) : 0;
-                const macroColor = macro === 'proteinas' ? c.primary : macro === 'carbos' ? c.success : c.macroFat;
-                const macroIcon = macro === 'proteinas' ? 'pulse-outline' : macro === 'carbos' ? 'leaf-outline' : 'flame-outline';
-                const macroLabel = macro === 'proteinas' ? 'Proteínas' : macro === 'carbos' ? 'Carbohidratos' : 'Grasas';
-                return (
-                  <View key={macro} style={styles.macroRow}>
-                    <View style={[styles.macroIcon, { backgroundColor: macroColor }]}>
-                      <Ionicons name={macroIcon} size={16} color={c.textOnPrimary} />
-                    </View>
-                    <View style={styles.macroBody}>
-                      <View style={styles.macroHeader}>
-                        <Text style={styles.macroLabel}>{macroLabel}</Text>
-                        <Text style={styles.macroValue}>
-                          {Math.round(data.actual)} / {Math.round(data.objetivo)} g
-                        </Text>
-                      </View>
-                      <View style={styles.macroTrack}>
-                        <View style={[styles.macroFill, { width: `${porcentaje * 100}%`, backgroundColor: macroColor }]} />
-                      </View>
-                    </View>
-                  </View>
-                );
-              })}
-            </View>
-          </View>
-
-          {cargandoDia && <Text style={styles.loadingInline}>[CARGANDO...]</Text>}
-        </View>
-
-        <Text style={styles.sectionTitle}>COMIDAS DEL DIA</Text>
-
-        {cargandoDia && <Text style={styles.loadingInline}>[CARGANDO...]</Text>}
+        {skeletonVisible && (
+          <Animated.View pointerEvents="none" style={{ opacity: skeletonFadeOpacity }}>
+            <MealCardsSkeleton styles={styles} shimmerOpacity={shimmerOpacity} />
+          </Animated.View>
+        )}
       </>
     );
   }, [
     swipeCalendario,
     semana,
+    rangoSemanaLabel,
     styles,
     cambiarFecha,
-    retrocederSemana,
-    avanzarSemana,
-    c.textSecondary,
+    abrirCalendario,
     c.textDisplay,
-    c.textOnPrimary,
     c.primary,
-    c.success,
-    c.macroFat,
-    c.border,
-    totalCalorias,
-    caloriasRestantes,
-    objetivoCalorias,
-    macros,
-    cargandoDia,
-    progresoRestante,
+    shimmerOpacity,
+    skeletonFadeOpacity,
+    skeletonVisible,
   ]);
 
   const renderItem = useCallback(
     ({ item: meal, drag, isActive }: { item: ComidaConAlimentos; drag: () => void; isActive: boolean; }) => {
       const logId = resumen?.logId;
-      const nombreLower = meal.nombre.toLowerCase();
-      const mealIcon =
-        nombreLower.includes('desayuno') ? 'sunny-outline' :
-        nombreLower.includes('almuerzo') ? 'partly-sunny-outline' :
-        nombreLower.includes('merienda') ? 'cafe-outline' :
-        nombreLower.includes('cena') ? 'moon-outline' :
-        'restaurant-outline';
+      const mealIcon = iconoComida(meal.nombre, meal.isDefault);
 
       const leftActions = () => (
         <View style={styles.swipeLeft}>
@@ -420,7 +423,8 @@ export default function NutricionIndex() {
       );
 
       return (
-        <Swipeable
+        <Animated.View style={{ opacity: contentOpacity }}>
+          <Swipeable
             enabled={!isActive}
             renderLeftActions={leftActions}
             overshootLeft={false}
@@ -443,27 +447,30 @@ export default function NutricionIndex() {
                 </Pressable>
 
                 <View style={styles.mealHeaderText}>
-                  <Text style={styles.mealTitle}>{meal.nombre}</Text>
-                  <Text style={styles.mealMeta}>
-                    {Math.round(meal.totalProteinas)}P | {Math.round(meal.totalCarbos)}C |{' '}
-                    {Math.round(meal.totalGrasas)}G
-                  </Text>
+                  <Text style={styles.mealTitle} numberOfLines={1}>{meal.nombre}</Text>
+                  <View style={styles.mealMetaRow}>
+                    <Ionicons name="flame-outline" size={11} color={c.danger} />
+                    <Text style={styles.mealMetaKcal}>{Math.round(meal.totalCalorias)} kcal</Text>
+                    <View style={styles.mealMetaDivider} />
+                    <Text style={styles.mealMetaProtein}>{Math.round(meal.totalProteinas)}P</Text>
+                    <View style={styles.mealMetaDivider} />
+                    <Text style={styles.mealMetaCarbs}>{Math.round(meal.totalCarbos)}C</Text>
+                    <View style={styles.mealMetaDivider} />
+                    <Text style={styles.mealMetaFat}>{Math.round(meal.totalGrasas)}G</Text>
+                  </View>
                 </View>
 
-                <View style={styles.mealRight}>
-                  <Text style={styles.mealKcal}>{Math.round(meal.totalCalorias)} KCAL</Text>
-                  <Pressable
-                    style={styles.addBtn}
-                    onPress={() =>
-                      router.push({
-                        pathname: '/(tabs)/(nutricion)/agregar',
-                        params: { mealId: meal.mealId, fecha },
-                      })
-                    }
-                  >
-                    <Text style={styles.addBtnText}>+</Text>
-                  </Pressable>
-                </View>
+                <Pressable
+                  style={styles.addBtn}
+                  onPress={() =>
+                    router.push({
+                      pathname: '/(tabs)/(nutricion)/agregar',
+                      params: { mealId: meal.mealId, fecha },
+                    })
+                  }
+                >
+                  <Text style={styles.addBtnText}>+</Text>
+                </Pressable>
               </View>
 
               <View style={styles.mealItemsList}>
@@ -493,32 +500,42 @@ export default function NutricionIndex() {
                       }}
                     >
                       <View style={styles.foodRow}>
-                        <View style={styles.foodMain}>
-                          <Text style={styles.foodName}>{item.food?.nombre ?? 'Alimento'}</Text>
-                          <Text style={styles.foodMeta}>
-                            {Math.round(item.gramos)}G / {Math.round(item.calorias_calculadas)} KCAL
-                          </Text>
+                        <Text style={styles.foodName} numberOfLines={1}>{item.food?.nombre ?? 'Alimento'}</Text>
+
+                        <View style={styles.foodMetaRow}>
+                          <Text style={styles.foodMeta}>{Math.round(item.gramos)} g</Text>
+                          <View style={styles.foodMetrics}>
+                            <Text style={[styles.foodMetricText, styles.foodMacroProteinText]}>
+                              {Math.round(item.proteinas_calculadas)}P
+                            </Text>
+                            <Text style={[styles.foodMetricText, styles.foodMacroCarbsText]}>
+                              {Math.round(item.carbos_calculados)}C
+                            </Text>
+                            <Text style={[styles.foodMetricText, styles.foodMacroFatText]}>
+                              {Math.round(item.grasas_calculadas)}G
+                            </Text>
+                            <Text style={styles.foodKcalText}>{Math.round(item.calorias_calculadas)} kcal</Text>
+                          </View>
                         </View>
-                        <Text style={styles.foodMacros}>
-                          {Math.round(item.proteinas_calculadas)}P | {Math.round(item.carbos_calculados)}C |{' '}
-                          {Math.round(item.grasas_calculadas)}G
-                        </Text>
                       </View>
                     </Swipeable>
                   );
                 })}
                 {meal.items.length === 0 && (
-                  <Text style={styles.emptyMealText}>Todavia no hay alimentos en esta comida.</Text>
+                  <Text style={styles.emptyMealSlotHint}>Todavía no hay alimentos en esta comida</Text>
                 )}
               </View>
             </View>
-      </Swipeable>
+          </Swipeable>
+        </Animated.View>
       );
     },
-    [styles, resumen?.logId, eliminarComidaDelLog, eliminarAlimento, fecha, c.primary],
+    [styles, resumen?.logId, eliminarComidaDelLog, eliminarAlimento, fecha, c.primary, c.danger, contentOpacity],
   );
 
   const renderFooter = useCallback(() => {
+    if (cargandoDia) return null;
+
     return (
       <View style={styles.footerBlock}>
         <View style={styles.adviceCard}>
@@ -526,29 +543,20 @@ export default function NutricionIndex() {
             <Ionicons name="sparkles-outline" size={16} color={c.textSecondary} />
           </View>
           <View style={styles.adviceTextBlock}>
-            <Text style={styles.adviceLabel}>CONSEJO DEL DIA</Text>
-            <Text style={styles.adviceText}>Intenta alcanzar tu objetivo de proteinas.</Text>
+            <Text style={styles.adviceLabel}>Consejo del día</Text>
+            <Text style={styles.adviceText}>Intenta alcanzar tus objetivos de proteínas 💪</Text>
           </View>
           <Ionicons name="chevron-forward" size={18} color={c.textSecondary} />
         </View>
 
-        <Pressable style={styles.addMealBtn} onPress={() => setModalNuevaComida(true)}>
-          <Text style={styles.addMealBtnText}>Añadir comida</Text>
-        </Pressable>
       </View>
     );
-  }, [styles, c.textSecondary]);
+  }, [styles, c.textSecondary, cargandoDia]);
 
   return (
     <View style={[styles.root, { paddingTop: insets.top + 8 }]}>
-      {cargando && (
-        <View style={styles.loadingOverlay}>
-          <Text style={styles.loadingInline}>[CARGANDO...]</Text>
-        </View>
-      )}
-
       <SortableMealList
-        data={comidasData}
+        data={cargandoDia ? [] : comidasData}
         keyExtractor={(item) => item.mealId}
         onDragEnd={onDragEnd}
         ListHeaderComponent={renderHeader}
@@ -561,9 +569,17 @@ export default function NutricionIndex() {
 
       {comidasData.length === 0 && !cargando && (
         <View style={styles.emptyOverlay} pointerEvents="none">
-          <Text style={styles.emptyMealText}>No hay comidas registradas para este dia.</Text>
+          <Text style={styles.emptyMealText}>No hay comidas registradas para este día.</Text>
         </View>
       )}
+
+      <CalendarioNutricion
+        visible={calendarioVisible}
+        fechaActual={fecha}
+        objetivos={objetivos}
+        onClose={cerrarCalendario}
+        onSeleccionarDia={seleccionarDiaCalendario}
+      />
 
       <Modal visible={modalNuevaComida} transparent animationType="fade" onRequestClose={() => setModalNuevaComida(false)}>
         <Pressable style={styles.modalOverlay} onPress={() => setModalNuevaComida(false)}>
@@ -584,53 +600,6 @@ export default function NutricionIndex() {
                 <Text style={styles.modalBtnPrimaryText}>Aceptar</Text>
               </Pressable>
             </View>
-          </Pressable>
-        </Pressable>
-      </Modal>
-
-      <Modal visible={!!menuMealId} transparent animationType="fade" onRequestClose={cerrarMenu}>
-        <Pressable style={styles.modalOverlay} onPress={cerrarMenu}>
-          <Pressable style={styles.menuCard} onPress={(e) => e.stopPropagation()}>
-            <Pressable
-              style={styles.menuRow}
-              onPress={() => {
-                if (mealDelMenu) copiarDesdeComida(mealDelMenu.items);
-                cerrarMenu();
-              }}
-            >
-              <Text style={styles.menuRowText}>Copiar comida</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.menuRow, !tieneCopia && styles.menuRowDisabled]}
-              disabled={!tieneCopia || !mealDelMenu}
-              onPress={() => {
-                void (async () => {
-                  if (!mealDelMenu || !lineas?.length) {
-                    cerrarMenu();
-                    return;
-                  }
-                  try {
-                    await pegarAlimentosEnComida(mealDelMenu.mealId, lineas);
-                    limpiarPortapapeles();
-                  } catch (e) {
-                    console.error('[Nutricion] pegar comida', e);
-                  } finally {
-                    cerrarMenu();
-                  }
-                })();
-              }}
-            >
-              <Text style={[styles.menuRowText, !tieneCopia && styles.menuRowTextDisabled]}>Pegar comida</Text>
-            </Pressable>
-            <Pressable
-              style={styles.menuRow}
-              onPress={() => {
-                if (mealDelMenu) void vaciarComida(mealDelMenu.mealId);
-                cerrarMenu();
-              }}
-            >
-              <Text style={[styles.menuRowText, styles.menuRowDanger]}>Limpiar comida</Text>
-            </Pressable>
           </Pressable>
         </Pressable>
       </Modal>
@@ -658,24 +627,61 @@ function makeStyles(
       paddingBottom: s.xxl,
       gap: s.sm,
     },
-    loadingOverlay: {
-      position: 'absolute',
-      top: s.md,
-      right: s.md,
-      zIndex: 10,
-      backgroundColor: c.surface,
-      borderWidth: 1,
-      borderColor: c.border,
-      borderRadius: r.technical,
-      paddingHorizontal: s.sm,
-      paddingVertical: s.xs,
+    skeletonSurface: {
+      backgroundColor: SKELETON_BG,
+      borderColor: SKELETON_BG,
     },
-    loadingInline: {
-      ...ts.label,
-      fontFamily: f.mono,
-      color: c.textSecondary,
-      letterSpacing: 1.1,
-      textTransform: 'uppercase',
+    skeletonMealsList: {
+      gap: s.sm,
+    },
+    skeletonMealIcon: {
+      width: 44,
+      height: 44,
+      borderRadius: r.pill,
+    },
+    skeletonMealTitle: {
+      width: '58%',
+      height: 18,
+      borderRadius: r.technical,
+    },
+    skeletonMealKcal: {
+      width: 52,
+      height: 12,
+      borderRadius: r.technical,
+    },
+    skeletonMealMacro: {
+      width: 20,
+      height: 12,
+      borderRadius: r.technical,
+    },
+    skeletonAddBtn: {
+      width: 38,
+      height: 38,
+      borderRadius: r.sm,
+    },
+    skeletonMealItemsList: {
+      backgroundColor: SKELETON_BG,
+      borderColor: SKELETON_BG,
+    },
+    skeletonFoodName: {
+      width: '62%',
+      height: 16,
+      borderRadius: r.technical,
+    },
+    skeletonFoodGrams: {
+      width: 40,
+      height: 13,
+      borderRadius: r.technical,
+    },
+    skeletonFoodMetric: {
+      width: 18,
+      height: 13,
+      borderRadius: r.technical,
+    },
+    skeletonFoodKcal: {
+      width: 48,
+      height: 13,
+      borderRadius: r.technical,
     },
     screenHeader: {
       flexDirection: 'row',
@@ -713,211 +719,122 @@ function makeStyles(
       alignItems: 'center',
       justifyContent: 'center',
     },
-    dateSelectorRow: {
+    weekStripCard: {
       flexDirection: 'row',
       alignItems: 'center',
+      backgroundColor: c.surface,
+      borderRadius: r.lg,
+      borderWidth: 1,
+      borderColor: c.borderVisible,
+      paddingVertical: s.xs,
+      paddingHorizontal: s.sm,
       gap: s.xs,
     },
-    weekCalendarGestureWrap: {
+    weekStripLeft: {
+      justifyContent: 'center',
+      alignItems: 'flex-start',
+      flexShrink: 0,
+      maxWidth: 112,
+      paddingRight: s.xs,
+    },
+    weekStripTitle: {
+      fontSize: 12,
+      lineHeight: 15,
+      fontFamily: f.sansBold,
+      color: c.textDisplay,
+      letterSpacing: -0.2,
+    },
+    weekStripSubtitle: {
+      marginTop: 1,
+      fontSize: 10,
+      lineHeight: 13,
+      fontFamily: f.sans,
+      color: c.textMuted,
+    },
+    weekStripDaysGestureHost: {
       flex: 1,
+      flexBasis: 0,
       minWidth: 0,
     },
-    calendarButton: {
-      width: 44,
-      height: 58,
-      borderRadius: r.sm,
-      borderWidth: 1,
-      borderColor: c.borderVisible,
-      backgroundColor: c.surface,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    weekCalendar: {
+    weekStripDaysWrap: {
       flex: 1,
-      borderWidth: 1,
-      borderColor: c.borderVisible,
-      borderRadius: r.md,
-      backgroundColor: c.surface,
-      paddingHorizontal: s.sm,
-      paddingVertical: s.xs,
+      width: '100%',
       flexDirection: 'row',
-      justifyContent: 'space-between',
-      minHeight: 58,
-    },
-    dayItem: {
-      width: 50,
-      paddingVertical: s.xs,
-      borderRadius: r.sm,
       alignItems: 'center',
       gap: s.xs,
+      paddingHorizontal: 2,
     },
-    dayItemActive: {
+    weekDayColumn: {
+      flex: 1,
+      minWidth: 0,
+      alignItems: 'center',
+    },
+    weekDayPress: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      width: '100%',
+    },
+    weekDayCell: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      alignSelf: 'stretch',
+      width: '100%',
+      minWidth: 0,
+      paddingHorizontal: 3,
+      paddingVertical: 5,
+      borderRadius: r.pill,
+      overflow: 'hidden',
+    },
+    weekDayCellActive: {
       backgroundColor: c.primary,
     },
-    dayLetter: {
-      ...ts.label,
+    weekDayLetter: {
+      fontSize: 10,
+      lineHeight: 12,
       fontFamily: f.mono,
       color: c.textMuted,
-      letterSpacing: 1.1,
+      letterSpacing: 0.45,
       textTransform: 'uppercase',
     },
-    dayLetterActive: {
+    weekDayLetterActive: {
       color: c.textOnPrimary,
     },
-    dayNumber: {
-      ...ts.label,
-      fontFamily: f.mono,
-      color: c.textSecondary,
+    weekDayNumber: {
+      marginTop: 1,
+      fontSize: 12,
+      lineHeight: 15,
+      fontFamily: f.sansMedium,
+      color: c.textDisplay,
+      letterSpacing: -0.35,
+      includeFontPadding: false,
+      textAlign: 'center',
     },
-    dayNumberActive: {
+    weekDayNumberActive: {
       color: c.textOnPrimary,
     },
-    summaryCard: {
+    weekDayUnderline: {
+      width: '75%',
+      maxWidth: 36,
+      height: 2,
+      marginTop: 3,
+      borderRadius: 1,
+      backgroundColor: c.border,
+    },
+    weekDayUnderlineActive: {
+      height: 3,
+      maxWidth: 38,
+      backgroundColor: c.primary,
+    },
+    weekStripCalendarBtn: {
+      width: 36,
+      height: 36,
+      flexShrink: 0,
+      borderRadius: r.sm,
       borderWidth: 1,
       borderColor: c.borderVisible,
-      borderRadius: r.lg,
-      backgroundColor: c.surface,
-      padding: s.md,
-    },
-    summaryCardCargando: {
-      opacity: 0.55,
-    },
-    summaryCardBelowCalendar: {
-      marginTop: s.md,
-    },
-    summaryContent: {
-      flexDirection: 'row',
-      gap: s.md,
-      alignItems: 'center',
-    },
-    kcalPanel: {
-      width: 166,
-      alignItems: 'center',
-      gap: s.sm,
-    },
-    gaugeWrap: {
-      width: GAUGE_SIZE,
-      height: GAUGE_SIZE,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    gaugeCenter: {
-      position: 'absolute',
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    gaugeValue: {
-      ...ts.displayMd,
-      fontFamily: f.sansMedium,
-      color: c.textDisplay,
-      lineHeight: 36,
-    },
-    gaugeUnit: {
-      ...ts.caption,
-      fontFamily: f.sans,
-      color: c.text,
-      lineHeight: 16,
-    },
-    gaugeOf: {
-      ...ts.label,
-      fontFamily: f.mono,
-      color: c.textSecondary,
-      textAlign: 'center',
-    },
-    remainingBadge: {
-      borderWidth: 1,
-      borderColor: c.border,
       backgroundColor: c.surfaceElevated,
-      borderRadius: r.technical,
-      paddingHorizontal: s.md,
-      paddingVertical: s.xs,
-      alignSelf: 'stretch',
-    },
-    remainingText: {
-      ...ts.label,
-      fontFamily: f.mono,
-      color: c.primary,
-      letterSpacing: 0.9,
-      textAlign: 'center',
-    },
-    macrosPanel: {
-      flex: 1,
-      gap: s.sm,
-      justifyContent: 'center',
-    },
-    goalBlock: {
-      borderBottomWidth: 1,
-      borderBottomColor: c.borderVisible,
-      paddingBottom: s.sm,
-      marginBottom: s.xs,
-      gap: s.xs,
-    },
-    summaryEyebrow: {
-      ...ts.label,
-      fontFamily: f.mono,
-      color: c.primary,
-      letterSpacing: 1.1,
-      textTransform: 'uppercase',
-      backgroundColor: c.primaryBg,
-      alignSelf: 'flex-start',
-      paddingHorizontal: s.xs,
-      paddingVertical: 2,
-      borderRadius: r.technical,
-      overflow: 'hidden',
-    },
-    summaryValue: {
-      ...ts.subheading,
-      fontFamily: f.sansMedium,
-      color: c.textDisplay,
-    },
-    summaryUnit: {
-      ...ts.bodySm,
-      fontFamily: f.sans,
-      color: c.text,
-    },
-    macroRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: s.sm,
-    },
-    macroIcon: {
-      width: 28,
-      height: 28,
-      borderRadius: r.pill,
       alignItems: 'center',
       justifyContent: 'center',
-    },
-    macroBody: {
-      flex: 1,
-      gap: s.xs,
-    },
-    macroHeader: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      gap: s.sm,
-    },
-    macroLabel: {
-      ...ts.caption,
-      fontFamily: f.sansMedium,
-      color: c.text,
-      flexShrink: 1,
-    },
-    macroValue: {
-      ...ts.caption,
-      fontFamily: f.mono,
-      color: c.textDisplay,
-    },
-    macroTrack: {
-      height: 4,
-      backgroundColor: c.border,
-      borderRadius: r.technical,
-      overflow: 'hidden',
-    },
-    macroFill: {
-      height: '100%',
-      backgroundColor: c.borderVisible,
-      borderRadius: r.technical,
     },
     sectionTitle: {
       ...ts.label,
@@ -930,9 +847,11 @@ function makeStyles(
     mealCard: {
       borderWidth: 1,
       borderColor: c.borderVisible,
-      borderRadius: r.md,
+      borderRadius: r.lg,
       backgroundColor: c.surface,
-      padding: s.sm,
+      paddingHorizontal: s.md,
+      paddingVertical: s.sm,
+      gap: s.sm,
     },
     mealCardActive: {
       borderColor: c.borderVisible,
@@ -941,30 +860,20 @@ function makeStyles(
     mealHeaderRow: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: s.md,
+      gap: s.xs,
     },
     mealIconWrap: {
-      width: 50,
-      height: 50,
+      width: 44,
+      height: 44,
       borderRadius: r.pill,
-      borderWidth: 1,
-      borderColor: c.border,
       backgroundColor: c.primaryBg,
       alignItems: 'center',
       justifyContent: 'center',
     },
     mealHeaderText: {
       flex: 1,
-      gap: s.xs,
-    },
-    mealRight: {
-      alignItems: 'flex-end',
-      gap: s.sm,
-    },
-    mealKcal: {
-      ...ts.caption,
-      fontFamily: f.mono,
-      color: c.textDisplay,
+      minWidth: 0,
+      gap: 2,
     },
     swipeLeft: {
       justifyContent: 'center',
@@ -1000,55 +909,134 @@ function makeStyles(
       marginVertical: 2,
     },
     mealItemsList: {
-      marginLeft: 66,
-      marginTop: -18,
+      borderWidth: 1,
+      borderColor: c.borderVisible,
+      borderRadius: r.md,
+      backgroundColor: c.surface,
+      overflow: 'hidden',
     },
     foodRow: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      gap: s.md,
+      gap: 3,
       backgroundColor: 'transparent',
-    },
-    foodMain: {
-      flex: 1,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: c.border,
+      paddingHorizontal: s.md,
+      paddingVertical: s.sm,
     },
     mealTitle: {
-      ...ts.bodySm,
-      fontFamily: f.sansMedium,
+      ...ts.subheading,
+      fontFamily: f.sansBold,
+      fontSize: 17,
+      lineHeight: 21,
+      letterSpacing: -0.2,
       color: c.textDisplay,
     },
-    mealMeta: {
+    mealMetaRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      flexWrap: 'nowrap',
+      flexShrink: 1,
+      minWidth: 0,
+    },
+    mealMetaKcal: {
       ...ts.label,
-      fontFamily: f.mono,
-      color: c.textMuted,
-      letterSpacing: 0.9,
-      textTransform: 'uppercase',
+      fontFamily: f.sansMedium,
+      fontSize: 10,
+      lineHeight: 13,
+      color: c.textSecondary,
+    },
+    mealMetaDivider: {
+      width: 1,
+      height: 10,
+      alignSelf: 'center',
+      backgroundColor: c.borderVisible,
+    },
+    mealMetaProtein: {
+      ...ts.label,
+      fontFamily: f.sansBold,
+      fontSize: 10,
+      lineHeight: 13,
+      color: c.primary,
+    },
+    mealMetaCarbs: {
+      ...ts.label,
+      fontFamily: f.sansBold,
+      fontSize: 10,
+      lineHeight: 13,
+      color: c.success,
+    },
+    mealMetaFat: {
+      ...ts.label,
+      fontFamily: f.sansBold,
+      fontSize: 10,
+      lineHeight: 13,
+      color: c.macroFat,
     },
     foodName: {
       ...ts.bodySm,
-      fontFamily: f.sansMedium,
-      color: c.text,
+      fontFamily: f.sansBold,
+      color: c.textDisplay,
+      alignSelf: 'stretch',
+    },
+    foodMetaRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: s.sm,
     },
     foodMeta: {
-      ...ts.label,
-      fontFamily: f.mono,
+      ...ts.caption,
+      fontFamily: f.sans,
       color: c.textMuted,
-      letterSpacing: 0.8,
-      textTransform: 'uppercase',
+      flexShrink: 1,
     },
-    foodMacros: {
-      ...ts.label,
-      fontFamily: f.mono,
-      color: c.textSecondary,
-      letterSpacing: 0.8,
-      textTransform: 'uppercase',
+    foodMetrics: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'flex-end',
+      flexWrap: 'nowrap',
+      gap: 6,
+      flexShrink: 0,
+    },
+    foodMetricText: {
+      ...ts.caption,
+      fontFamily: f.sansBold,
+      lineHeight: 15,
+    },
+    foodMacroProteinText: {
+      color: c.primary,
+    },
+    foodMacroCarbsText: {
+      color: c.success,
+    },
+    foodMacroFatText: {
+      color: c.macroFat,
+    },
+    foodKcalText: {
+      fontSize: 10,
+      lineHeight: 13,
+      fontFamily: f.sansMedium,
+      color: c.textMuted,
+      marginLeft: 2,
     },
     emptyMealText: {
-      ...ts.label,
-      fontFamily: f.mono,
+      ...ts.bodySm,
+      fontFamily: f.sans,
       color: c.textMuted,
-      letterSpacing: 0.8,
+      paddingHorizontal: s.md,
+      paddingVertical: s.lg,
+      textAlign: 'center',
+    },
+    emptyMealSlotHint: {
+      ...ts.caption,
+      fontFamily: f.sans,
+      fontSize: 11,
+      lineHeight: 15,
+      color: c.textMuted,
+      paddingHorizontal: s.sm,
+      paddingVertical: s.xs,
+      textAlign: 'center',
     },
     emptyOverlay: {
       ...StyleSheet.absoluteFillObject,
@@ -1058,8 +1046,8 @@ function makeStyles(
       top: '45%',
     },
     addBtn: {
-      width: 46,
-      height: 46,
+      width: 38,
+      height: 38,
       borderRadius: r.sm,
       borderWidth: 1,
       borderColor: c.primary,
@@ -1068,8 +1056,8 @@ function makeStyles(
       justifyContent: 'center',
     },
     addBtnText: {
-      fontSize: 26,
-      lineHeight: 28,
+      fontSize: 22,
+      lineHeight: 24,
       fontFamily: f.mono,
       color: c.textDisplay,
     },
@@ -1103,12 +1091,12 @@ function makeStyles(
       gap: s.xs,
     },
     adviceLabel: {
-      ...ts.caption,
+      ...ts.bodySm,
       fontFamily: f.sansMedium,
       color: c.textDisplay,
     },
     adviceText: {
-      ...ts.label,
+      ...ts.bodySm,
       fontFamily: f.sans,
       color: c.textSecondary,
     },
@@ -1190,37 +1178,6 @@ function makeStyles(
       color: c.textDisplay,
       letterSpacing: 0.8,
       textTransform: 'uppercase',
-    },
-    menuCard: {
-      backgroundColor: c.surface,
-      borderRadius: r.sm,
-      borderWidth: 1,
-      borderColor: c.borderVisible,
-      overflow: 'hidden',
-      alignSelf: 'center',
-      minWidth: 220,
-    },
-    menuRow: {
-      paddingVertical: s.md,
-      paddingHorizontal: s.lg,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: c.border,
-    },
-    menuRowDisabled: {
-      opacity: 0.4,
-    },
-    menuRowText: {
-      ...ts.bodySm,
-      fontFamily: f.sansMedium,
-      color: c.text,
-      letterSpacing: 0.8,
-      textTransform: 'uppercase',
-    },
-    menuRowTextDisabled: {
-      color: c.textMuted,
-    },
-    menuRowDanger: {
-      color: c.danger,
     },
   });
 }

@@ -7,8 +7,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Svg, { Circle, Polyline, Rect } from 'react-native-svg';
 import {
   ActivityIndicator,
   Dimensions,
@@ -17,12 +15,14 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Svg, { Circle, Polyline, Rect } from 'react-native-svg';
 
 import { useAuth } from '@/hooks/useAuth';
 import { useNutricion } from '@/hooks/useNutricion';
 import { useTheme } from '@/hooks/useTheme';
-import { useFocusEffect } from 'expo-router';
 import { supabase } from '@/lib/supabase';
+import { useFocusEffect } from 'expo-router';
 
 const { width: SW } = Dimensions.get('window');
 
@@ -262,7 +262,7 @@ export default function HomeScreen() {
     <View style={{ flex: 1, backgroundColor: c.background, paddingTop: insets.top + 8, paddingBottom: 20 }}>
 
       {/* ── Header ─────────────────────────────────────────────────── */}
-      <View style={[row, { paddingHorizontal: ph, marginBottom: s.lg }]}>
+      <View style={[row, { paddingHorizontal: ph, marginBottom: s.lg}]}>
         {/* Avatar — pulsar navega a perfil */}
         <TouchableOpacity onPress={() => router.push('/(tabs)/(perfil)')} activeOpacity={0.8}>
           {avatarUrl ? (

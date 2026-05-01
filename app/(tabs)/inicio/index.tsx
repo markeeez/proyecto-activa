@@ -4,14 +4,13 @@
  */
 
 import { Ionicons } from '@expo/vector-icons';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { Image } from 'expo-image';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Polyline, Rect } from 'react-native-svg';
 import {
-  ActivityIndicator,
-  Dimensions,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -25,47 +24,17 @@ import { supabase } from '@/lib/supabase';
 import { ModalRegistrarComida } from '@/components/ModalRegistrarComida';
 import { ModalRegistrarEntreno } from '@/components/ModalRegistrarEntreno';
 
-const { width: SW } = Dimensions.get('window');
+const GAUGE_SIZE = 110;
+const GAUGE_STROKE = 8;
+const GAUGE_RADIUS = (GAUGE_SIZE - GAUGE_STROKE) / 2;
+const GAUGE_CIRCUMFERENCE = 2 * Math.PI * GAUGE_RADIUS;
+const GAUGE_ARC_RATIO = 0.78;
+const GAUGE_ARC = GAUGE_CIRCUMFERENCE * GAUGE_ARC_RATIO;
+const GAUGE_START_ANGLE = 90 + ((1 - GAUGE_ARC_RATIO) * 360) / 2;
 
 /* ─────────────────────────────────────────────────────────────────────
    Sub-componentes
 ──────────────────────────────────────────────────────────────────────*/
-
-/** Anillo de progreso circular (donut). */
-function DonutRing({
-  size,
-  strokeWidth,
-  progress,
-  color,
-  bgColor,
-}: {
-  size: number;
-  strokeWidth: number;
-  progress: number;
-  color: string;
-  bgColor: string;
-}) {
-  const r    = (size - strokeWidth) / 2;
-  const cx   = size / 2;
-  const circ = 2 * Math.PI * r;
-  return (
-    <View style={{ transform: [{ rotate: '-90deg' }] }}>
-      <Svg width={size} height={size}>
-        <Circle cx={cx} cy={cx} r={r} stroke={bgColor} strokeWidth={strokeWidth} fill="none" />
-        <Circle
-          cx={cx}
-          cy={cx}
-          r={r}
-          stroke={color}
-          strokeWidth={strokeWidth}
-          fill="none"
-          strokeDasharray={`${progress * circ} ${circ}`}
-          strokeLinecap="round"
-        />
-      </Svg>
-    </View>
-  );
-}
 
 /** Gráfico de línea mini (sparkline). */
 function Sparkline({
@@ -322,11 +291,14 @@ export default function HomeScreen() {
   const kcalTotal     = objetivos?.calorias_objetivo ?? 2000;
   const kcalRestantes = Math.max(0, kcalTotal - kcalConsumed);
   const kcalProgress  = kcalTotal > 0 ? Math.min(kcalConsumed / kcalTotal, 1) : 0;
+  const gaugeProgress = Math.max(0.03, kcalProgress);
+  const diferenciaKcal = kcalConsumed - kcalTotal;
+  const colorGauge = Math.abs(diferenciaKcal) > 300 ? c.warningKcal : c.primary;
 
   const macros = [
-    { label: 'Proteínas',     current: resumen?.totalProteinas ?? 0, total: objetivos?.proteinas_objetivo ?? 160, color: c.primary  },
-    { label: 'Carbohidratos', current: resumen?.totalCarbos    ?? 0, total: objetivos?.carbos_objetivo    ?? 275, color: c.success  },
-    { label: 'Grasas',        current: resumen?.totalGrasas    ?? 0, total: objetivos?.grasas_objetivo    ?? 80,  color: c.macroFat },
+    { key: 'proteinas', label: 'Proteínas',     current: resumen?.totalProteinas ?? 0, total: objetivos?.proteinas_objetivo ?? 0, color: c.primary  },
+    { key: 'carbos',    label: 'Carbohidratos', current: resumen?.totalCarbos    ?? 0, total: objetivos?.carbos_objetivo    ?? 0, color: c.success  },
+    { key: 'grasas',    label: 'Grasas',        current: resumen?.totalGrasas    ?? 0, total: objetivos?.grasas_objetivo    ?? 0, color: c.macroFat },
   ];
 
   // ── Progreso: valores calculados ──────────────────────────────────
@@ -388,64 +360,107 @@ export default function HomeScreen() {
       </View>
 
       {/* ── Resumen diario ──────────────────────────────────────────── */}
-      <View style={[st.card, { backgroundColor: c.surface, borderColor: c.border, marginHorizontal: ph, marginBottom: s.md }]}>
-        <View style={[row, { justifyContent: 'space-between' }]}>
-          <Text style={[st.cardTitle, { color: c.textDisplay }]}>Resumen diario</Text>
-          {cargandoNutricion && <ActivityIndicator size="small" color={c.primary} />}
-        </View>
+      <View
+        style={[
+          st.nutritionSummaryCard,
+          { backgroundColor: c.surface, borderColor: c.borderVisible, marginHorizontal: ph, marginBottom: s.md },
+        ]}
+      >
+        <View style={st.nutritionSummaryContent}>
+          <View style={st.kcalPanel}>
+            <View style={st.gaugeWrap}>
+              <Svg width={GAUGE_SIZE} height={GAUGE_SIZE} viewBox={`0 0 ${GAUGE_SIZE} ${GAUGE_SIZE}`}>
+                <Circle
+                  cx={GAUGE_SIZE / 2}
+                  cy={GAUGE_SIZE / 2}
+                  r={GAUGE_RADIUS}
+                  stroke={c.border}
+                  strokeWidth={GAUGE_STROKE}
+                  fill="none"
+                  strokeLinecap="round"
+                  strokeDasharray={`${GAUGE_ARC} ${GAUGE_CIRCUMFERENCE}`}
+                  transform={`rotate(${GAUGE_START_ANGLE} ${GAUGE_SIZE / 2} ${GAUGE_SIZE / 2})`}
+                />
+                <Circle
+                  cx={GAUGE_SIZE / 2}
+                  cy={GAUGE_SIZE / 2}
+                  r={GAUGE_RADIUS}
+                  stroke={colorGauge}
+                  strokeWidth={GAUGE_STROKE}
+                  fill="none"
+                  strokeLinecap="round"
+                  strokeDasharray={`${GAUGE_ARC * gaugeProgress} ${GAUGE_CIRCUMFERENCE}`}
+                  transform={`rotate(${GAUGE_START_ANGLE} ${GAUGE_SIZE / 2} ${GAUGE_SIZE / 2})`}
+                />
+                <Circle
+                  cx={GAUGE_SIZE / 2}
+                  cy={GAUGE_SIZE / 2}
+                  r={GAUGE_RADIUS - 12}
+                  stroke={colorGauge}
+                  strokeWidth={GAUGE_STROKE}
+                  fill="none"
+                  strokeLinecap="round"
+                  strokeDasharray={`${GAUGE_ARC * gaugeProgress} ${GAUGE_CIRCUMFERENCE}`}
+                  transform={`rotate(150 ${GAUGE_SIZE / 2} ${GAUGE_SIZE / 2})`}
+                  opacity={0.45}
+                />
+              </Svg>
 
-        <View style={[row, { marginTop: 12 }]}>
-          {/* Donut + labels centrados */}
-          <View style={st.donutWrap}>
-            <DonutRing
-              size={118}
-              strokeWidth={11}
-              progress={kcalProgress}
-              color={c.primary}
-              bgColor={c.border}
-            />
-            <View style={st.donutOverlay} pointerEvents="none">
-              <Text style={[st.donutNum, { color: c.textDisplay }]}>
-                {kcalConsumed.toLocaleString('es-ES')}
-              </Text>
-              <Text style={[st.donutUnit, { color: c.textSecondary }]}>kcal</Text>
-              <Text style={[st.donutOf,   { color: c.textSecondary }]}>
-                de {kcalTotal.toLocaleString('es-ES')}
-              </Text>
+              <View style={st.gaugeCenter}>
+                <Text style={[st.gaugeValue, { color: c.textDisplay }]}>{Math.round(kcalConsumed)}</Text>
+                <Text style={[st.gaugeUnit, { color: c.text }]}>kcal</Text>
+              </View>
+            </View>
+
+            <View style={[st.remainingBadge, { backgroundColor: c.surfaceElevated, borderColor: c.border }]}>
+              <Text style={[st.remainingText, { color: c.primary }]}>{Math.round(kcalRestantes)} kcal restantes</Text>
             </View>
           </View>
 
-          {/* Barras de macros */}
-          <View style={{ flex: 1, marginLeft: 16, gap: 10 }}>
-            {macros.map(m => (
-              <View key={m.label}>
-                <View style={[row, { justifyContent: 'space-between', marginBottom: 4 }]}>
-                  <View style={[row, { gap: 5 }]}>
-                    <Ionicons name="ellipse" size={8} color={m.color} />
-                    <Text style={[st.macroLabel, { color: c.textSecondary }]}>{m.label}</Text>
+          <View style={st.macrosPanel}>
+            <View style={[st.goalBlock, { borderBottomColor: c.borderVisible }]}>
+              <Text style={[st.summaryEyebrow, { backgroundColor: c.primaryBg, color: c.primary }]}>
+                OBJETIVO DIARIO
+              </Text>
+              <Text style={[st.summaryValue, { color: c.textDisplay }]}>
+                {Math.round(kcalTotal)} <Text style={[st.summaryUnit, { color: c.text }]}>kcal</Text>
+              </Text>
+            </View>
+
+            {macros.map((m) => {
+              const porcentaje = m.total > 0 ? Math.min(1, m.current / m.total) : 0;
+              return (
+                <View key={m.key} style={st.nutritionMacroRow}>
+                  <View style={[st.macroIcon, { backgroundColor: m.color }]}>
+                    {m.key === 'proteinas' ? (
+                      <MaterialCommunityIcons name="food-drumstick-outline" size={16} color={c.textOnPrimary} />
+                    ) : m.key === 'carbos' ? (
+                      <MaterialCommunityIcons name="barley" size={16} color={c.textOnPrimary} />
+                    ) : (
+                      <Ionicons name="water-outline" size={16} color={c.textOnPrimary} />
+                    )}
                   </View>
-                  <Text style={[st.macroVal, { color: c.text }]}>
-                    {m.current} / {m.total} g
-                  </Text>
+                  <View style={st.nutritionMacroBody}>
+                    <View style={st.nutritionMacroHeader}>
+                      <Text style={[st.nutritionMacroLabel, { color: c.text }]}>{m.label}</Text>
+                      <Text style={[st.nutritionMacroValue, { color: c.textDisplay }]}>
+                        {Math.round(m.current)} / {Math.round(m.total)} g
+                      </Text>
+                    </View>
+                    <View style={[st.nutritionMacroTrack, { backgroundColor: c.border }]}>
+                      <View
+                        style={[
+                          st.nutritionMacroFill,
+                          { width: `${porcentaje * 100}%` as `${number}%`, backgroundColor: m.color },
+                        ]}
+                      />
+                    </View>
+                  </View>
                 </View>
-                <View style={[st.macroTrack, { backgroundColor: c.border }]}>
-                  <View
-                    style={[
-                      st.macroFill,
-                      { width: `${(m.current / m.total) * 100}%` as any, backgroundColor: m.color },
-                    ]}
-                  />
-                </View>
-              </View>
-            ))}
+              );
+            })}
           </View>
         </View>
-
-        {/* Restantes */}
-        <Text style={[st.restantes, { color: c.primary }]}>
-          <Text style={{ fontWeight: '700' }}>{kcalRestantes}</Text>
-          {' '}kcal restantes
-        </Text>
       </View>
 
       {/* ── Acciones rápidas ────────────────────────────────────────── */}
@@ -666,22 +681,106 @@ const st = StyleSheet.create({
   cardTitle: { fontSize: 17, fontWeight: '600' },
   seeAll:    { fontSize: 14 },
 
-  /* Donut */
-  donutWrap: { width: 118, height: 118 },
-  donutOverlay: {
-    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-    alignItems: 'center', justifyContent: 'center',
+  /* Nutrition summary */
+  nutritionSummaryCard: {
+    borderWidth: 1,
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
   },
-  donutNum:  { fontSize: 22, fontWeight: '700', lineHeight: 26 },
-  donutUnit: { fontSize: 12, lineHeight: 17 },
-  donutOf:   { fontSize: 11, lineHeight: 15 },
-
-  /* Macros */
-  macroLabel: { fontSize: 12 },
-  macroVal:   { fontSize: 11 },
-  macroTrack: { height: 5, borderRadius: 3, overflow: 'hidden' },
-  macroFill:  { height: 5, borderRadius: 3 },
-  restantes:  { fontSize: 14, textAlign: 'center', marginTop: 14 },
+  nutritionSummaryContent: {
+    flexDirection: 'row',
+    gap: 12,
+    alignItems: 'center',
+  },
+  kcalPanel: {
+    width: 122,
+    alignItems: 'center',
+    gap: 8,
+  },
+  gaugeWrap: {
+    width: GAUGE_SIZE,
+    height: GAUGE_SIZE,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  gaugeCenter: {
+    position: 'absolute',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  gaugeValue: { fontSize: 24, fontWeight: '600', lineHeight: 28, letterSpacing: -0.24 },
+  gaugeUnit: { fontSize: 11, lineHeight: 14, letterSpacing: 0.88 },
+  remainingBadge: {
+    borderWidth: 1,
+    borderRadius: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    alignSelf: 'stretch',
+  },
+  remainingText: {
+    fontSize: 11,
+    lineHeight: 13,
+    letterSpacing: 0.9,
+    textAlign: 'center',
+  },
+  macrosPanel: {
+    flex: 1,
+    gap: 6,
+    justifyContent: 'center',
+  },
+  goalBlock: {
+    borderBottomWidth: 1,
+    paddingBottom: 6,
+    marginBottom: 4,
+    gap: 3,
+  },
+  summaryEyebrow: {
+    fontSize: 11,
+    lineHeight: 13,
+    letterSpacing: 1.1,
+    textTransform: 'uppercase',
+    alignSelf: 'flex-start',
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  summaryValue: { fontSize: 18, fontWeight: '600', lineHeight: 23 },
+  summaryUnit: { fontSize: 14, lineHeight: 21, fontWeight: '400' },
+  nutritionMacroRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  macroIcon: {
+    width: 24,
+    height: 24,
+    borderRadius: 9999,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  nutritionMacroBody: {
+    flex: 1,
+    gap: 5,
+  },
+  nutritionMacroHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  nutritionMacroLabel: { fontSize: 12, lineHeight: 17, letterSpacing: 0.48, fontWeight: '500', flexShrink: 1 },
+  nutritionMacroValue: { fontSize: 12, lineHeight: 17, letterSpacing: 0.48 },
+  nutritionMacroTrack: {
+    height: 5,
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  nutritionMacroFill: {
+    height: '100%',
+    borderRadius: 4,
+  },
 
   /* Quick actions */
   quickCard: {

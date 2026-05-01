@@ -235,6 +235,56 @@ export const nutricionService = {
     return resumenDesdeComidas(fecha, logId, comidas);
   },
 
+  /**
+   * Resumen ligero de un mes para el calendario: solo total de calorías por fecha.
+   * NO crea logs (a diferencia de obtenerResumenDiaNutricion). Días sin log → ausentes
+   * del Map → el consumidor los pinta como `sinDatos`.
+   *
+   * Hace 2 round-trips:
+   *   1) nutrition_logs (id, fecha) en el rango.
+   *   2) nutrition_log_meals + nutrition_log_items (calorias_calculadas) por log_id.
+   *
+   * Esto es mucho más barato que llamar 30 veces a obtenerResumenDiaNutricion
+   * (que hace RPC + joins con foods).
+   */
+  async obtenerResumenMes(
+    userId: string,
+    desdeIso: string,
+    hastaIso: string,
+  ): Promise<Map<string, number>> {
+    const totalesPorFecha = new Map<string, number>();
+
+    const { data: logs, error: errLogs } = await supabase
+      .from('nutrition_logs')
+      .select('id, fecha')
+      .eq('user_id', userId)
+      .gte('fecha', desdeIso)
+      .lte('fecha', hastaIso);
+    if (errLogs) throw errLogs;
+    if (!logs?.length) return totalesPorFecha;
+
+    const logIds = (logs as { id: string; fecha: string }[]).map((l) => l.id);
+    const fechaPorLogId = new Map<string, string>(
+      (logs as { id: string; fecha: string }[]).map((l) => [l.id, l.fecha]),
+    );
+
+    const { data: meals, error: errMeals } = await supabase
+      .from('nutrition_log_meals')
+      .select('log_id, nutrition_log_items(calorias_calculadas)')
+      .in('log_id', logIds);
+    if (errMeals) throw errMeals;
+
+    (meals ?? []).forEach((m: any) => {
+      const items = (m.nutrition_log_items ?? []) as { calorias_calculadas: number | null }[];
+      const subtotal = items.reduce((acc, it) => acc + Number(it.calorias_calculadas ?? 0), 0);
+      const fecha = fechaPorLogId.get(m.log_id);
+      if (!fecha) return;
+      totalesPorFecha.set(fecha, (totalesPorFecha.get(fecha) ?? 0) + subtotal);
+    });
+
+    return totalesPorFecha;
+  },
+
   async actualizarOrdenComidas(logId: string, mealIdsEnOrden: string[]): Promise<void> {
     // RPC: actualiza todos los órdenes en una sola transacción atómica.
     // Antes: N UPDATEs paralelos sin transacción → orden parcial si uno fallaba.

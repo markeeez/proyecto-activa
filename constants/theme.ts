@@ -96,6 +96,7 @@ export const Colors = {
     warning:          Palette.warning,
     warningBg:        '#FAF0D4',
     warningText:      '#7A5A1A',
+    warningKcal:      '#F2CE24',
 
     danger:           Palette.danger,
     dangerBg:         '#FAD4D4',
@@ -159,6 +160,7 @@ export const Colors = {
     warning:          Palette.warning,
     warningBg:        '#2E2200',
     warningText:      '#E8C46A',
+    warningKcal:      '#F2CE24',
 
     danger:           Palette.danger,
     dangerBg:         '#2E0000',

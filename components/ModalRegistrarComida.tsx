@@ -23,23 +23,8 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useTheme } from '@/hooks/useTheme';
+import { iconoComida } from '@/lib/iconosComida';
 import type { ComidaConAlimentos } from '@/types/app.types';
-
-/* ─── Iconos por comida predeterminada ────────────────────────────── */
-const ICONOS_DEFAULT: Record<string, keyof (typeof Ionicons)['glyphMap']> = {
-  desayuno: 'cafe-outline',
-  almuerzo: 'sunny-outline',
-  merienda: 'restaurant-outline',
-  cena: 'moon-outline',
-};
-
-function iconoComida(
-  nombre: string,
-  isDefault: boolean,
-): keyof (typeof Ionicons)['glyphMap'] {
-  if (!isDefault) return 'nutrition-outline';
-  return ICONOS_DEFAULT[nombre.toLowerCase().trim()] ?? 'nutrition-outline';
-}
 
 /* ─── Props ────────────────────────────────────────────────────────── */
 interface Props {
@@ -163,22 +148,47 @@ export function ModalRegistrarComida({
       marginBottom: 4,
     },
     mealNombre: {
+      flex: 1,
       fontSize: 15,
       fontWeight: '600',
       color: c.textDisplay,
+      marginRight: s.sm,
     },
     mealKcal: {
-      fontSize: 13,
-      fontWeight: '700',
-      color: c.textDisplay,
-    },
-    macrosRow: {
-      paddingHorizontal: s.md,
-      marginBottom: s.sm,
-    },
-    macrosText: {
       fontSize: 12,
+      fontWeight: '600',
       color: c.textSecondary,
+    },
+    metricsRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'flex-end',
+      flexWrap: 'nowrap',
+      gap: 6,
+      flexShrink: 0,
+    },
+    totalMetrics: {
+      marginRight: s.sm * 2 + 16,
+    },
+    totalLabel: {
+      fontSize: 12,
+      lineHeight: 15,
+      fontWeight: '600',
+      color: c.textSecondary,
+    },
+    macroMetric: {
+      fontSize: 12,
+      lineHeight: 15,
+      fontWeight: '700',
+    },
+    macroProtein: {
+      color: c.primary,
+    },
+    macroCarbs: {
+      color: c.success,
+    },
+    macroFat: {
+      color: c.macroFat,
     },
     /* Lista de alimentos */
     itemsWrap: {
@@ -200,10 +210,9 @@ export function ModalRegistrarComida({
       flex: 1,
       fontSize: 14,
       color: c.textDisplay,
+      marginRight: s.sm,
     },
-    itemMeta: {
-      fontSize: 12,
-      color: c.textSecondary,
+    itemMetrics: {
       marginRight: s.sm,
     },
     emptyTxt: {
@@ -299,13 +308,17 @@ export function ModalRegistrarComida({
             {comidaSeleccionada && (
               <>
                 <View style={st.mealInfoRow}>
-                  <Text style={st.mealNombre}>{comidaSeleccionada.nombre}</Text>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Text style={st.macrosText}>
+                  <Text style={st.mealNombre} numberOfLines={1}>
+                    {comidaSeleccionada.nombre}
+                  </Text>
+                  <View style={[st.metricsRow, st.totalMetrics]}>
+                    <Text style={[st.macroMetric, st.macroProtein]}>
                       {Math.round(comidaSeleccionada.totalProteinas)}P
-                      {' / '}
+                    </Text>
+                    <Text style={[st.macroMetric, st.macroCarbs]}>
                       {Math.round(comidaSeleccionada.totalCarbos)}C
-                      {' / '}
+                    </Text>
+                    <Text style={[st.macroMetric, st.macroFat]}>
                       {Math.round(comidaSeleccionada.totalGrasas)}G
                     </Text>
                     <Text style={st.mealKcal}>
@@ -325,9 +338,20 @@ export function ModalRegistrarComida({
                           <Text style={st.itemNombre} numberOfLines={1}>
                             {item.food.nombre}
                           </Text>
-                          <Text style={st.itemMeta}>
-                            {item.gramos}g · {Math.round(item.calorias_calculadas)} kcal
-                          </Text>
+                          <View style={[st.metricsRow, st.itemMetrics]}>
+                            <Text style={[st.macroMetric, st.macroProtein]}>
+                              {Math.round(item.proteinas_calculadas)}P
+                            </Text>
+                            <Text style={[st.macroMetric, st.macroCarbs]}>
+                              {Math.round(item.carbos_calculados)}C
+                            </Text>
+                            <Text style={[st.macroMetric, st.macroFat]}>
+                              {Math.round(item.grasas_calculadas)}G
+                            </Text>
+                            <Text style={st.mealKcal}>
+                              {Math.round(item.calorias_calculadas)} kcal
+                            </Text>
+                          </View>
                           <Pressable
                             onPress={() => void handleEliminar(item.id)}
                             hitSlop={8}
