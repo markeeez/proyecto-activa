@@ -1,5 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { StyleProp, ViewStyle } from 'react-native';
 import {
@@ -20,6 +19,7 @@ import { runOnJS } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle } from 'react-native-svg';
 
+import { BuscadorAlimentos } from '@/components/nutricion/BuscadorAlimentos';
 import { CalendarioNutricion } from '@/components/nutricion/CalendarioNutricion';
 import { SortableMealList } from '@/components/SortableMealList';
 import { GlowButton } from '@/components/ui/GlowButton';
@@ -36,16 +36,23 @@ import {
   getSemanaMovil,
 } from '@/lib/fechaNutricion';
 import { iconoComida } from '@/lib/iconosComida';
+import { emitNutricionLogActualizado } from '@/lib/nutricionEvents';
 import { guardarOrdenComidas, obtenerOrdenComidas } from '@/lib/nutricionLogPreferencias';
+import { alimentosService } from '@/services/alimentos.service';
 import { nutricionService } from '@/services/nutricion.service';
 import type { ComidaConAlimentos } from '@/types/app.types';
+import type { Food } from '@/types/database.types';
 
-const SKELETON_BG = '#1A1A1A';
-const SKELETON_SHIMMER = '#2A2A2A';
 const SKELETON_FADE_MS = 200;
 const MACRO_CARBS_COLOR = '#16C862';
 
 type NutricionStyles = ReturnType<typeof makeStyles>;
+type SkeletonPalette = {
+  surface: string;
+  surfaceAlt: string;
+  block: string;
+  shimmer: string;
+};
 
 function pct(actual: number, objetivo: number): number {
   if (!Number.isFinite(actual) || !Number.isFinite(objetivo) || objetivo <= 0) return 0;
@@ -112,66 +119,79 @@ function KcalRing({
 interface SkeletonProps {
   styles: NutricionStyles;
   shimmerOpacity: Animated.Value;
+  colors: SkeletonPalette;
 }
 
 const stylesStatic = StyleSheet.create({
   skeletonBlock: {
-    backgroundColor: SKELETON_BG,
     overflow: 'hidden',
-  },
-  skeletonShimmer: {
-    backgroundColor: SKELETON_SHIMMER,
   },
 });
 
 function SkeletonBlock({
   style,
   shimmerOpacity,
+  colors,
 }: {
   style?: StyleProp<ViewStyle>;
   shimmerOpacity: Animated.Value;
+  colors: SkeletonPalette;
 }) {
   return (
-    <View style={[stylesStatic.skeletonBlock, style]}>
-      <Animated.View style={[StyleSheet.absoluteFillObject, stylesStatic.skeletonShimmer, { opacity: shimmerOpacity }]} />
+    <View style={[stylesStatic.skeletonBlock, { backgroundColor: colors.block }, style]}>
+      <Animated.View
+        style={[
+          StyleSheet.absoluteFillObject,
+          { backgroundColor: colors.shimmer, opacity: shimmerOpacity },
+        ]}
+      />
     </View>
   );
 }
 
-function MealCardsSkeleton({ styles, shimmerOpacity }: SkeletonProps) {
+function MealCardsSkeleton({ styles, shimmerOpacity, colors }: SkeletonProps) {
   return (
     <View style={styles.skeletonMealsList}>
       {COMIDAS_PREDETERMINADAS.map((meal) => (
-        <View key={`meal-skeleton-${meal.slot}`} style={[styles.mealCard, styles.skeletonSurface]}>
+        <View
+          key={`meal-skeleton-${meal.slot}`}
+          style={[styles.mealCard, styles.skeletonSurface, { backgroundColor: colors.surface, borderColor: colors.surfaceAlt }]}
+        >
           <View style={styles.mealHeaderRow}>
-            <SkeletonBlock style={styles.skeletonMealIcon} shimmerOpacity={shimmerOpacity} />
+            <SkeletonBlock style={styles.skeletonMealIcon} shimmerOpacity={shimmerOpacity} colors={colors} />
 
             <View style={styles.mealHeaderText}>
-              <SkeletonBlock style={styles.skeletonMealTitle} shimmerOpacity={shimmerOpacity} />
+              <SkeletonBlock style={styles.skeletonMealTitle} shimmerOpacity={shimmerOpacity} colors={colors} />
               <View style={styles.mealMetaRow}>
-                <SkeletonBlock style={styles.skeletonMealKcal} shimmerOpacity={shimmerOpacity} />
+                <SkeletonBlock style={styles.skeletonMealKcal} shimmerOpacity={shimmerOpacity} colors={colors} />
                 <View style={styles.mealMetaDivider} />
-                <SkeletonBlock style={styles.skeletonMealMacro} shimmerOpacity={shimmerOpacity} />
+                <SkeletonBlock style={styles.skeletonMealMacro} shimmerOpacity={shimmerOpacity} colors={colors} />
                 <View style={styles.mealMetaDivider} />
-                <SkeletonBlock style={styles.skeletonMealMacro} shimmerOpacity={shimmerOpacity} />
+                <SkeletonBlock style={styles.skeletonMealMacro} shimmerOpacity={shimmerOpacity} colors={colors} />
                 <View style={styles.mealMetaDivider} />
-                <SkeletonBlock style={styles.skeletonMealMacro} shimmerOpacity={shimmerOpacity} />
+                <SkeletonBlock style={styles.skeletonMealMacro} shimmerOpacity={shimmerOpacity} colors={colors} />
               </View>
             </View>
 
-            <SkeletonBlock style={styles.skeletonAddBtn} shimmerOpacity={shimmerOpacity} />
+            <SkeletonBlock style={styles.skeletonAddBtn} shimmerOpacity={shimmerOpacity} colors={colors} />
           </View>
 
-          <View style={[styles.mealItemsList, styles.skeletonMealItemsList]}>
+          <View
+            style={[
+              styles.mealItemsList,
+              styles.skeletonMealItemsList,
+              { backgroundColor: colors.surfaceAlt, borderColor: colors.surfaceAlt },
+            ]}
+          >
             <View style={styles.foodRow}>
-              <SkeletonBlock style={styles.skeletonFoodName} shimmerOpacity={shimmerOpacity} />
+              <SkeletonBlock style={styles.skeletonFoodName} shimmerOpacity={shimmerOpacity} colors={colors} />
               <View style={styles.foodMetaRow}>
-                <SkeletonBlock style={styles.skeletonFoodGrams} shimmerOpacity={shimmerOpacity} />
+                <SkeletonBlock style={styles.skeletonFoodGrams} shimmerOpacity={shimmerOpacity} colors={colors} />
                 <View style={styles.foodMetrics}>
-                  <SkeletonBlock style={styles.skeletonFoodMetric} shimmerOpacity={shimmerOpacity} />
-                  <SkeletonBlock style={styles.skeletonFoodMetric} shimmerOpacity={shimmerOpacity} />
-                  <SkeletonBlock style={styles.skeletonFoodMetric} shimmerOpacity={shimmerOpacity} />
-                  <SkeletonBlock style={styles.skeletonFoodKcal} shimmerOpacity={shimmerOpacity} />
+                  <SkeletonBlock style={styles.skeletonFoodMetric} shimmerOpacity={shimmerOpacity} colors={colors} />
+                  <SkeletonBlock style={styles.skeletonFoodMetric} shimmerOpacity={shimmerOpacity} colors={colors} />
+                  <SkeletonBlock style={styles.skeletonFoodMetric} shimmerOpacity={shimmerOpacity} colors={colors} />
+                  <SkeletonBlock style={styles.skeletonFoodKcal} shimmerOpacity={shimmerOpacity} colors={colors} />
                 </View>
               </View>
             </View>
@@ -227,6 +247,15 @@ export default function NutricionIndex() {
   } = useComidaPortapapeles();
 
   const styles = useMemo(() => makeStyles(c, f, ts, s, r), [c, f, ts, s, r]);
+  const skeletonColors = useMemo<SkeletonPalette>(
+    () => ({
+      surface: isDark ? c.surfaceElevated : c.surface,
+      surfaceAlt: isDark ? c.surface : c.surfaceElevated,
+      block: isDark ? c.borderVisible : c.border,
+      shimmer: isDark ? c.separator : c.borderVisible,
+    }),
+    [c, isDark],
+  );
 
   const [ordenIds, setOrdenIds] = useState<string[] | null>(null);
   // dragOverride: orden optimista durante/después de un drag. Se limpia cuando llegan datos frescos.
@@ -237,6 +266,7 @@ export default function NutricionIndex() {
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [menuComida, setMenuComida] = useState<ComidaConAlimentos | null>(null);
   const [menuAnchor, setMenuAnchor] = useState({ x: 0, y: 0 });
+  const [mealIdBuscador, setMealIdBuscador] = useState<string | null>(null);
 
   useEffect(() => {
     const showSub = Keyboard.addListener('keyboardDidShow', (event) => {
@@ -301,7 +331,6 @@ export default function NutricionIndex() {
       {
         key: 'proteinas',
         label: 'Proteínas',
-        icon: 'pulse-outline' as const,
         actual: Math.round(resumen?.totalProteinas ?? 0),
         objetivo: Math.round(objetivos?.proteinas_objetivo ?? 0),
         color: c.primary,
@@ -309,7 +338,6 @@ export default function NutricionIndex() {
       {
         key: 'carbos',
         label: 'Carbohidratos',
-        icon: 'leaf-outline' as const,
         actual: Math.round(resumen?.totalCarbos ?? 0),
         objetivo: Math.round(objetivos?.carbos_objetivo ?? 0),
         color: MACRO_CARBS_COLOR,
@@ -317,7 +345,6 @@ export default function NutricionIndex() {
       {
         key: 'grasas',
         label: 'Grasas',
-        icon: 'flame-outline' as const,
         actual: Math.round(resumen?.totalGrasas ?? 0),
         objetivo: Math.round(objetivos?.grasas_objetivo ?? 0),
         color: c.macroFat,
@@ -357,7 +384,17 @@ export default function NutricionIndex() {
               return (
                 <View key={macro.key} style={styles.goalMacro}>
                   <View style={[styles.goalMacroIcon, { backgroundColor: macro.color }]}>
-                    <Ionicons name={macro.icon} size={17} color="#FFFFFF" />
+                    {macro.key === 'proteinas' ? (
+                      <MaterialCommunityIcons
+                        name="food-drumstick-outline"
+                        size={17}
+                        color="#FFFFFF"
+                      />
+                    ) : macro.key === 'carbos' ? (
+                      <MaterialCommunityIcons name="barley" size={17} color="#FFFFFF" />
+                    ) : (
+                      <Ionicons name="water-outline" size={17} color="#FFFFFF" />
+                    )}
                   </View>
                   <View style={styles.goalMacroBody}>
                     <Text style={styles.goalMacroLabel} numberOfLines={1}>
@@ -458,10 +495,7 @@ export default function NutricionIndex() {
       setModalNuevaComida(false);
       setNombreNuevaComida('');
       if (nuevoMealId && esDiaPasadoVsHoy(fecha)) {
-        router.push({
-          pathname: '/(tabs)/(nutricion)/agregar',
-          params: { mealId: nuevoMealId, fecha },
-        });
+        setMealIdBuscador(nuevoMealId);
       }
     } catch {
       /* silencioso; podría mostrarse toast */
@@ -470,12 +504,34 @@ export default function NutricionIndex() {
 
   const abrirRegistrarComida = useCallback(
     (mealId: string) => {
-      router.push({
-        pathname: '/(tabs)/(nutricion)/agregar',
-        params: { mealId, fecha },
-      });
+      setMealIdBuscador(mealId);
     },
-    [fecha],
+    [],
+  );
+
+  const cerrarBuscadorAlimentos = useCallback(() => {
+    setMealIdBuscador(null);
+  }, []);
+
+  const registrarAlimentoSeleccionado = useCallback(
+    async (food: Food, gramos: number) => {
+      if (!mealIdBuscador || !user?.id) return;
+
+      const foodReal = await alimentosService.asegurarFoodParaLog(food);
+      await nutricionService.añadirAlimentoAComida({
+        mealId: mealIdBuscador,
+        foodId: foodReal.id,
+        gramos,
+        food: {
+          calorias: Number(foodReal.calorias ?? 0),
+          proteinas: Number(foodReal.proteinas ?? 0),
+          carbohidratos: Number(foodReal.carbohidratos ?? 0),
+          grasas: Number(foodReal.grasas ?? 0),
+        },
+      });
+      emitNutricionLogActualizado({ fechaLog: fecha });
+    },
+    [fecha, mealIdBuscador, user?.id],
   );
 
   const eliminarComidaSeleccionada = useCallback(async () => {
@@ -628,7 +684,11 @@ export default function NutricionIndex() {
 
         {skeletonVisible && (
           <Animated.View pointerEvents="none" style={{ opacity: skeletonFadeOpacity }}>
-            <MealCardsSkeleton styles={styles} shimmerOpacity={shimmerOpacity} />
+            <MealCardsSkeleton
+              styles={styles}
+              shimmerOpacity={shimmerOpacity}
+              colors={skeletonColors}
+            />
           </Animated.View>
         )}
       </>
@@ -644,6 +704,7 @@ export default function NutricionIndex() {
     c.primary,
     renderGoalCard,
     shimmerOpacity,
+    skeletonColors,
     skeletonFadeOpacity,
     skeletonVisible,
   ]);
@@ -769,14 +830,8 @@ export default function NutricionIndex() {
       c.primary,
       c.danger,
       c.textDisplay,
-      c.textMuted,
       contentOpacity,
       abrirRegistrarComida,
-      copiarComidaSeleccionada,
-      eliminarComidaSeleccionada,
-      pegarEnComidaSeleccionada,
-      tieneCopia,
-      vaciarComidaSeleccionada,
     ],
   );
 
@@ -894,6 +949,13 @@ export default function NutricionIndex() {
         onSeleccionarDia={seleccionarDiaCalendario}
       />
 
+      <BuscadorAlimentos
+        visible={mealIdBuscador !== null}
+        onClose={cerrarBuscadorAlimentos}
+        onAlimentoSeleccionado={registrarAlimentoSeleccionado}
+        userId={user?.id}
+      />
+
       <Modal visible={modalNuevaComida} transparent animationType="fade" onRequestClose={() => setModalNuevaComida(false)}>
         <KeyboardAvoidingView
           style={[
@@ -979,8 +1041,7 @@ function makeStyles(
       gap: s.sm,
     },
     skeletonSurface: {
-      backgroundColor: SKELETON_BG,
-      borderColor: SKELETON_BG,
+      overflow: 'hidden',
     },
     skeletonMealsList: {
       gap: s.sm,
@@ -1011,8 +1072,7 @@ function makeStyles(
       borderRadius: r.sm,
     },
     skeletonMealItemsList: {
-      backgroundColor: SKELETON_BG,
-      borderColor: SKELETON_BG,
+      overflow: 'hidden',
     },
     skeletonFoodName: {
       width: '62%',

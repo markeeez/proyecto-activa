@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\markeeezz\\\\Documents\\\\proyecto-activa\" -Force)",
+      "Bash(Select-Object Name, FullName)"
+    ]
+  }
+}

@@ -1,15 +1,4 @@
-/**
- * ModalRegistrarComida
- *
- * Bottom sheet que aparece al pulsar "+" en la quick action de "Registrar comida"
- * desde la pantalla Home. Es un atajo directo a la lógica de alimentación:
- *   - Muestra las comidas del día del usuario (scroll horizontal)
- *   - Seleccionada una comida: macros, kcal y lista de alimentos con borrado
- *   - Botón "Añadir alimento" → navega al buscador de alimentos de nutrición
- */
-
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
@@ -34,6 +23,7 @@ interface Props {
   fecha: string;
   cargando: boolean;
   eliminarAlimento: (itemId: string) => Promise<void>;
+  onAgregarAlimento: (mealId: string) => void;
 }
 
 /* ─── Componente ───────────────────────────────────────────────────── */
@@ -41,9 +31,10 @@ export function ModalRegistrarComida({
   visible,
   onClose,
   comidas,
-  fecha,
+  fecha: _fecha, // conservado en Props para compatibilidad, no usado en render
   cargando,
   eliminarAlimento,
+  onAgregarAlimento,
 }: Props) {
   const { c, s } = useTheme();
   const insets = useSafeAreaInsets();
@@ -57,12 +48,8 @@ export function ModalRegistrarComida({
 
   const handleAgregar = useCallback(() => {
     if (!comidaSeleccionada) return;
-    onClose();
-    router.push({
-      pathname: '/(tabs)/(nutricion)/agregar',
-      params: { mealId: comidaSeleccionada.mealId, fecha },
-    });
-  }, [comidaSeleccionada, fecha, onClose]);
+    onAgregarAlimento(comidaSeleccionada.mealId);
+  }, [comidaSeleccionada, onAgregarAlimento]);
 
   const handleEliminar = useCallback(
     async (itemId: string) => {

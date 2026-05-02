@@ -23,6 +23,11 @@ import { useTheme } from '@/hooks/useTheme';
 import { supabase } from '@/lib/supabase';
 import { ModalRegistrarComida } from '@/components/ModalRegistrarComida';
 import { ModalRegistrarEntreno } from '@/components/ModalRegistrarEntreno';
+import { BuscadorAlimentos } from '@/components/nutricion/BuscadorAlimentos';
+import { emitNutricionLogActualizado } from '@/lib/nutricionEvents';
+import { alimentosService } from '@/services/alimentos.service';
+import { nutricionService } from '@/services/nutricion.service';
+import type { Food } from '@/types/database.types';
 
 const GAUGE_SIZE = 110;
 const GAUGE_STROKE = 8;
@@ -286,6 +291,27 @@ export default function HomeScreen() {
 
   const [modalComidaVisible, setModalComidaVisible] = useState(false);
   const [modalEntrenoVisible, setModalEntrenoVisible] = useState(false);
+  const [mealIdBuscador, setMealIdBuscador] = useState<string | null>(null);
+
+  const registrarAlimentoDesdeInicio = useCallback(
+    async (food: Food, gramos: number) => {
+      if (!mealIdBuscador || !user?.id) return;
+      const foodReal = await alimentosService.asegurarFoodParaLog(food);
+      await nutricionService.añadirAlimentoAComida({
+        mealId: mealIdBuscador,
+        foodId: foodReal.id,
+        gramos,
+        food: {
+          calorias: Number(foodReal.calorias ?? 0),
+          proteinas: Number(foodReal.proteinas ?? 0),
+          carbohidratos: Number(foodReal.carbohidratos ?? 0),
+          grasas: Number(foodReal.grasas ?? 0),
+        },
+      });
+      emitNutricionLogActualizado({ fechaLog: fechaNutricion });
+    },
+    [mealIdBuscador, user?.id, fechaNutricion],
+  );
 
   const kcalConsumed  = resumen?.totalCalorias  ?? 0;
   const kcalTotal     = objetivos?.calorias_objetivo ?? 2000;
@@ -645,6 +671,14 @@ export default function HomeScreen() {
         fecha={fechaNutricion}
         cargando={cargandoNutricion}
         eliminarAlimento={eliminarAlimento}
+        onAgregarAlimento={(mealId) => setMealIdBuscador(mealId)}
+      />
+
+      <BuscadorAlimentos
+        visible={mealIdBuscador !== null}
+        onClose={() => setMealIdBuscador(null)}
+        onAlimentoSeleccionado={registrarAlimentoDesdeInicio}
+        userId={user?.id}
       />
 
       {/* ── Modal registrar entreno ────────────────────────────────── */}

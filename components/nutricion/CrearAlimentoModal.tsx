@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTheme } from '@/hooks/useTheme';
+import { alimentosService } from '@/services/alimentos.service';
+import type { Food } from '@/types/database.types';
+import { Ionicons } from '@expo/vector-icons';
+import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera';
+import { Image } from 'expo-image';
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
 import {
   ActivityIndicator,
   Modal,
@@ -11,17 +17,13 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
-import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera';
-import { Image } from 'expo-image';
-import { alimentosService } from '@/services/alimentos.service';
-import { useTheme } from '@/hooks/useTheme';
-import type { Food } from '@/types/database.types';
 
 export type CrearAlimentoModalProps = {
   visible: boolean;
   onClose: () => void;
   userId: string | null | undefined;
+  /** Pestaña inicial al abrir (por defecto 'foto'). */
+  initialMode?: CrearModo;
   /** Tras crear o resolver por código (OFF). */
   onFoodCreated?: (food: Food) => void;
   /** Favoritos (escáner): si faltan, no se muestra la estrella. */
@@ -29,12 +31,15 @@ export type CrearAlimentoModalProps = {
   onToggleFavorito?: (food: Food) => void | Promise<void>;
 };
 
-type CrearModo = 'foto' | 'manual' | 'escaner';
+export type CrearModo = 'foto' | 'manual' | 'escaner';
+
+const BarcodeCameraView = CameraView as unknown as ComponentType<any>;
 
 export function CrearAlimentoModal({
   visible,
   onClose,
   userId,
+  initialMode = 'foto',
   onFoodCreated,
   esFavoritoAlimento,
   onToggleFavorito,
@@ -57,9 +62,10 @@ export function CrearAlimentoModal({
   const [manualP, setManualP] = useState('');
   const [manualC, setManualC] = useState('');
   const [manualG, setManualG] = useState('');
-  const [manualFibra, setManualFibra] = useState('');
   const [guardandoManual, setGuardandoManual] = useState(false);
   const [msgManual, setMsgManual] = useState<string | null>(null);
+  const [mostrarAvisoKcal, setMostrarAvisoKcal] = useState(false);
+  const [kcalCalculadas, setKcalCalculadas] = useState(0);
 
   const [codigoLeido, setCodigoLeido] = useState<string | null>(null);
   const [cargandoCodigo, setCargandoCodigo] = useState(false);
@@ -69,8 +75,12 @@ export function CrearAlimentoModal({
 
   const cameraRef = useRef<CameraView>(null);
   const prevModoRef = useRef<CrearModo>('foto');
-  /** Fuerza remontaje del escáner (evita vista negra al volver a «Escanea código» en Android). */
-  const [escanerMountGen, setEscanerMountGen] = useState(0);
+  /**
+   * Fuerza remontaje de cualquier CameraView al cambiar de pestaña.
+   * Evita la pantalla negra en Android/iOS cuando la cámara no se
+   * reactiva tras liberar el recurso de hardware entre foto ↔ escáner.
+   */
+  const [cameraMountGen, setCameraMountGen] = useState(0);
 
   const necesitaCamara = modo === 'foto' || modo === 'escaner';
   const camaraNativa = Platform.OS !== 'web';
@@ -80,15 +90,17 @@ export function CrearAlimentoModal({
       prevModoRef.current = 'foto';
       return;
     }
-    if (modo === 'escaner' && prevModoRef.current !== 'escaner') {
-      setEscanerMountGen((g) => g + 1);
+    // Cada vez que se entra a una pestaña con cámara desde otra pestaña, forzar remontaje
+    const vieneDeOtra = prevModoRef.current !== modo;
+    if (vieneDeOtra && (modo === 'foto' || modo === 'escaner')) {
+      setCameraMountGen((g) => g + 1);
     }
     prevModoRef.current = modo;
   }, [visible, modo]);
 
   useEffect(() => {
     if (!visible) {
-      setModo('foto');
+      setModo(initialMode);
       setNombreFoto('');
       setFotoUri(null);
       setMsgFoto(null);
@@ -98,15 +110,18 @@ export function CrearAlimentoModal({
       setManualP('');
       setManualC('');
       setManualG('');
-      setManualFibra('');
       setMsgManual(null);
+      setMostrarAvisoKcal(false);
+      setKcalCalculadas(0);
       setCodigoLeido(null);
       setErrorCodigo(null);
       setFoodCodigo(null);
       setCargandoCodigo(false);
       lastScanRef.current = { data: '', t: 0 };
+    } else {
+      setModo(initialMode);
     }
-  }, [visible]);
+  }, [visible, initialMode]);
 
   useEffect(() => {
     if (visible && necesitaCamara && camaraNativa && !permission?.granted) {
@@ -195,6 +210,7 @@ export function CrearAlimentoModal({
   const puedeGuardarFoto =
     Boolean(userId) && nombreFoto.trim().length > 0 && Boolean(fotoUri);
 
+  /** Valida macros vs kcal y guarda o muestra aviso. */
   const guardarManual = async () => {
     if (!userId) {
       setMsgManual('Inicia sesión para crear alimentos.');
@@ -213,23 +229,34 @@ export function CrearAlimentoModal({
       setMsgManual('Revisa calorías y macros (números válidos).');
       return;
     }
-    const fib = manualFibra.trim()
-      ? Number(manualFibra.replace(',', '.'))
-      : null;
-    if (manualFibra.trim() && (!Number.isFinite(fib) || (fib ?? 0) < 0)) {
-      setMsgManual('La fibra debe ser un número válido.');
+    // Validación invisible: P*4 + C*4 + G*9
+    const kcalEsperadas = p * 4 + carb * 4 + gr * 9;
+    if (Math.abs(kcal - kcalEsperadas) > 20) {
+      setKcalCalculadas(Math.round(kcalEsperadas));
+      setMostrarAvisoKcal(true);
       return;
     }
+    await ejecutarGuardadoManual(nombre, kcal, p, carb, gr);
+  };
+
+  /** Guarda el alimento con los valores proporcionados. */
+  const ejecutarGuardadoManual = async (
+    nombre: string,
+    kcal: number,
+    p: number,
+    carb: number,
+    gr: number,
+  ) => {
     setGuardandoManual(true);
     setMsgManual(null);
     try {
-      const food = await alimentosService.crearAlimentoPersonalizado(userId, {
+      const food = await alimentosService.crearAlimentoPersonalizado(userId!, {
         nombre,
         calorias: kcal,
         proteinas: p,
         carbohidratos: carb,
         grasas: gr,
-        fibra: fib,
+        fibra: null,
         azucar: null,
       });
       onFoodCreated?.(food);
@@ -241,12 +268,29 @@ export function CrearAlimentoModal({
     }
   };
 
+  /** El usuario confirma guardar con las kcal que introdujo (aunque no cuadren). */
+  const confirmarConKcalUsuario = () => {
+    setMostrarAvisoKcal(false);
+    const kcal = Number(manualKcal.replace(',', '.'));
+    const p = Number(manualP.replace(',', '.'));
+    const carb = Number(manualC.replace(',', '.'));
+    const gr = Number(manualG.replace(',', '.'));
+    void ejecutarGuardadoManual(manualNombre.trim(), kcal, p, carb, gr);
+  };
+
+  /** Recalcula: pone las kcal correctas en el campo y cierra el aviso. */
+  const recalcularKcal = () => {
+    setManualKcal(String(kcalCalculadas));
+    setMostrarAvisoKcal(false);
+  };
+
   /** Vista previa de la captura en el mismo recuadro que la cámara, o cámara en vivo. */
   const renderCuadroFotoEtiqueta = () => {
     if (fotoUri) {
       return (
         <View style={[styles.cameraBox, styles.cameraFlexFill]}>
           <Image source={{ uri: fotoUri }} style={StyleSheet.absoluteFill} contentFit="cover" />
+          <ScannerCorners styles={styles} />
         </View>
       );
     }
@@ -270,11 +314,18 @@ export function CrearAlimentoModal({
     return (
       <View style={[styles.cameraBox, styles.cameraFlexFill]}>
         <CameraView
+          key={`foto-cam-${cameraMountGen}`}
           ref={cameraRef}
           style={StyleSheet.absoluteFill}
           facing="back"
           active={visible && modo === 'foto' && !fotoUri}
         />
+        <View style={styles.photoCaptureButton} pointerEvents="none">
+          <View style={styles.photoCaptureInner}>
+            <Ionicons name="camera-outline" size={28} color={c.primary} />
+          </View>
+        </View>
+        <ScannerCorners styles={styles} />
       </View>
     );
   };
@@ -299,8 +350,8 @@ export function CrearAlimentoModal({
     }
     return (
       <View style={styles.cameraScanSized}>
-        <CameraView
-          key={`barcode-${escanerMountGen}`}
+        <BarcodeCameraView
+          key={`barcode-${cameraMountGen}`}
           style={StyleSheet.absoluteFill}
           facing="back"
           active={visible && modo === 'escaner'}
@@ -311,6 +362,7 @@ export function CrearAlimentoModal({
           onBarcodeScanned={handleBarcodeScanned}
         />
         <View style={styles.scanOverlay} pointerEvents="none">
+          <ScannerCorners styles={styles} />
           <View style={styles.scanLine} />
         </View>
       </View>
@@ -323,13 +375,13 @@ export function CrearAlimentoModal({
   };
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.backdrop}>
         <Pressable style={styles.dismissArea} onPress={onClose} />
         <View style={styles.sheet}>
           <View style={styles.topBar}>
             <Pressable style={styles.closeBtn} onPress={onClose} hitSlop={8}>
-              <Text style={styles.closeText}>X</Text>
+              <Ionicons name="close" size={18} color={c.textSecondary} />
             </Pressable>
             <Text style={styles.sheetTitle}>Crear alimento</Text>
             <View style={styles.topBarSpacer} />
@@ -338,10 +390,15 @@ export function CrearAlimentoModal({
           {modo === 'foto' && (
             <View style={styles.bodyFlex}>
               <View style={styles.fotoHeader}>
-                <Text style={styles.sectionTitle}>Crea con una foto</Text>
+                <View style={styles.modeHeading}>
+                  <Text style={styles.sectionTitle}>1. Crea con una foto</Text>
+                  <View style={styles.modeIcon}>
+                    <Ionicons name="camera-outline" size={17} color={c.primary} />
+                  </View>
+                </View>
                 <Text style={styles.sectionSubtitle}>
                   Haz una foto a la etiqueta nutricional e indica el nombre. Las calorías y macros se completarán más
-                  adelante con un modelo de IA a partir de la imagen; por ahora se guardan en 0.
+                  adelante con un modelo de IA.
                 </Text>
                 <Text style={styles.fieldLabel}>Nombre del alimento</Text>
                 <TextInput
@@ -350,12 +407,22 @@ export function CrearAlimentoModal({
                   value={nombreFoto}
                   onChangeText={setNombreFoto}
                 />
+                <View style={styles.aiNote}>
+                  <Ionicons name="sparkles" size={18} color={c.primary} />
+                  <Text style={styles.aiNoteText}>
+                    Las calorías y macros se guardan en 0 por ahora.{'\n'}Nuestro modelo de IA las calculará próximamente a partir de la imagen.
+                  </Text>
+                </View>
               </View>
               <View style={styles.fotoCameraArea}>{renderCuadroFotoEtiqueta()}</View>
               <View style={styles.fotoFooter}>
+                <View style={styles.photoHintRow}>
+                  <Ionicons name="bulb-outline" size={15} color={c.textMuted} />
+                  <Text style={styles.photoHintText}>Asegúrate de que la imagen esté bien enfocada y con buena iluminación.</Text>
+                </View>
                 <Pressable
                   style={[
-                    styles.secondaryBtn,
+                    styles.primaryBtn,
                     (capturando || (!fotoUri && (!permission?.granted || !camaraNativa))) && styles.btnDisabled,
                   ]}
                   onPress={fotoUri ? repetirFoto : tomarFotoEtiqueta}
@@ -364,26 +431,27 @@ export function CrearAlimentoModal({
                   }
                 >
                   {capturando && !fotoUri ? (
-                    <ActivityIndicator color={c.textDisplay} />
+                    <ActivityIndicator color={c.textOnPrimary} />
                   ) : (
-                    <Text style={styles.secondaryBtnText}>
-                      {fotoUri ? 'Repetir foto' : 'Hacer foto a la etiqueta'}
-                    </Text>
+                    <>
+                      <Ionicons name="camera-outline" size={17} color={c.textOnPrimary} />
+                      <Text style={styles.primaryBtnText}>{fotoUri ? 'Repetir foto' : 'Hacer foto'}</Text>
+                    </>
                   )}
                 </Pressable>
                 {!!msgFoto && <Text style={styles.msgError}>{msgFoto}</Text>}
                 <Pressable
                   style={[
-                    styles.primaryBtn,
+                    styles.secondaryBtn,
                     (!puedeGuardarFoto || guardandoFoto) && styles.btnDisabled,
                   ]}
                   onPress={guardarDesdeFoto}
                   disabled={!puedeGuardarFoto || guardandoFoto}
                 >
                   {guardandoFoto ? (
-                    <ActivityIndicator color={c.background} />
+                    <ActivityIndicator color={c.primary} />
                   ) : (
-                    <Text style={styles.primaryBtnText}>Guardar alimento</Text>
+                    <Text style={styles.secondaryBtnText}>Guardar alimento</Text>
                   )}
                 </Pressable>
               </View>
@@ -397,14 +465,19 @@ export function CrearAlimentoModal({
               keyboardShouldPersistTaps="handled"
               showsVerticalScrollIndicator={false}
             >
-              <Text style={styles.sectionTitle}>Añade un alimento</Text>
+              <View style={styles.modeHeading}>
+                <Text style={styles.sectionTitle}>2. Añade un alimento</Text>
+                <View style={styles.modeIcon}>
+                  <Ionicons name="create-outline" size={17} color={c.primary} />
+                </View>
+              </View>
               <Text style={styles.sectionSubtitle}>
                 Rellena el formulario con los datos del alimento (valores por 100 g).
               </Text>
-              <Text style={styles.fieldLabel}>Nombre</Text>
+              <Text style={styles.fieldLabel}>Nombre del alimento</Text>
               <TextInput
                 {...inputProps}
-                placeholder="Nombre del alimento"
+                placeholder="Ej. Avena en copos"
                 value={manualNombre}
                 onChangeText={setManualNombre}
               />
@@ -416,7 +489,7 @@ export function CrearAlimentoModal({
                 value={manualKcal}
                 onChangeText={setManualKcal}
               />
-              <Text style={styles.fieldLabel}>Proteínas (g)</Text>
+              <Text style={styles.fieldLabel}>Proteínas (g / 100g)</Text>
               <TextInput
                 {...inputProps}
                 placeholder="0"
@@ -424,7 +497,7 @@ export function CrearAlimentoModal({
                 value={manualP}
                 onChangeText={setManualP}
               />
-              <Text style={styles.fieldLabel}>Carbohidratos (g)</Text>
+              <Text style={styles.fieldLabel}>Carbohidratos (g / 100g)</Text>
               <TextInput
                 {...inputProps}
                 placeholder="0"
@@ -432,21 +505,13 @@ export function CrearAlimentoModal({
                 value={manualC}
                 onChangeText={setManualC}
               />
-              <Text style={styles.fieldLabel}>Grasas (g)</Text>
+              <Text style={styles.fieldLabel}>Grasas (g / 100g)</Text>
               <TextInput
                 {...inputProps}
                 placeholder="0"
                 keyboardType="decimal-pad"
                 value={manualG}
                 onChangeText={setManualG}
-              />
-              <Text style={styles.fieldLabel}>Fibra (g, opcional)</Text>
-              <TextInput
-                {...inputProps}
-                placeholder="—"
-                keyboardType="decimal-pad"
-                value={manualFibra}
-                onChangeText={setManualFibra}
               />
               {!!msgManual && <Text style={styles.msgError}>{msgManual}</Text>}
               <Pressable
@@ -463,12 +528,43 @@ export function CrearAlimentoModal({
             </ScrollView>
           )}
 
+          {mostrarAvisoKcal && (
+            <View style={styles.kcalOverlay}>
+              <View style={styles.kcalCard}>
+                <View style={styles.kcalIconWrap}>
+                  <Ionicons name="warning-outline" size={28} color={c.warning} />
+                </View>
+                <Text style={styles.kcalTitle}>Los macros no cuadran</Text>
+                <Text style={styles.kcalBody}>
+                  Has introducido{' '}
+                  <Text style={styles.kcalBold}>{manualKcal} kcal</Text>, pero según los macros
+                  (P×4 + C×4 + G×9) deberían ser aprox.{' '}
+                  <Text style={styles.kcalBold}>{kcalCalculadas} kcal</Text>.
+                </Text>
+                <View style={styles.kcalActions}>
+                  <Pressable style={styles.primaryBtn} onPress={recalcularKcal}>
+                    <Ionicons name="calculator-outline" size={17} color={c.textOnPrimary} />
+                    <Text style={styles.primaryBtnText}>Recalcular ({kcalCalculadas} kcal)</Text>
+                  </Pressable>
+                  <Pressable style={styles.secondaryBtn} onPress={confirmarConKcalUsuario}>
+                    <Text style={styles.secondaryBtnText}>Confirmar de todos modos</Text>
+                  </Pressable>
+                </View>
+              </View>
+            </View>
+          )}
+
           {modo === 'escaner' && (
             <View style={styles.bodyFlex}>
               <View style={styles.escanerHeader}>
-                <Text style={styles.sectionTitle}>Escanea código de barras</Text>
+                <View style={styles.modeHeading}>
+                  <Text style={styles.sectionTitle}>3. Escanea código de barras</Text>
+                  <View style={styles.modeIcon}>
+                    <Ionicons name="barcode-outline" size={17} color={c.primary} />
+                  </View>
+                </View>
                 <Text style={styles.sectionSubtitle}>
-                  Coloca la línea roja a lo largo del código de barras del producto.
+                  Coloca la línea sobre el código de barras del producto.
                 </Text>
               </View>
               <View style={styles.escanerCameraWrap}>
@@ -481,6 +577,12 @@ export function CrearAlimentoModal({
                 nestedScrollEnabled
                 showsVerticalScrollIndicator={false}
               >
+                <View style={styles.aiNote}>
+                  <Ionicons name="sparkles-outline" size={18} color={c.primary} />
+                  <Text style={styles.aiNoteText}>
+                    Scanner inteligente.{'\n'}Detectamos el código automáticamente y buscaremos la información del alimento al instante.
+                  </Text>
+                </View>
                 {cargandoCodigo && (
                   <View style={styles.inlineLoading}>
                     <ActivityIndicator color={c.primary} />
@@ -540,9 +642,10 @@ export function CrearAlimentoModal({
             >
               <Ionicons
                 name="camera-outline"
-                size={24}
-                color={modo === 'foto' ? c.textDisplay : c.textMuted}
+                size={22}
+                color={modo === 'foto' ? c.primary : c.textMuted}
               />
+              <Text style={[styles.segmentLabel, modo === 'foto' && styles.segmentLabelActive]}>FOTO</Text>
             </Pressable>
             <Pressable
               style={[styles.segmentItem, modo === 'manual' && styles.segmentItemActive]}
@@ -555,24 +658,39 @@ export function CrearAlimentoModal({
             >
               <Ionicons
                 name="create-outline"
-                size={24}
-                color={modo === 'manual' ? c.textDisplay : c.textMuted}
+                size={22}
+                color={modo === 'manual' ? c.primary : c.textMuted}
               />
+              <Text style={[styles.segmentLabel, modo === 'manual' && styles.segmentLabelActive]}>MANUAL</Text>
             </Pressable>
             <Pressable
               style={[styles.segmentItem, modo === 'escaner' && styles.segmentItemActive]}
               onPress={() => setModo('escaner')}
             >
               <Ionicons
-                name="scan-outline"
-                size={24}
-                color={modo === 'escaner' ? c.textDisplay : c.textMuted}
+                name="barcode-outline"
+                size={22}
+                color={modo === 'escaner' ? c.primary : c.textMuted}
               />
+              <Text style={[styles.segmentLabel, modo === 'escaner' && styles.segmentLabelActive]}>CÓDIGO</Text>
             </Pressable>
           </View>
         </View>
       </View>
     </Modal>
+  );
+}
+
+type CrearAlimentoStyles = ReturnType<typeof makeStyles>;
+
+function ScannerCorners({ styles }: { styles: CrearAlimentoStyles }) {
+  return (
+    <View style={styles.cornerLayer} pointerEvents="none">
+      <View style={[styles.corner, styles.cornerTopLeft]} />
+      <View style={[styles.corner, styles.cornerTopRight]} />
+      <View style={[styles.corner, styles.cornerBottomLeft]} />
+      <View style={[styles.corner, styles.cornerBottomRight]} />
+    </View>
   );
 }
 
@@ -587,22 +705,19 @@ function makeStyles(
   return StyleSheet.create({
     backdrop: {
       flex: 1,
-      backgroundColor: 'rgba(0,0,0,0.45)',
-      justifyContent: 'flex-end',
-      paddingHorizontal: s.xs,
-      paddingTop: s.xs,
-      paddingBottom: 0,
-      minHeight: '100%',
+      backgroundColor: 'rgba(0,0,0,0.5)',
+      justifyContent: 'center',
+      alignItems: 'center',
+      paddingHorizontal: 16,
     },
     dismissArea: {
       ...StyleSheet.absoluteFillObject,
     },
     sheet: {
-      height: '97%',
-      maxHeight: '97%',
-      borderRadius: r.lg,
-      borderWidth: 1,
-      borderColor: c.borderVisible,
+      width: '100%',
+      maxWidth: 400,
+      height: '88%',
+      borderRadius: 16,
       backgroundColor: c.background,
       overflow: 'hidden',
       flexDirection: 'column',
@@ -612,89 +727,113 @@ function makeStyles(
       alignItems: 'center',
       paddingHorizontal: s.md,
       paddingTop: s.md,
-      paddingBottom: s.sm,
+      paddingBottom: 12,
       gap: s.sm,
     },
     closeBtn: {
-      width: 42,
-      height: 42,
+      width: 28,
+      height: 28,
       borderRadius: r.pill,
-      borderWidth: 1,
-      borderColor: c.borderVisible,
       alignItems: 'center',
       justifyContent: 'center',
-      backgroundColor: c.surface,
+      backgroundColor: c.surfaceElevated,
     },
-    closeText: { ...ts.label, fontFamily: f.monoBold, color: c.textDisplay, fontSize: 13 },
+    closeText: { fontSize: 13, lineHeight: 16, fontFamily: f.sansBold, color: c.textSecondary },
     sheetTitle: {
       flex: 1,
       textAlign: 'center',
-      ...ts.subheading,
+      fontSize: 18,
+      lineHeight: 23,
       fontFamily: f.sansBold,
       color: c.textDisplay,
     },
-    topBarSpacer: { width: 42 },
+    topBarSpacer: { width: 28 },
     bodyFlex: {
       flex: 1,
       minHeight: 0,
+      paddingHorizontal: s.md,
     },
     scrollContent: {
-      paddingHorizontal: s.md,
-      paddingBottom: s.lg,
-      gap: s.sm,
+      paddingBottom: s.sm,
+      gap: 7,
     },
     fotoHeader: {
-      paddingHorizontal: s.md,
       paddingBottom: s.xs,
     },
     fotoCameraArea: {
       flex: 1,
-      minHeight: 120,
-      marginHorizontal: s.md,
-      marginTop: s.xs,
+      minHeight: 140,
+      marginTop: s.sm,
     },
     fotoFooter: {
-      paddingHorizontal: s.md,
       paddingTop: s.sm,
       paddingBottom: s.xs,
       gap: s.xs,
     },
     escanerHeader: {
-      paddingHorizontal: s.md,
       paddingBottom: s.xs,
     },
     escanerCameraWrap: {
       flex: 1,
-      minHeight: 140,
+      minHeight: 180,
       justifyContent: 'center',
       alignItems: 'center',
-      paddingVertical: s.sm,
+      paddingVertical: s.xs,
     },
     escanerBottomScroll: {
       flexGrow: 0,
-      maxHeight: 240,
-      paddingHorizontal: s.md,
+      maxHeight: 220,
     },
     escanerBottomContent: {
-      paddingBottom: s.md,
+      paddingBottom: s.xs,
       gap: s.sm,
     },
-    sectionTitle: {
-      ...ts.subheading,
-      fontFamily: f.sansBold,
-      color: c.textDisplay,
+    escanerFooter: {
+      paddingTop: s.sm,
+      paddingBottom: s.xs,
+    },
+    modeHeading: {
+      minHeight: 34,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: s.sm,
       marginTop: s.xs,
     },
+    modeIcon: {
+      width: 30,
+      height: 30,
+      borderRadius: r.pill,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: c.primaryBg,
+    },
+    sectionTitle: {
+      fontSize: 16,
+      lineHeight: 21,
+      letterSpacing: 0,
+      fontFamily: f.sansBold,
+      color: c.textDisplay,
+      flex: 1,
+    },
     sectionSubtitle: {
-      ...ts.bodySm,
+      fontSize: 12,
+      lineHeight: 16,
+      letterSpacing: 0,
       fontFamily: f.sans,
       color: c.textSecondary,
-      lineHeight: 20,
       marginBottom: s.xs,
     },
-    fieldLabel: { ...ts.caption, fontFamily: f.mono, color: c.textMuted, marginTop: s.xs },
+    fieldLabel: {
+      fontSize: 11,
+      lineHeight: 15,
+      letterSpacing: 0,
+      fontFamily: f.sansMedium,
+      color: c.textMuted,
+      marginTop: s.xs,
+    },
     fieldInput: {
-      height: 46,
+      height: 40,
       borderRadius: r.md,
       borderWidth: 1,
       borderColor: c.borderVisible,
@@ -702,7 +841,9 @@ function makeStyles(
       paddingHorizontal: s.md,
       color: c.textDisplay,
       fontFamily: f.sans,
-      ...ts.body,
+      fontSize: 14,
+      lineHeight: 18,
+      letterSpacing: 0,
     },
     cameraBox: {
       borderRadius: r.lg,
@@ -713,14 +854,14 @@ function makeStyles(
     },
     cameraFlexFill: {
       flex: 1,
-      minHeight: 140,
+      minHeight: 96,
       width: '100%',
       alignSelf: 'stretch',
     },
     cameraScanSized: {
-      width: '92%',
-      maxWidth: 420,
-      height: 256,
+      width: '100%',
+      height: '100%',
+      minHeight: 128,
       borderRadius: r.lg,
       overflow: 'hidden',
       backgroundColor: c.surfaceElevated,
@@ -762,35 +903,145 @@ function makeStyles(
     },
     scanLine: {
       width: '88%',
-      height: 3,
-      backgroundColor: '#E53935',
+      height: 2,
+      backgroundColor: c.primary,
       borderRadius: 2,
-      shadowColor: '#f00',
-      shadowOpacity: 0.6,
-      shadowRadius: 6,
+      shadowColor: c.primary,
+      shadowOpacity: 0.8,
+      shadowRadius: 8,
     },
     secondaryBtn: {
       marginTop: s.xs,
-      height: 46,
+      height: 40,
       borderRadius: r.pill,
       borderWidth: 1,
-      borderColor: c.borderVisible,
+      borderColor: c.primary,
       alignItems: 'center',
       justifyContent: 'center',
-      backgroundColor: c.surface,
+      backgroundColor: 'transparent',
     },
-    secondaryBtnText: { ...ts.label, fontFamily: f.mono, color: c.textDisplay },
+    secondaryBtnText: {
+      fontSize: 12,
+      lineHeight: 15,
+      letterSpacing: 0,
+      fontFamily: f.sansBold,
+      color: c.primary,
+    },
     primaryBtn: {
-      marginTop: s.sm,
-      height: 48,
+      marginTop: s.xs,
+      height: 40,
       borderRadius: r.pill,
-      backgroundColor: c.textDisplay,
+      backgroundColor: c.primary,
       alignItems: 'center',
       justifyContent: 'center',
+      flexDirection: 'row',
+      gap: 7,
     },
-    primaryBtnText: { ...ts.label, fontFamily: f.monoBold, color: c.background },
+    primaryBtnText: {
+      fontSize: 12,
+      lineHeight: 15,
+      letterSpacing: 0,
+      fontFamily: f.sansBold,
+      color: c.textOnPrimary,
+    },
+    saveBtn: {
+      backgroundColor: c.surfaceElevated,
+    },
+    saveBtnText: {
+      color: c.textMuted,
+    },
     btnDisabled: { opacity: 0.55 },
     msgError: { ...ts.caption, fontFamily: f.mono, color: c.danger, marginTop: s.xs },
+    aiNote: {
+      minHeight: 40,
+      borderRadius: r.md,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surfaceElevated,
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: s.sm,
+      paddingHorizontal: s.md,
+      paddingVertical: 7,
+      marginTop: s.sm,
+    },
+    aiNoteText: {
+      flex: 1,
+      minWidth: 0,
+      fontSize: 11,
+      lineHeight: 16,
+      letterSpacing: 0,
+      fontFamily: f.sans,
+      color: c.textSecondary,
+    },
+    photoHintRow: {
+      minHeight: 24,
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: s.sm,
+      paddingHorizontal: s.xs,
+    },
+    photoHintText: {
+      flex: 1,
+      minWidth: 0,
+      fontSize: 11,
+      lineHeight: 15,
+      letterSpacing: 0,
+      fontFamily: f.sans,
+      color: c.textSecondary,
+    },
+    photoCaptureButton: {
+      ...StyleSheet.absoluteFillObject,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    photoCaptureInner: {
+      width: 56,
+      height: 56,
+      borderRadius: r.pill,
+      borderWidth: 3,
+      borderColor: c.primary,
+      backgroundColor: c.surface,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    cornerLayer: {
+      ...StyleSheet.absoluteFillObject,
+    },
+    corner: {
+      position: 'absolute',
+      width: 24,
+      height: 24,
+      borderColor: c.primary,
+    },
+    cornerTopLeft: {
+      top: 16,
+      left: 16,
+      borderTopWidth: 3,
+      borderLeftWidth: 3,
+      borderTopLeftRadius: r.sm,
+    },
+    cornerTopRight: {
+      top: 16,
+      right: 16,
+      borderTopWidth: 3,
+      borderRightWidth: 3,
+      borderTopRightRadius: r.sm,
+    },
+    cornerBottomLeft: {
+      bottom: 16,
+      left: 16,
+      borderBottomWidth: 3,
+      borderLeftWidth: 3,
+      borderBottomLeftRadius: r.sm,
+    },
+    cornerBottomRight: {
+      bottom: 16,
+      right: 16,
+      borderBottomWidth: 3,
+      borderRightWidth: 3,
+      borderBottomRightRadius: r.sm,
+    },
     inlineLoading: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -836,23 +1087,86 @@ function makeStyles(
       borderTopColor: c.separator,
       paddingHorizontal: s.md,
       paddingTop: s.sm,
-      paddingBottom: Math.max(s.md, insetBottom + s.sm),
-      gap: s.sm,
+      paddingBottom: Math.max(12, Math.min(20, insetBottom + s.sm)),
+      gap: 8,
       backgroundColor: c.background,
     },
     segmentItem: {
       flex: 1,
-      height: 52,
+      height: 44,
       borderRadius: r.md,
       borderWidth: 1,
-      borderColor: c.borderVisible,
+      borderColor: c.border,
       backgroundColor: c.surface,
       alignItems: 'center',
       justifyContent: 'center',
+      gap: 3,
     },
     segmentItemActive: {
-      borderColor: c.textDisplay,
-      backgroundColor: c.surfaceElevated,
+      borderColor: c.primary,
+      backgroundColor: c.surface,
+    },
+    segmentLabel: {
+      fontSize: 9,
+      lineHeight: 12,
+      letterSpacing: 0,
+      fontFamily: f.sansBold,
+      color: c.textMuted,
+    },
+    segmentLabelActive: {
+      color: c.primary,
+    },
+    kcalOverlay: {
+      ...StyleSheet.absoluteFillObject,
+      backgroundColor: 'rgba(0,0,0,0.55)',
+      justifyContent: 'center',
+      alignItems: 'center',
+      paddingHorizontal: s.lg,
+      zIndex: 10,
+      borderRadius: 16,
+    },
+    kcalCard: {
+      width: '100%',
+      maxWidth: 320,
+      backgroundColor: c.background,
+      borderRadius: r.lg,
+      padding: s.lg,
+      alignItems: 'center',
+      gap: s.sm,
+      borderWidth: 1,
+      borderColor: c.borderVisible,
+    },
+    kcalIconWrap: {
+      width: 48,
+      height: 48,
+      borderRadius: r.pill,
+      backgroundColor: c.warningBg ?? c.surfaceElevated,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: s.xs,
+    },
+    kcalTitle: {
+      fontSize: 16,
+      lineHeight: 21,
+      fontFamily: f.sansBold,
+      color: c.textDisplay,
+      textAlign: 'center',
+    },
+    kcalBody: {
+      fontSize: 13,
+      lineHeight: 18,
+      fontFamily: f.sans,
+      color: c.textSecondary,
+      textAlign: 'center',
+    },
+    kcalBold: {
+      fontFamily: f.sansBold,
+      color: c.textDisplay,
+    },
+    kcalActions: {
+      width: '100%',
+      gap: s.xs,
+      marginTop: s.xs,
     },
   });
 }
