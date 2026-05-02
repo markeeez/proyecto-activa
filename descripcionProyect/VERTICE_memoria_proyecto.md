@@ -1,8 +1,8 @@
-# ACTIVA — Memoria del proyecto
+# VERTICE — Memoria del proyecto
 
 ## Visión general
 
-ACTIVA es una app de fitness y nutrición construida con **Expo (React Native)** y **Supabase (PostgreSQL)**. El objetivo es que sea una app funcional y bien construida desde el inicio, con margen para crecer.
+VERTICE es una app de fitness y nutrición construida con **Expo (React Native)** y **Supabase (PostgreSQL)**. El objetivo es que sea una app funcional y bien construida desde el inicio, con margen para crecer.
 
 Las funcionalidades principales son:
 - Registro y seguimiento de nutrición diaria
@@ -43,7 +43,7 @@ El campo `id` de `profiles` es el mismo `uuid` que genera Supabase Auth.
 
 ## Esquema de la base de datos
 
-Todas las tablas tienen **Row Level Security (RLS)** activado. Cada usuario solo puede leer y escribir sus propios datos.
+Todas las tablas tienen **Row Level Security (RLS)** VERTICEdo. Cada usuario solo puede leer y escribir sus propios datos.
 
 ---
 
@@ -123,12 +123,6 @@ Alimentos del sistema. Pueden venir de una API externa (ej. FatSecret, Open Food
 **Estrategia de caché:** cuando se busca un alimento de una API externa, se guarda en esta tabla para evitar llamadas repetidas. Se busca primero en BD local antes de llamar a la API.
 
 **Índices:** `(nombre)`, `unique (api_source, api_id)`
-
-**Políticas RLS actualizadas:**
-- **Select:** alimentos del sistema (`is_custom = false` y `created_by = null`) visibles para todos los autenticados, más los propios personalizados.
-- **Insert:** se permite insertar alimentos del sistema (sin `created_by`) o personalizados propios.
-- **Update:** igual que select.
-- **Delete:** solo alimentos personalizados propios.
 
 ---
 
@@ -326,58 +320,6 @@ Mensajes dentro de una sesión de chat.
 
 ---
 
-### `user_favorite_foods`
-Tabla puente para alimentos favoritos del usuario.
-
-| Campo | Tipo | Notas |
-|---|---|---|
-| user_id | uuid | PK parcial, FK → auth.users |
-| food_id | uuid | PK parcial, FK → foods |
-| created_at | timestamptz | automático |
-
-**Clave primaria compuesta:** `(user_id, food_id)` — un usuario no puede marcar el mismo alimento como favorito dos veces.
-
-**RLS:** el usuario solo puede ver, añadir y eliminar sus propios favoritos.
-
----
-
-### `user_favorite_exercises`
-Tabla puente para ejercicios favoritos del usuario.
-
-| Campo | Tipo | Notas |
-|---|---|---|
-| user_id | uuid | PK parcial, FK → auth.users |
-| exercise_id | uuid | PK parcial, FK → exercises |
-| created_at | timestamptz | automático |
-
-**Clave primaria compuesta:** `(user_id, exercise_id)` — un usuario no puede marcar el mismo ejercicio como favorito dos veces.
-
-**RLS:** el usuario solo puede ver, añadir y eliminar sus propios favoritos.
-
----
-
-### `exercise_progress_summary`
-Vista materializada que precalcula la progresión de cada usuario por ejercicio y fecha. Se refresca automáticamente mediante un trigger cuando se marca un set como completado.
-
-| Campo | Tipo | Notas |
-|---|---|---|
-| user_id | uuid | FK → profiles |
-| exercise_id | uuid | FK → exercises |
-| fecha | date | fecha de la sesión |
-| mejor_peso_kg | numeric | máximo peso levantado en esa sesión |
-| mejores_repeticiones | integer | máximo de repeticiones en esa sesión |
-| volumen_total_kg | numeric | suma de (peso × reps) de todos los sets |
-| total_series | integer | número de series completadas |
-| session_id | uuid | sesión de origen |
-
-**Tipo:** vista materializada — datos precalculados para consultas rápidas.
-
-**Índices:** `(user_id, exercise_id, fecha desc)`, `(exercise_id, fecha desc)`
-
-**Trigger:** `on_set_completed` → se dispara al insertar o actualizar un set con `completada = true`, refrescando la vista automáticamente.
-
----
-
 ### `ai_notes`
 Notas generadas por la IA y guardadas en un contexto concreto (una comida, un entreno, un alimento o ejercicio).
 
@@ -402,9 +344,7 @@ auth.users
             ├── user_goals
             ├── user_body_metrics
             ├── foods (created_by)
-            │       └── user_favorite_foods ── profiles
             ├── exercises (created_by)
-            │       └── user_favorite_exercises ── profiles
             ├── meal_types (user_id, nullable para defaults)
             ├── nutrition_logs
             │       └── nutrition_log_meals
@@ -412,7 +352,6 @@ auth.users
             ├── workout_sessions
             │       └── workout_session_exercises ── exercises
             │               └── workout_sets
-            │                       └── exercise_progress_summary (vista materializada)
             ├── ai_usage
             ├── ai_chat_sessions
             │       └── ai_chat_messages
@@ -433,10 +372,8 @@ auth.users
 
 5. **Comidas predeterminadas:** las 4 comidas del sistema tienen `user_id = null` y `is_default = true`. Las personalizadas tienen `user_id` del usuario y `is_default = false`.
 
-6. **RLS en todas las tablas:** activado desde el principio. Cada usuario solo accede a sus datos. Los alimentos y ejercicios no personalizados son visibles para todos.
+6. **RLS en todas las tablas:** VERTICEdo desde el principio. Cada usuario solo accede a sus datos. Los alimentos y ejercicios no personalizados son visibles para todos.
 
 7. **IA contextual vs chat general:** el campo `contexto_tipo` + `contexto_id` en `ai_chat_sessions` y `ai_notes` permite ligar cualquier conversación o nota a cualquier elemento de la app sin duplicar tablas.
 
 8. **Límites de IA dinámicos:** los límites están en la tabla `plan_limits`, no hardcodeados en el código. Si se quieren cambiar los límites de un plan, basta con actualizar esa tabla.
-
-9. **Progresión de ejercicios mediante vista materializada:** en lugar de calcular la progresión en tiempo real (costoso a escala), se usa una vista materializada `exercise_progress_summary` que precalcula el mejor peso, mejores repeticiones y volumen total por usuario, ejercicio y fecha. Se refresca automáticamente al completar cualquier set, manteniendo los datos siempre actualizados sin coste en las consultas.

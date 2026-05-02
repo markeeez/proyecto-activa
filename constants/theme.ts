@@ -188,7 +188,7 @@ export const Colors = {
 
 } as const;
 
-export type Theme = typeof Colors.light;
+export type Theme = (typeof Colors)[keyof typeof Colors];
 export type ColorKey = keyof Theme;
 
 // ─── Tipografía Nothing ───────────────────────────────────────────────────────

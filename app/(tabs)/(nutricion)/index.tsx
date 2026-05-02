@@ -1,24 +1,31 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { StyleProp, ViewStyle } from 'react-native';
 import {
   Animated,
+  Keyboard,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
   TextInput,
   View,
+  useWindowDimensions,
 } from 'react-native';
-import type { StyleProp, ViewStyle } from 'react-native';
 import { Gesture, GestureDetector, Swipeable } from 'react-native-gesture-handler';
 import { runOnJS } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Svg, { Circle } from 'react-native-svg';
 
 import { CalendarioNutricion } from '@/components/nutricion/CalendarioNutricion';
 import { SortableMealList } from '@/components/SortableMealList';
+import { GlowButton } from '@/components/ui/GlowButton';
 
 import { COMIDAS_PREDETERMINADAS } from '@/constants/comidasPredeterminadas';
+import { useComidaPortapapeles } from '@/context/ComidaPortapapelesContext';
 import { useAuth } from '@/hooks/useAuth';
 import { useNutricion } from '@/hooks/useNutricion';
 import { useTheme } from '@/hooks/useTheme';
@@ -36,8 +43,71 @@ import type { ComidaConAlimentos } from '@/types/app.types';
 const SKELETON_BG = '#1A1A1A';
 const SKELETON_SHIMMER = '#2A2A2A';
 const SKELETON_FADE_MS = 200;
+const MACRO_CARBS_COLOR = '#16C862';
 
 type NutricionStyles = ReturnType<typeof makeStyles>;
+
+function pct(actual: number, objetivo: number): number {
+  if (!Number.isFinite(actual) || !Number.isFinite(objetivo) || objetivo <= 0) return 0;
+  return Math.max(0, Math.min(actual / objetivo, 1));
+}
+
+function KcalRing({
+  actual,
+  objetivo,
+  color,
+  trackColor,
+  styles,
+}: {
+  actual: number;
+  objetivo: number;
+  color: string;
+  trackColor: string;
+  styles: NutricionStyles;
+}) {
+  const size = 94;
+  const center = size / 2;
+  const radius = 36;
+  const circumference = 2 * Math.PI * radius;
+  const arc = circumference * 0.78;
+  const progress = pct(actual, objetivo);
+
+  return (
+    <View style={styles.goalKcalRing}>
+      <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+        <Circle
+          cx={center}
+          cy={center}
+          r={radius}
+          fill="none"
+          stroke={trackColor}
+          strokeWidth={9}
+          strokeLinecap="round"
+          strokeDasharray={`${arc} ${circumference}`}
+          transform={`rotate(135 ${center} ${center})`}
+        />
+        <Circle
+          cx={center}
+          cy={center}
+          r={radius}
+          fill="none"
+          stroke={color}
+          strokeWidth={9}
+          strokeLinecap="round"
+          strokeDasharray={`${arc} ${circumference}`}
+          strokeDashoffset={arc * (1 - progress)}
+          transform={`rotate(135 ${center} ${center})`}
+        />
+      </Svg>
+      <View style={styles.goalKcalCenter}>
+        <Text style={styles.goalKcalValue} numberOfLines={1} adjustsFontSizeToFit>
+          {Math.round(actual)}
+        </Text>
+        <Text style={styles.goalKcalUnit}>kcal</Text>
+      </View>
+    </View>
+  );
+}
 
 interface SkeletonProps {
   styles: NutricionStyles;
@@ -133,8 +203,9 @@ function ordenarComidas(comidas: ComidaConAlimentos[], ordenIds: string[] | null
 }
 
 export default function NutricionIndex() {
-  const { c, f, ts, s, r } = useTheme();
+  const { c, f, ts, s, r, isDark } = useTheme();
   const insets = useSafeAreaInsets();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const { user } = useAuth();
   const {
     fecha,
@@ -145,7 +216,15 @@ export default function NutricionIndex() {
     eliminarComidaDelLog,
     crearComidaPersonalizada,
     eliminarAlimento,
+    vaciarComida,
+    pegarAlimentosEnComida,
   } = useNutricion();
+  const {
+    lineas: lineasCopiadas,
+    copiarDesdeComida,
+    limpiarPortapapeles,
+    tieneCopia,
+  } = useComidaPortapapeles();
 
   const styles = useMemo(() => makeStyles(c, f, ts, s, r), [c, f, ts, s, r]);
 
@@ -155,6 +234,24 @@ export default function NutricionIndex() {
   const [modalNuevaComida, setModalNuevaComida] = useState(false);
   const [nombreNuevaComida, setNombreNuevaComida] = useState('');
   const [calendarioVisible, setCalendarioVisible] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [menuComida, setMenuComida] = useState<ComidaConAlimentos | null>(null);
+  const [menuAnchor, setMenuAnchor] = useState({ x: 0, y: 0 });
+
+  useEffect(() => {
+    const showSub = Keyboard.addListener('keyboardDidShow', (event) => {
+      setKeyboardHeight(event.endCoordinates.height);
+    });
+    const hideSub = Keyboard.addListener('keyboardDidHide', () => {
+      setKeyboardHeight(0);
+    });
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+
   useEffect(() => {
     if (!user?.id) return;
     void obtenerOrdenComidas(user.id, fecha).then(setOrdenIds);
@@ -196,6 +293,93 @@ export default function NutricionIndex() {
   const shimmerOpacity = useRef(new Animated.Value(0.3)).current;
   const contentOpacity = useRef(new Animated.Value(cargandoDia ? 0 : 1)).current;
   const [skeletonVisible, setSkeletonVisible] = useState(cargandoDia);
+
+  const kcalActual = Math.round(resumen?.totalCalorias ?? 0);
+  const kcalObjetivo = Math.round(objetivos?.calorias_objetivo ?? 0);
+  const goalMacros = useMemo(
+    () => [
+      {
+        key: 'proteinas',
+        label: 'Proteínas',
+        icon: 'pulse-outline' as const,
+        actual: Math.round(resumen?.totalProteinas ?? 0),
+        objetivo: Math.round(objetivos?.proteinas_objetivo ?? 0),
+        color: c.primary,
+      },
+      {
+        key: 'carbos',
+        label: 'Carbohidratos',
+        icon: 'leaf-outline' as const,
+        actual: Math.round(resumen?.totalCarbos ?? 0),
+        objetivo: Math.round(objetivos?.carbos_objetivo ?? 0),
+        color: MACRO_CARBS_COLOR,
+      },
+      {
+        key: 'grasas',
+        label: 'Grasas',
+        icon: 'flame-outline' as const,
+        actual: Math.round(resumen?.totalGrasas ?? 0),
+        objetivo: Math.round(objetivos?.grasas_objetivo ?? 0),
+        color: c.macroFat,
+      },
+    ],
+    [
+      c.macroFat,
+      c.primary,
+      objetivos?.carbos_objetivo,
+      objetivos?.grasas_objetivo,
+      objetivos?.proteinas_objetivo,
+      resumen?.totalCarbos,
+      resumen?.totalGrasas,
+      resumen?.totalProteinas,
+    ],
+  );
+
+  const renderGoalCard = useCallback(
+    () => (
+      <View style={styles.goalCard}>
+        <KcalRing
+          actual={kcalActual}
+          objetivo={kcalObjetivo}
+          color={c.primary}
+          trackColor={c.primaryBg}
+          styles={styles}
+        />
+
+        <View style={styles.goalMain}>
+          <View style={styles.goalBadge}>
+            <Text style={styles.goalBadgeText}>OBJETIVO DIARIO</Text>
+          </View>
+
+          <View style={styles.goalMacrosRow}>
+            {goalMacros.map((macro) => {
+              const progress = pct(macro.actual, macro.objetivo);
+              return (
+                <View key={macro.key} style={styles.goalMacro}>
+                  <View style={[styles.goalMacroIcon, { backgroundColor: macro.color }]}>
+                    <Ionicons name={macro.icon} size={17} color="#FFFFFF" />
+                  </View>
+                  <View style={styles.goalMacroBody}>
+                    <Text style={styles.goalMacroLabel} numberOfLines={1}>
+                      {macro.label}
+                    </Text>
+                    <Text style={styles.goalMacroValue} numberOfLines={1} adjustsFontSizeToFit>
+                      <Text style={{ color: macro.color }}>{macro.actual}</Text>
+                      <Text style={styles.goalMacroTarget}> / {macro.objetivo} g</Text>
+                    </Text>
+                    <View style={styles.goalMacroTrack}>
+                      <View style={[styles.goalMacroFill, { width: `${progress * 100}%`, backgroundColor: macro.color }]} />
+                    </View>
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        </View>
+      </View>
+    ),
+    [c.primary, c.primaryBg, goalMacros, kcalActual, kcalObjetivo, styles],
+  );
 
   const avanzarDia = useCallback(() => {
     cambiarFecha(agregarDiasIso(fecha, 1));
@@ -283,6 +467,58 @@ export default function NutricionIndex() {
       /* silencioso; podría mostrarse toast */
     }
   }, [nombreNuevaComida, crearComidaPersonalizada, fecha]);
+
+  const abrirRegistrarComida = useCallback(
+    (mealId: string) => {
+      router.push({
+        pathname: '/(tabs)/(nutricion)/agregar',
+        params: { mealId, fecha },
+      });
+    },
+    [fecha],
+  );
+
+  const eliminarComidaSeleccionada = useCallback(async () => {
+    const meal = menuComida;
+    const logId = resumen?.logId;
+    if (!meal || !logId) return;
+
+    setMenuComida(null);
+    try {
+      await eliminarComidaDelLog(logId, meal.mealId);
+    } catch (e) {
+      console.error('[Nutricion] eliminar comida', e);
+    }
+  }, [eliminarComidaDelLog, menuComida, resumen?.logId]);
+
+  const copiarComidaSeleccionada = useCallback(() => {
+    if (!menuComida) return;
+    copiarDesdeComida(menuComida.items);
+    setMenuComida(null);
+  }, [copiarDesdeComida, menuComida]);
+
+  const pegarEnComidaSeleccionada = useCallback(async () => {
+    const meal = menuComida;
+    if (!meal || !lineasCopiadas?.length) return;
+    setMenuComida(null);
+    try {
+      await pegarAlimentosEnComida(meal.mealId, lineasCopiadas);
+      limpiarPortapapeles();
+    } catch (e) {
+      console.error('[Nutricion] pegar comida', e);
+    }
+  }, [limpiarPortapapeles, lineasCopiadas, menuComida, pegarAlimentosEnComida]);
+
+  const vaciarComidaSeleccionada = useCallback(async () => {
+    const meal = menuComida;
+    if (!meal) return;
+    setMenuComida(null);
+    try {
+      await vaciarComida(meal.mealId);
+    } catch (e) {
+      console.error('[Nutricion] vaciar comida', e);
+    }
+  }, [menuComida, vaciarComida]);
 
   useEffect(() => {
     if (cargandoDia) {
@@ -386,6 +622,8 @@ export default function NutricionIndex() {
           </Pressable>
         </View>
 
+        {renderGoalCard()}
+
         <Text style={styles.sectionTitle}>COMIDAS DEL DÍA</Text>
 
         {skeletonVisible && (
@@ -404,6 +642,7 @@ export default function NutricionIndex() {
     abrirCalendario,
     c.textDisplay,
     c.primary,
+    renderGoalCard,
     shimmerOpacity,
     skeletonFadeOpacity,
     skeletonVisible,
@@ -411,43 +650,20 @@ export default function NutricionIndex() {
 
   const renderItem = useCallback(
     ({ item: meal, drag, isActive }: { item: ComidaConAlimentos; drag: () => void; isActive: boolean; }) => {
-      const logId = resumen?.logId;
       const mealIcon = iconoComida(meal.nombre, meal.isDefault);
-
-      const leftActions = () => (
-        <View style={styles.swipeLeft}>
-          <View style={styles.swipeDeleteInner}>
-            <Text style={styles.swipeDeleteTxt}>Eliminar</Text>
-          </View>
-        </View>
-      );
 
       return (
         <Animated.View style={{ opacity: contentOpacity }}>
-          <Swipeable
-            enabled={!isActive}
-            renderLeftActions={leftActions}
-            overshootLeft={false}
-            onSwipeableOpen={(direction) => {
-              const mid = meal.mealId;
-              if (direction !== 'left' || !logId || !mid) return;
-              void (async () => {
-                try {
-                  await eliminarComidaDelLog(logId, mid);
-                } catch (e) {
-                  console.error('[Nutricion] eliminar comida', e);
-                }
-              })();
-            }}
-          >
-            <View style={[styles.mealCard, isActive && styles.mealCardActive]}>
+          <View style={[styles.mealCard, isActive && styles.mealCardActive]}>
               <View style={styles.mealHeaderRow}>
                 <Pressable onLongPress={drag} delayLongPress={150} style={styles.mealIconWrap} hitSlop={12}>
-                  <Ionicons name={mealIcon} size={22} color={c.primary} />
+                  <Ionicons name={mealIcon} size={27} color={c.primary} />
                 </Pressable>
 
                 <View style={styles.mealHeaderText}>
-                  <Text style={styles.mealTitle} numberOfLines={1}>{meal.nombre}</Text>
+                  <Text style={styles.mealTitle} numberOfLines={1} adjustsFontSizeToFit>
+                    {meal.nombre}
+                  </Text>
                   <View style={styles.mealMetaRow}>
                     <Ionicons name="flame-outline" size={11} color={c.danger} />
                     <Text style={styles.mealMetaKcal}>{Math.round(meal.totalCalorias)} kcal</Text>
@@ -460,17 +676,25 @@ export default function NutricionIndex() {
                   </View>
                 </View>
 
-                <Pressable
-                  style={styles.addBtn}
-                  onPress={() =>
-                    router.push({
-                      pathname: '/(tabs)/(nutricion)/agregar',
-                      params: { mealId: meal.mealId, fecha },
-                    })
-                  }
-                >
-                  <Text style={styles.addBtnText}>+</Text>
-                </Pressable>
+                <View style={styles.mealActionRow}>
+                  <Pressable style={styles.mealAiBtn} accessibilityRole="button" accessibilityLabel="Asistente IA">
+                    <Ionicons name="sparkles-outline" size={18} color={c.primary} />
+                  </Pressable>
+                  <Pressable
+                    style={styles.mealMenuBtn}
+                    onPress={(event) => {
+                      setMenuAnchor({
+                        x: event.nativeEvent.pageX,
+                        y: event.nativeEvent.pageY,
+                      });
+                      setMenuComida(meal);
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel="Abrir menú de comida"
+                  >
+                    <Ionicons name="ellipsis-vertical" size={22} color={c.textDisplay} />
+                  </Pressable>
+                </View>
               </View>
 
               <View style={styles.mealItemsList}>
@@ -525,33 +749,41 @@ export default function NutricionIndex() {
                   <Text style={styles.emptyMealSlotHint}>Todavía no hay alimentos en esta comida</Text>
                 )}
               </View>
-            </View>
-          </Swipeable>
+
+              <Pressable
+                style={styles.registerMealBtn}
+                onPress={() => abrirRegistrarComida(meal.mealId)}
+                accessibilityRole="button"
+                accessibilityLabel={`Registrar comida en ${meal.nombre}`}
+              >
+                <Ionicons name="add-circle-outline" size={17} color={c.primary} />
+                <Text style={styles.registerMealBtnText}>Registrar alimento</Text>
+              </Pressable>
+          </View>
         </Animated.View>
       );
     },
-    [styles, resumen?.logId, eliminarComidaDelLog, eliminarAlimento, fecha, c.primary, c.danger, contentOpacity],
+    [
+      styles,
+      eliminarAlimento,
+      c.primary,
+      c.danger,
+      c.textDisplay,
+      c.textMuted,
+      contentOpacity,
+      abrirRegistrarComida,
+      copiarComidaSeleccionada,
+      eliminarComidaSeleccionada,
+      pegarEnComidaSeleccionada,
+      tieneCopia,
+      vaciarComidaSeleccionada,
+    ],
   );
 
-  const renderFooter = useCallback(() => {
-    if (cargandoDia) return null;
-
-    return (
-      <View style={styles.footerBlock}>
-        <View style={styles.adviceCard}>
-          <View style={styles.adviceIcon}>
-            <Ionicons name="sparkles-outline" size={16} color={c.textSecondary} />
-          </View>
-          <View style={styles.adviceTextBlock}>
-            <Text style={styles.adviceLabel}>Consejo del día</Text>
-            <Text style={styles.adviceText}>Intenta alcanzar tus objetivos de proteínas 💪</Text>
-          </View>
-          <Ionicons name="chevron-forward" size={18} color={c.textSecondary} />
-        </View>
-
-      </View>
-    );
-  }, [styles, c.textSecondary, cargandoDia]);
+  const abrirNuevaComida = useCallback(() => {
+    setNombreNuevaComida('');
+    setModalNuevaComida(true);
+  }, []);
 
   return (
     <View style={[styles.root, { paddingTop: insets.top + 8 }]}>
@@ -560,12 +792,93 @@ export default function NutricionIndex() {
         keyExtractor={(item) => item.mealId}
         onDragEnd={onDragEnd}
         ListHeaderComponent={renderHeader}
-        ListFooterComponent={renderFooter}
         renderItem={renderItem}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
         containerStyle={styles.listContainer}
       />
+
+      {!cargandoDia && (
+        <View style={styles.fixedAddMealWrap}>
+          {isDark ? (
+            <GlowButton borderRadius={999} glowPadding={18}>
+              <Pressable
+                style={styles.addMealBtn}
+                onPress={abrirNuevaComida}
+                accessibilityRole="button"
+                accessibilityLabel="Añadir comida"
+              >
+                <Ionicons name="add-circle-outline" size={17} color={c.textOnPrimary} />
+                <Text style={styles.addMealBtnText}>Añadir comida</Text>
+              </Pressable>
+            </GlowButton>
+          ) : (
+            <Pressable
+              style={styles.addMealBtn}
+              onPress={abrirNuevaComida}
+              accessibilityRole="button"
+              accessibilityLabel="Añadir comida"
+            >
+              <Ionicons name="add-circle-outline" size={17} color={c.textOnPrimary} />
+              <Text style={styles.addMealBtnText}>Añadir comida</Text>
+            </Pressable>
+          )}
+        </View>
+      )}
+
+      {menuComida && (
+        <View style={styles.mealMenuLayer} pointerEvents="box-none">
+          <Pressable style={styles.mealMenuDismiss} onPress={() => setMenuComida(null)} />
+          <View
+            style={[
+              styles.mealMenuPopover,
+              {
+                top: Math.min(menuAnchor.y + 10, windowHeight - 276),
+                left: Math.min(Math.max(menuAnchor.x - 176, s.md), windowWidth - 206),
+              },
+            ]}
+          >
+            <Text style={styles.mealMenuTitle} numberOfLines={1}>
+              {menuComida.nombre}
+            </Text>
+            <Pressable
+              style={[styles.mealMenuOption, menuComida.items.length === 0 && styles.mealMenuOptionDisabled]}
+              onPress={copiarComidaSeleccionada}
+              disabled={menuComida.items.length === 0}
+            >
+              <Ionicons name="copy-outline" size={17} color={menuComida.items.length > 0 ? c.textDisplay : c.textMuted} />
+              <Text style={[styles.mealMenuOptionText, menuComida.items.length === 0 && styles.mealMenuOptionTextDisabled]}>
+                Copiar comida
+              </Text>
+            </Pressable>
+            <Pressable
+              style={[styles.mealMenuOption, !tieneCopia && styles.mealMenuOptionDisabled]}
+              onPress={() => void pegarEnComidaSeleccionada()}
+              disabled={!tieneCopia}
+            >
+              <Ionicons name="clipboard-outline" size={17} color={tieneCopia ? c.textDisplay : c.textMuted} />
+              <Text style={[styles.mealMenuOptionText, !tieneCopia && styles.mealMenuOptionTextDisabled]}>
+                Pegar comida
+              </Text>
+            </Pressable>
+            <Pressable
+              style={[styles.mealMenuOption, menuComida.items.length === 0 && styles.mealMenuOptionDisabled]}
+              onPress={() => void vaciarComidaSeleccionada()}
+              disabled={menuComida.items.length === 0}
+            >
+              <Ionicons name="remove-circle-outline" size={17} color={menuComida.items.length > 0 ? c.textDisplay : c.textMuted} />
+              <Text style={[styles.mealMenuOptionText, menuComida.items.length === 0 && styles.mealMenuOptionTextDisabled]}>
+                Vaciar comida
+              </Text>
+            </Pressable>
+            <View style={styles.mealMenuDivider} />
+            <Pressable style={styles.mealMenuOption} onPress={() => void eliminarComidaSeleccionada()}>
+              <Ionicons name="trash-outline" size={17} color={c.danger} />
+              <Text style={styles.mealMenuOptionDanger}>Eliminar comida</Text>
+            </Pressable>
+          </View>
+        </View>
+      )}
 
       {comidasData.length === 0 && !cargando && (
         <View style={styles.emptyOverlay} pointerEvents="none">
@@ -582,26 +895,63 @@ export default function NutricionIndex() {
       />
 
       <Modal visible={modalNuevaComida} transparent animationType="fade" onRequestClose={() => setModalNuevaComida(false)}>
-        <Pressable style={styles.modalOverlay} onPress={() => setModalNuevaComida(false)}>
-          <Pressable style={styles.modalCard} onPress={(e) => e.stopPropagation()}>
-            <Text style={styles.modalTitle}>Nueva comida</Text>
-            <TextInput
-              value={nombreNuevaComida}
-              onChangeText={setNombreNuevaComida}
-              placeholder="Nombre"
-              placeholderTextColor={c.textMuted}
-              style={styles.modalInput}
-            />
-            <View style={styles.modalActions}>
-              <Pressable style={styles.modalBtnGhost} onPress={() => setModalNuevaComida(false)}>
-                <Text style={styles.modalBtnGhostText}>Cancelar</Text>
+        <KeyboardAvoidingView
+          style={[
+            styles.modalKeyboardAvoiding,
+            Platform.OS === 'android' && keyboardHeight > 0 ? { paddingBottom: keyboardHeight } : null,
+          ]}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+          <Pressable style={styles.modalOverlay} onPress={() => setModalNuevaComida(false)}>
+            <Pressable
+              style={[styles.modalCard, { paddingBottom: s.lg + Math.max(insets.bottom, s.md) }]}
+              onPress={(e) => e.stopPropagation()}
+            >
+              <View style={styles.modalHandle} />
+
+              <Pressable
+                style={styles.modalCloseBtn}
+                onPress={() => setModalNuevaComida(false)}
+                accessibilityRole="button"
+                accessibilityLabel="Cerrar"
+              >
+                <Ionicons name="close" size={20} color={c.textDisplay} />
               </Pressable>
-              <Pressable style={styles.modalBtnPrimary} onPress={() => void confirmarNuevaComida()}>
-                <Text style={styles.modalBtnPrimaryText}>Aceptar</Text>
-              </Pressable>
-            </View>
+
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Añadir comida</Text>
+                <Text style={styles.modalSubtitle}>Escribe el nombre de la comida</Text>
+              </View>
+
+              <View style={styles.modalFieldBlock}>
+                <Text style={styles.modalLabel}>Nombre</Text>
+                <View style={styles.modalInputWrap}>
+                  <Ionicons name="pricetag-outline" size={18} color={c.textSecondary} />
+                  <View style={styles.modalInputAccent} />
+                  <TextInput
+                    value={nombreNuevaComida}
+                    onChangeText={setNombreNuevaComida}
+                    placeholder="Ej: Post Cena"
+                    placeholderTextColor={c.textMuted}
+                    style={styles.modalInput}
+                    autoFocus
+                    returnKeyType="done"
+                    onSubmitEditing={() => void confirmarNuevaComida()}
+                  />
+                </View>
+              </View>
+
+              <View style={styles.modalActions}>
+                <Pressable style={styles.modalBtnGhost} onPress={() => setModalNuevaComida(false)}>
+                  <Text style={styles.modalBtnGhostText}>Cancelar</Text>
+                </Pressable>
+                <Pressable style={styles.modalBtnPrimary} onPress={() => void confirmarNuevaComida()}>
+                  <Text style={styles.modalBtnPrimaryText}>Aceptar</Text>
+                </Pressable>
+              </View>
+            </Pressable>
           </Pressable>
-        </Pressable>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );
@@ -621,10 +971,11 @@ function makeStyles(
     },
     listContainer: {
       flex: 1,
+      marginBottom: 78,
     },
     listContent: {
       paddingHorizontal: s.md,
-      paddingBottom: s.xxl,
+      paddingBottom: s.md,
       gap: s.sm,
     },
     skeletonSurface: {
@@ -832,7 +1183,7 @@ function makeStyles(
       borderRadius: r.sm,
       borderWidth: 1,
       borderColor: c.borderVisible,
-      backgroundColor: c.surfaceElevated,
+      backgroundColor: c.surface,
       alignItems: 'center',
       justifyContent: 'center',
     },
@@ -845,12 +1196,13 @@ function makeStyles(
       marginTop: s.md,
     },
     mealCard: {
+      position: 'relative',
       borderWidth: 1,
       borderColor: c.borderVisible,
       borderRadius: r.lg,
       backgroundColor: c.surface,
       paddingHorizontal: s.md,
-      paddingVertical: s.sm,
+      paddingVertical: s.md,
       gap: s.sm,
     },
     mealCardActive: {
@@ -860,11 +1212,11 @@ function makeStyles(
     mealHeaderRow: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: s.xs,
+      gap: s.md,
     },
     mealIconWrap: {
-      width: 44,
-      height: 44,
+      width: 52,
+      height: 52,
       borderRadius: r.pill,
       backgroundColor: c.primaryBg,
       alignItems: 'center',
@@ -874,19 +1226,6 @@ function makeStyles(
       flex: 1,
       minWidth: 0,
       gap: 2,
-    },
-    swipeLeft: {
-      justifyContent: 'center',
-      marginRight: s.sm,
-    },
-    swipeDeleteInner: {
-      backgroundColor: c.danger,
-      justifyContent: 'center',
-      alignItems: 'center',
-      width: 88,
-      borderRadius: r.sm,
-      flex: 1,
-      marginVertical: 2,
     },
     swipeDeleteTxt: {
       ...ts.label,
@@ -911,7 +1250,7 @@ function makeStyles(
     mealItemsList: {
       borderWidth: 1,
       borderColor: c.borderVisible,
-      borderRadius: r.md,
+      borderRadius: r.lg,
       backgroundColor: c.surface,
       overflow: 'hidden',
     },
@@ -926,9 +1265,9 @@ function makeStyles(
     mealTitle: {
       ...ts.subheading,
       fontFamily: f.sansBold,
-      fontSize: 17,
-      lineHeight: 21,
-      letterSpacing: -0.2,
+      fontSize: 20,
+      lineHeight: 24,
+      letterSpacing: -0.45,
       color: c.textDisplay,
     },
     mealMetaRow: {
@@ -940,42 +1279,39 @@ function makeStyles(
       minWidth: 0,
     },
     mealMetaKcal: {
-      ...ts.label,
-      fontFamily: f.sansMedium,
+      fontFamily: f.sansBold,
       fontSize: 10,
       lineHeight: 13,
       color: c.textSecondary,
     },
     mealMetaDivider: {
       width: 1,
-      height: 10,
+      height: 12,
       alignSelf: 'center',
       backgroundColor: c.borderVisible,
     },
     mealMetaProtein: {
-      ...ts.label,
       fontFamily: f.sansBold,
       fontSize: 10,
       lineHeight: 13,
       color: c.primary,
     },
     mealMetaCarbs: {
-      ...ts.label,
       fontFamily: f.sansBold,
       fontSize: 10,
       lineHeight: 13,
       color: c.success,
     },
     mealMetaFat: {
-      ...ts.label,
       fontFamily: f.sansBold,
       fontSize: 10,
       lineHeight: 13,
       color: c.macroFat,
     },
     foodName: {
-      ...ts.bodySm,
       fontFamily: f.sansBold,
+      fontSize: 12,
+      lineHeight: 15,
       color: c.textDisplay,
       alignSelf: 'stretch',
     },
@@ -986,8 +1322,9 @@ function makeStyles(
       gap: s.sm,
     },
     foodMeta: {
-      ...ts.caption,
       fontFamily: f.sans,
+      fontSize: 10,
+      lineHeight: 13,
       color: c.textMuted,
       flexShrink: 1,
     },
@@ -1000,9 +1337,9 @@ function makeStyles(
       flexShrink: 0,
     },
     foodMetricText: {
-      ...ts.caption,
       fontFamily: f.sansBold,
-      lineHeight: 15,
+      fontSize: 10,
+      lineHeight: 13,
     },
     foodMacroProteinText: {
       color: c.primary,
@@ -1014,8 +1351,8 @@ function makeStyles(
       color: c.macroFat,
     },
     foodKcalText: {
-      fontSize: 10,
-      lineHeight: 13,
+      fontSize: 9,
+      lineHeight: 12,
       fontFamily: f.sansMedium,
       color: c.textMuted,
       marginLeft: 2,
@@ -1029,13 +1366,12 @@ function makeStyles(
       textAlign: 'center',
     },
     emptyMealSlotHint: {
-      ...ts.caption,
       fontFamily: f.sans,
-      fontSize: 11,
-      lineHeight: 15,
+      fontSize: 14,
+      lineHeight: 18,
       color: c.textMuted,
-      paddingHorizontal: s.sm,
-      paddingVertical: s.xs,
+      paddingHorizontal: s.md,
+      paddingVertical: 10,
       textAlign: 'center',
     },
     emptyOverlay: {
@@ -1061,123 +1397,388 @@ function makeStyles(
       fontFamily: f.mono,
       color: c.textDisplay,
     },
-    footerBlock: {
-      marginTop: s.sm,
-      marginBottom: s.lg,
-      gap: s.sm,
-    },
-    adviceCard: {
-      borderWidth: 1,
-      borderColor: c.borderVisible,
-      borderRadius: r.md,
-      backgroundColor: c.surfaceElevated,
-      padding: s.md,
+    mealActionRow: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: s.md,
+      gap: s.xs,
+      flexShrink: 0,
     },
-    adviceIcon: {
-      width: 42,
-      height: 42,
-      borderRadius: r.sm,
+    mealAiBtn: {
+      width: 36,
+      height: 36,
+      borderRadius: r.md,
       borderWidth: 1,
       borderColor: c.primary,
-      backgroundColor: c.surface,
+      backgroundColor: 'transparent',
       alignItems: 'center',
       justifyContent: 'center',
     },
-    adviceTextBlock: {
-      flex: 1,
-      gap: s.xs,
-    },
-    adviceLabel: {
-      ...ts.bodySm,
-      fontFamily: f.sansMedium,
-      color: c.textDisplay,
-    },
-    adviceText: {
-      ...ts.bodySm,
-      fontFamily: f.sans,
-      color: c.textSecondary,
-    },
-    addMealBtn: {
+    mealMenuBtn: {
+      width: 36,
+      height: 36,
+      borderRadius: r.md,
       borderWidth: 1,
       borderColor: c.borderVisible,
-      borderRadius: r.technical,
       backgroundColor: 'transparent',
-      paddingVertical: s.md,
       alignItems: 'center',
+      justifyContent: 'center',
+    },
+    registerMealBtn: {
+      minHeight: 31,
+      borderRadius: r.pill,
+      borderWidth: 1,
+      borderColor: c.primary,
+      backgroundColor: 'transparent',
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+    },
+    registerMealBtnText: {
+      ...ts.label,
+      fontFamily: f.sansMedium,
+      color: c.primary,
+      letterSpacing: 0,
+    },
+    goalCard: {
+      borderWidth: 1,
+      borderColor: c.borderVisible,
+      borderRadius: r.md,
+      backgroundColor: c.surface,
+      marginTop: s.sm,
+      paddingHorizontal: s.sm,
+      paddingVertical: s.sm,
+      flexDirection: 'row',
+      alignItems: 'stretch',
+      gap: s.sm,
+    },
+    goalKcalRing: {
+      width: 96,
+      height: 102,
+      alignItems: 'center',
+      justifyContent: 'center',
+      flexShrink: 0,
+    },
+    goalKcalCenter: {
+      position: 'absolute',
+      alignItems: 'center',
+      justifyContent: 'center',
+      top: 29,
+      left: 14,
+      right: 14,
+    },
+    goalKcalValue: {
+      fontSize: 18,
+      lineHeight: 28,
+      fontFamily: f.sansMedium,
+      color: c.textDisplay,
+      letterSpacing: 0,
+      includeFontPadding: false,
+      textAlign: 'center',
+    },
+    goalKcalUnit: {
+      marginTop: 2,
+      fontSize: 11,
+      lineHeight: 14,
+      fontFamily: f.sansMedium,
+      color: c.textSecondary,
+      includeFontPadding: false,
+    },
+    goalMain: {
+      flex: 1,
+      minWidth: 0,
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: s.sm,
+    },
+    goalBadge: {
+      alignSelf: 'center',
+      borderRadius: r.sm,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surface,
+      paddingHorizontal: s.sm,
+      paddingVertical: 5,
+    },
+    goalBadgeText: {
+      ...ts.label,
+      fontFamily: f.mono,
+      fontSize: 11,
+      lineHeight: 13,
+      color: c.primary,
+      letterSpacing: 3,
+      includeFontPadding: false,
+    },
+    goalMacrosRow: {
+      width: '100%',
+      flexDirection: 'row',
+      alignItems: 'stretch',
+      gap: s.xs,
+    },
+    goalMacro: {
+      flex: 1,
+      minWidth: 0,
+      alignItems: 'center',
+      gap: 5,
+      paddingHorizontal: 1,
+    },
+    goalMacroIcon: {
+      width: 26,
+      height: 26,
+      borderRadius: r.pill,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    goalMacroBody: {
+      width: '100%',
+      minWidth: 0,
+      alignItems: 'center',
+      gap: 4,
+    },
+    goalMacroLabel: {
+      fontSize: 10,
+      lineHeight: 12,
+      fontFamily: f.sansBold,
+      color: c.textDisplay,
+      textAlign: 'center',
+      includeFontPadding: false,
+    },
+    goalMacroValue: {
+      width: '100%',
+      fontSize: 12,
+      lineHeight: 15,
+      fontFamily: f.sansBold,
+      textAlign: 'center',
+      includeFontPadding: false,
+    },
+    goalMacroTarget: {
+      fontFamily: f.sansMedium,
+      color: c.textSecondary,
+    },
+    goalMacroTrack: {
+      width: '100%',
+      height: 6,
+      borderRadius: r.pill,
+      backgroundColor: c.borderVisible,
+      overflow: 'hidden',
+    },
+    goalMacroFill: {
+      height: '100%',
+      borderRadius: r.pill,
+    },
+    fixedAddMealWrap: {
+      position: 'absolute',
+      left: s.md,
+      right: s.md,
+      bottom: s.sm,
+      zIndex: 20,
+      marginBottom: 15,
+    },
+    addMealBtn: {
+      borderWidth: 0,
+      borderColor: 'transparent',
+      borderRadius: r.pill,
+      backgroundColor: c.primary,
+      minHeight: 31,
+      paddingVertical: 6,
+      paddingHorizontal: s.md,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
     },
     addMealBtnDisabled: {
       opacity: 0.45,
     },
     addMealBtnText: {
       ...ts.label,
-      fontFamily: f.mono,
+      fontFamily: f.sansMedium,
+      color: c.textOnPrimary,
+      letterSpacing: 0,
+    },
+    mealMenuPopover: {
+      position: 'absolute',
+      width: 190,
+      maxHeight: 260,
+      borderWidth: 1,
+      borderColor: c.borderVisible,
+      borderRadius: r.md,
+      backgroundColor: c.surfaceElevated,
+      paddingVertical: s.xs,
+      paddingHorizontal: s.sm,
+      zIndex: 30,
+    },
+    mealMenuLayer: {
+      ...StyleSheet.absoluteFillObject,
+      zIndex: 40,
+    },
+    mealMenuDismiss: {
+      ...StyleSheet.absoluteFillObject,
+      backgroundColor: 'transparent',
+    },
+    mealMenuTitle: {
+      fontSize: 12,
+      lineHeight: 15,
+      fontFamily: f.sansBold,
       color: c.textDisplay,
-      letterSpacing: 1.1,
-      textTransform: 'uppercase',
+      paddingHorizontal: s.xs,
+      paddingVertical: s.xs,
+    },
+    mealMenuOption: {
+      minHeight: 34,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: s.xs,
+      borderRadius: r.sm,
+      paddingHorizontal: s.xs,
+    },
+    mealMenuOptionDisabled: {
+      opacity: 0.45,
+    },
+    mealMenuOptionText: {
+      fontSize: 12,
+      lineHeight: 15,
+      fontFamily: f.sansMedium,
+      color: c.textDisplay,
+    },
+    mealMenuOptionTextDisabled: {
+      color: c.textMuted,
+    },
+    mealMenuOptionDanger: {
+      fontSize: 12,
+      lineHeight: 15,
+      fontFamily: f.sansMedium,
+      color: c.danger,
+    },
+    mealMenuDivider: {
+      height: StyleSheet.hairlineWidth,
+      backgroundColor: c.borderVisible,
+      marginVertical: 2,
     },
     modalOverlay: {
       flex: 1,
-      backgroundColor: c.background,
-      justifyContent: 'center',
-      paddingHorizontal: s.xl,
+      backgroundColor: 'rgba(0, 0, 0, 0.72)',
+      justifyContent: 'flex-end',
+    },
+    modalKeyboardAvoiding: {
+      flex: 1,
     },
     modalCard: {
       backgroundColor: c.surface,
-      borderRadius: r.sm,
+      borderTopLeftRadius: 16,
+      borderTopRightRadius: 16,
       borderWidth: 1,
       borderColor: c.borderVisible,
-      padding: s.lg,
-      gap: s.md,
+      paddingTop: 34,
+      paddingHorizontal: s.lg,
+      gap: s.lg,
+    },
+    modalHandle: {
+      position: 'absolute',
+      top: 12,
+      alignSelf: 'center',
+      width: 38,
+      height: 4,
+      borderRadius: r.pill,
+      backgroundColor: c.textMuted,
+      opacity: 0.72,
+    },
+    modalCloseBtn: {
+      position: 'absolute',
+      top: 20,
+      right: s.md,
+      width: 30,
+      height: 30,
+      borderRadius: r.pill,
+      borderWidth: 1,
+      borderColor: c.borderVisible,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    modalHeader: {
+      gap: 7,
     },
     modalTitle: {
-      ...ts.bodySm,
-      fontFamily: f.sansMedium,
+      fontSize: 20,
+      lineHeight: 25,
+      fontFamily: f.sansBold,
       color: c.textDisplay,
-      letterSpacing: 0.8,
-      textTransform: 'uppercase',
+      letterSpacing: 0,
     },
-    modalInput: {
-      ...ts.bodySm,
+    modalSubtitle: {
+      fontSize: 13,
+      lineHeight: 17,
       fontFamily: f.sans,
-      color: c.text,
+      color: c.textSecondary,
+    },
+    modalFieldBlock: {
+      gap: 9,
+    },
+    modalLabel: {
+      fontSize: 13,
+      lineHeight: 16,
+      fontFamily: f.sansBold,
+      color: c.textDisplay,
+    },
+    modalInputWrap: {
+      minHeight: 47,
       borderWidth: 1,
       borderColor: c.borderVisible,
-      borderRadius: r.technical,
-      paddingHorizontal: s.md,
-      paddingVertical: s.sm,
+      borderRadius: r.sm,
       backgroundColor: c.surfaceElevated,
+      paddingHorizontal: s.md,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 9,
+    },
+    modalInputAccent: {
+      width: 2,
+      height: 24,
+      borderRadius: r.pill,
+      backgroundColor: c.primary,
+    },
+    modalInput: {
+      fontFamily: f.sans,
+      color: c.text,
+      fontSize: 14,
+      lineHeight: 18,
+      flex: 1,
+      minWidth: 0,
+      paddingVertical: 0,
     },
     modalActions: {
       flexDirection: 'row',
-      justifyContent: 'flex-end',
       gap: s.md,
     },
     modalBtnGhost: {
-      paddingVertical: s.sm,
-      paddingHorizontal: s.md,
-    },
-    modalBtnGhostText: {
-      ...ts.bodySm,
-      fontFamily: f.sansMedium,
-      color: c.textSecondary,
-    },
-    modalBtnPrimary: {
-      paddingVertical: s.sm,
-      paddingHorizontal: s.md,
-      backgroundColor: 'transparent',
-      borderRadius: r.technical,
+      flex: 1,
+      minHeight: 43,
       borderWidth: 1,
       borderColor: c.borderVisible,
+      borderRadius: r.sm,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    modalBtnGhostText: {
+      fontSize: 13,
+      lineHeight: 16,
+      fontFamily: f.sansBold,
+      color: c.textDisplay,
+    },
+    modalBtnPrimary: {
+      flex: 1,
+      minHeight: 43,
+      backgroundColor: c.primary,
+      borderRadius: r.sm,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     modalBtnPrimaryText: {
-      ...ts.bodySm,
-      fontFamily: f.sansMedium,
-      color: c.textDisplay,
-      letterSpacing: 0.8,
-      textTransform: 'uppercase',
+      fontSize: 13,
+      lineHeight: 16,
+      fontFamily: f.sansBold,
+      color: c.textOnPrimary,
+      letterSpacing: 0,
     },
   });
 }
