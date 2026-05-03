@@ -1,567 +1,588 @@
 /**
- * Tab Rutinas — datos desde Supabase, selector desplegable Mis Rutinas / Favoritos.
+ * Tab Rutinas - contenido visual de WorkoutsScreen.
  */
 
+import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Modal,
+  Alert,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
-  TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
 
+import VLogoLight from '@/assets/images/logo_light_sb.svg';
+import VLogoDark from '@/assets/images/logo_sb.svg';
 import { useEntreno } from '@/context/EntrenoContext';
 import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from '@/hooks/useTheme';
-import {
-  borrarRutina,
-  cambiarNombreRutina,
-  entrenamientoService,
-  type RutinaListaVista,
-} from '@/services/entrenamiento.service';
-import type { Theme } from '@/constants/theme';
+import { supabase } from '@/lib/supabase';
+import { borrarRutina } from '@/services/entrenamiento.service';
 
-type FiltroRutinas = 'mis' | 'favoritos';
+type Routine = {
+  id: string;
+  user_id: string;
+  nombre: string;
+  descripcion: string;
+  num_ejercicios: number;
+  musculos: string[];
+  imagen_url: string | null;
+  is_community: boolean;
+};
 
-function makeStyles(c: Theme, f: ReturnType<typeof useTheme>['f'], ts: ReturnType<typeof useTheme>['ts'], s: ReturnType<typeof useTheme>['s'], r: ReturnType<typeof useTheme>['r']) {
+type FiltroRutinas = 'mis' | 'favoritas';
+
+type RoutineExerciseJoinRow = {
+  orden: number;
+  exercises: RoutineExerciseJoin | RoutineExerciseJoin[] | null;
+};
+
+type RoutineExerciseJoin = {
+  nombre: string | null;
+  musculo_primario: string | null;
+  musculos_secundarios: string[] | null;
+};
+
+type RoutineJoinRow = {
+  id: string;
+  nombre: string;
+  created_by?: string | null;
+  routine_exercises?: RoutineExerciseJoinRow[] | null;
+};
+
+type FavoriteRoutineJoinRow = {
+  routines: RoutineJoinRow | RoutineJoinRow[] | null;
+};
+
+type LayoutBox = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+type RoutinesTheme = {
+  background: string;
+  surface: string;
+  textPrimary: string;
+  textSecondary: string;
+  accent: string;
+  border: string;
+  shadow: string;
+  shadowOpacity: number;
+  mutedSurface: string;
+  ctaStart: string;
+  ctaEnd: string;
+  ctaWave: string;
+  ctaIconBg: string;
+  white: string;
+  whiteMuted: string;
+  danger: string;
+};
+
+const ROUTINES_COLORS = {
+  light: {
+    background: '#F5F5F5',
+    surface: '#FFFFFF',
+    textPrimary: '#0D0D0D',
+    textSecondary: '#888888',
+    accent: '#00B4D8',
+    border: '#E0E0E0',
+    shadow: 'rgba(0,0,0,0.08)',
+    shadowOpacity: 1,
+    mutedSurface: '#F7F9FA',
+    ctaStart: '#00B4D8',
+    ctaEnd: '#0096C7',
+    ctaWave: 'rgba(255,255,255,0.18)',
+    ctaIconBg: 'rgba(255,255,255,0.24)',
+    white: '#FFFFFF',
+    whiteMuted: 'rgba(255,255,255,0.74)',
+    danger: '#D71921',
+  },
+  dark: {
+    background: '#0D0D0D',
+    surface: '#1A1A1A',
+    textPrimary: '#FFFFFF',
+    textSecondary: '#888888',
+    accent: '#00B4D8',
+    border: '#2A2A2A',
+    shadow: 'rgba(0,0,0,0)',
+    shadowOpacity: 0,
+    mutedSurface: '#151515',
+    ctaStart: '#00B4D8',
+    ctaEnd: '#0077B6',
+    ctaWave: 'rgba(255,255,255,0.14)',
+    ctaIconBg: 'rgba(255,255,255,0.22)',
+    white: '#FFFFFF',
+    whiteMuted: 'rgba(255,255,255,0.72)',
+    danger: '#D71921',
+  },
+} as const;
+
+function getRoutineTheme(scheme: 'light' | 'dark'): RoutinesTheme {
+  return scheme === 'dark' ? ROUTINES_COLORS.dark : ROUTINES_COLORS.light;
+}
+
+function uniqueClean(values: (string | null | undefined)[]): string[] {
+  return Array.from(
+    new Set(values.map((value) => value?.trim()).filter((value): value is string => Boolean(value))),
+  );
+}
+
+// --- RUTINAS STYLES START ---
+function makeStyles(
+  theme: RoutinesTheme,
+  f: ReturnType<typeof useTheme>['f'],
+) {
   return StyleSheet.create({
+    scroll: {
+      flex: 1,
+      backgroundColor: theme.background,
+    },
     root: {
       flex: 1,
-      minHeight: 0,
-      paddingHorizontal: s.md,
-      paddingBottom: s.sm,
-      gap: s.md,
+      backgroundColor: theme.background,
     },
-    primaryBtn: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: s.sm,
-      paddingVertical: s.md,
-      borderRadius: r.sm,
-      backgroundColor: c.primary,
-      borderWidth: 1,
-      borderColor: c.primary,
+    scrollContent: {
+      paddingHorizontal: 20,
+      paddingTop: 16,
+      paddingBottom: 24,
+      gap: 14,
     },
-    primaryBtnText: {
-      ...ts.subheading,
-      fontFamily: f.sansMedium,
-      color: c.textOnPrimary,
-      letterSpacing: 0.3,
-    },
-    secondaryRow: {
-      flexDirection: 'row',
-      gap: s.sm,
-    },
-    secondaryBtn: {
-      flex: 1,
-      paddingVertical: s.sm,
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderWidth: 1,
-      borderColor: c.borderVisible,
-      borderRadius: r.technical,
-      backgroundColor: c.surface,
-    },
-    secondaryBtnText: {
-      ...ts.bodySm,
-      fontFamily: f.mono,
-      color: c.textDisplay,
-      letterSpacing: 0.4,
-    },
-    accordionWrap: {
-      borderWidth: 1,
-      borderColor: c.borderVisible,
-      borderRadius: r.lg,
-      backgroundColor: c.surface,
+    ctaCard: {
+      minHeight: 86,
+      borderRadius: 16,
       overflow: 'hidden',
+      backgroundColor: theme.ctaStart,
+      shadowColor: theme.shadow,
+      shadowOpacity: theme.shadowOpacity,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 6 },
+      elevation: theme.shadowOpacity > 0 ? 3 : 0,
     },
-    accordionHeader: {
+    ctaGradientLayer: {
+      ...StyleSheet.absoluteFillObject,
+      backgroundColor: theme.ctaEnd,
+      opacity: 0.28,
+      left: '46%',
+    },
+    waveOne: {
+      position: 'absolute',
+      width: 170,
+      height: 170,
+      borderRadius: 85,
+      borderWidth: 1,
+      borderColor: theme.ctaWave,
+      right: -46,
+      top: -76,
+    },
+    waveTwo: {
+      position: 'absolute',
+      width: 132,
+      height: 132,
+      borderRadius: 66,
+      borderWidth: 1,
+      borderColor: theme.ctaWave,
+      right: -18,
+      top: -42,
+    },
+    waveThree: {
+      position: 'absolute',
+      width: 92,
+      height: 92,
+      borderRadius: 46,
+      borderWidth: 1,
+      borderColor: theme.ctaWave,
+      right: 16,
+      top: -12,
+    },
+    ctaContent: {
+      minHeight: 86,
       flexDirection: 'row',
       alignItems: 'center',
-      justifyContent: 'space-between',
-      paddingHorizontal: s.md,
-      paddingVertical: s.sm,
+      paddingHorizontal: 18,
+      gap: 16,
     },
-    accordionTitulo: {
-      ...ts.bodySm,
-      fontFamily: f.sansMedium,
-      color: c.textDisplay,
+    ctaIconCircle: {
+      width: 48,
+      height: 48,
+      borderRadius: 24,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: theme.ctaIconBg,
     },
-    accordionOptions: {
-      borderTopWidth: 1,
-      borderTopColor: c.border,
+    ctaTitle: {
+      fontFamily: f.sansBold,
+      fontSize: 16,
+      lineHeight: 20,
+      color: theme.white,
     },
-    accordionOption: {
-      paddingHorizontal: s.md,
-      paddingVertical: s.sm,
-    },
-    accordionOptionActive: {
-      backgroundColor: c.primaryBg,
-    },
-    accordionOptionText: {
-      ...ts.bodySm,
+    ctaSubtitle: {
+      marginTop: 3,
       fontFamily: f.sans,
-      color: c.text,
+      fontSize: 12,
+      lineHeight: 16,
+      color: theme.whiteMuted,
     },
-    listArea: {
-      flex: 1,
-      minHeight: 0,
+    quickActionsRow: {
+      flexDirection: 'row',
       gap: 12,
     },
-    sectionMeta: {
-      ...ts.caption,
-      fontFamily: f.mono,
-      color: c.textMuted,
-      letterSpacing: 0.5,
-    },
-    card: {
-      borderWidth: 1,
-      borderColor: c.borderVisible,
-      borderRadius: r.lg,
-      backgroundColor: c.surfaceElevated,
-      paddingHorizontal: s.sm,
-      paddingTop: s.sm,
-      paddingBottom: s.xs,
-      position: 'relative',
-    },
-    actionHit: {
-      position: 'absolute',
-      top: s.xs,
-      right: s.xs,
-      zIndex: 2,
-      width: 44,
-      height: 44,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    cardTitle: {
-      ...ts.body,
-      fontFamily: f.sansMedium,
-      color: c.textDisplay,
-      marginBottom: s.xs,
-      paddingRight: 40,
-    },
-    startBtn: {
-      marginTop: s.xs,
-      paddingVertical: s.sm,
-      alignItems: 'center',
-      borderRadius: r.technical,
-      backgroundColor: c.surface,
-      borderWidth: 1,
-      borderColor: c.borderVisible,
-    },
-    startBtnText: {
-      ...ts.label,
-      fontFamily: f.mono,
-      color: c.primary,
-      letterSpacing: 0.8,
-    },
-    loadingBox: {
-      padding: s.lg,
-      alignItems: 'center',
-    },
-    emptyTxt: {
-      ...ts.bodySm,
-      fontFamily: f.sans,
-      color: c.textMuted,
-      textAlign: 'center',
-      paddingVertical: s.lg,
-    },
-    modalOverlay: {
+    quickCard: {
       flex: 1,
-      backgroundColor: 'rgba(0,0,0,0.55)',
-      justifyContent: 'center',
-      padding: s.lg,
-    },
-    modalCard: {
-      backgroundColor: c.surface,
-      borderRadius: r.lg,
+      minHeight: 98,
+      borderRadius: 14,
+      backgroundColor: theme.surface,
       borderWidth: 1,
-      borderColor: c.borderVisible,
-      padding: s.md,
-    },
-    modalHeader: {
+      borderColor: theme.border,
+      padding: 14,
       flexDirection: 'row',
-      alignItems: 'flex-start',
-      justifyContent: 'space-between',
-      marginBottom: s.sm,
-    },
-    modalTitle: {
-      ...ts.subheading,
-      fontFamily: f.sansMedium,
-      color: c.textDisplay,
-      flex: 1,
-      paddingRight: s.sm,
-    },
-    modalClose: {
-      width: 40,
-      height: 40,
       alignItems: 'center',
-      justifyContent: 'center',
+      gap: 10,
+      shadowColor: theme.shadow,
+      shadowOpacity: theme.shadowOpacity,
+      shadowRadius: 10,
+      shadowOffset: { width: 0, height: 4 },
+      elevation: theme.shadowOpacity > 0 ? 2 : 0,
     },
-    modalLabel: {
-      ...ts.caption,
-      fontFamily: f.mono,
-      color: c.textSecondary,
-      marginBottom: s.xs,
-      letterSpacing: 0.5,
-    },
-    modalInput: {
-      ...ts.body,
-      fontFamily: f.sans,
-      color: c.textDisplay,
-      borderBottomWidth: 1,
-      borderBottomColor: c.borderVisible,
-      paddingVertical: s.xs,
-      marginBottom: s.md,
-    },
-    modalRow: {
-      flexDirection: 'row',
-      gap: s.sm,
-      justifyContent: 'flex-end',
-      flexWrap: 'wrap',
-    },
-    modalBtn: {
-      paddingVertical: s.sm,
-      paddingHorizontal: s.md,
-      borderRadius: r.technical,
-      borderWidth: 1,
-      borderColor: c.borderVisible,
-      backgroundColor: c.surfaceElevated,
-    },
-    modalBtnPrimary: {
-      backgroundColor: c.primary,
-      borderColor: c.primary,
-    },
-    modalBtnTxt: {
-      ...ts.bodySm,
-      fontFamily: f.sans,
-      color: c.textDisplay,
-    },
-    modalBtnTxtPrimary: {
-      color: c.textOnPrimary,
-      fontFamily: f.sansMedium,
-    },
-    startBtnDisabled: {
-      opacity: 0.65,
-    },
-    startBtnTextMuted: {
-      color: c.textMuted,
-    },
-    renameModalOverlay: {
-      flex: 1,
-      backgroundColor: 'rgba(0,0,0,0.5)',
-      justifyContent: 'center',
-      paddingHorizontal: s.lg,
-    },
-    renameModalCard: {
-      backgroundColor: c.surface,
+    quickIconBox: {
+      width: 42,
+      height: 42,
       borderRadius: 12,
-      padding: s.md,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: theme.mutedSurface,
       borderWidth: 1,
-      borderColor: c.borderVisible,
+      borderColor: theme.border,
     },
-    renameModalTitle: {
-      fontSize: 11,
-      fontFamily: f.mono,
-      color: c.textSecondary,
-      textTransform: 'uppercase',
-      letterSpacing: 0.6,
-      marginBottom: s.sm,
+    quickPlusBadge: {
+      position: 'absolute',
+      right: 8,
+      bottom: 8,
     },
-    renameModalInput: {
-      ...ts.body,
+    quickTextWrap: {
+      flex: 1,
+      minWidth: 0,
+    },
+    quickTitle: {
+      fontFamily: f.sansBold,
+      fontSize: 13,
+      lineHeight: 17,
+      color: theme.textPrimary,
+    },
+    quickSubtitle: {
+      marginTop: 4,
       fontFamily: f.sans,
-      color: c.textDisplay,
-      borderBottomWidth: 1,
-      borderBottomColor: c.borderVisible,
-      paddingVertical: s.xs,
-      marginBottom: s.md,
+      fontSize: 10,
+      lineHeight: 13,
+      color: theme.textSecondary,
     },
-    renameModalRow: {
-      flexDirection: 'row',
-      justifyContent: 'flex-end',
-      gap: s.sm,
-    },
-    renameBtnGhost: {
-      paddingVertical: s.sm,
-      paddingHorizontal: s.md,
-      borderRadius: r.technical,
+    sectionHeader: {
+      minHeight: 46,
+      borderRadius: 14,
+      backgroundColor: theme.surface,
       borderWidth: 1,
-      borderColor: c.borderVisible,
+      borderColor: theme.border,
+      paddingHorizontal: 14,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      shadowColor: theme.shadow,
+      shadowOpacity: theme.shadowOpacity,
+      shadowRadius: 8,
+      shadowOffset: { width: 0, height: 3 },
+      elevation: theme.shadowOpacity > 0 ? 1 : 0,
+    },
+    sectionTitleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 9,
+      minWidth: 0,
+      flex: 1,
+    },
+    sectionTitle: {
+      fontFamily: f.sansBold,
+      fontSize: 13,
+      lineHeight: 17,
+      color: theme.textPrimary,
+    },
+    sectionCount: {
+      fontFamily: f.sansBold,
+      fontSize: 12,
+      lineHeight: 16,
+      color: theme.accent,
+      marginLeft: 12,
+    },
+    filterOptions: {
+      marginTop: -8,
+      borderRadius: 14,
+      backgroundColor: theme.surface,
+      borderWidth: 1,
+      borderColor: theme.border,
+      overflow: 'hidden',
+      shadowColor: theme.shadow,
+      shadowOpacity: theme.shadowOpacity,
+      shadowRadius: 8,
+      shadowOffset: { width: 0, height: 3 },
+      elevation: theme.shadowOpacity > 0 ? 1 : 0,
+    },
+    filterOption: {
+      minHeight: 44,
+      paddingHorizontal: 14,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    filterOptionActive: {
+      backgroundColor: theme.mutedSurface,
+    },
+    filterOptionText: {
+      fontFamily: f.sansBold,
+      fontSize: 13,
+      lineHeight: 17,
+      color: theme.textPrimary,
+    },
+    filterOptionDivider: {
+      height: 1,
+      backgroundColor: theme.border,
+    },
+    filterMenuLayer: {
+      ...StyleSheet.absoluteFillObject,
+      zIndex: 40,
+    },
+    filterMenuDismiss: {
+      ...StyleSheet.absoluteFillObject,
       backgroundColor: 'transparent',
     },
-    renameBtnGhostTxt: {
-      ...ts.bodySm,
-      fontFamily: f.sans,
-      color: c.textDisplay,
-    },
-    renameBtnPrimary: {
-      paddingVertical: s.sm,
-      paddingHorizontal: s.md,
-      borderRadius: r.technical,
-      backgroundColor: c.primary,
+    filterMenuPopover: {
+      position: 'absolute',
+      width: 190,
+      maxHeight: 180,
       borderWidth: 1,
-      borderColor: c.primary,
-    },
-    renameBtnPrimaryTxt: {
-      ...ts.bodySm,
-      fontFamily: f.sansMedium,
-      color: c.textOnPrimary,
-    },
-    dsModalOverlay: {
-      flex: 1,
-      backgroundColor: 'rgba(0,0,0,0.5)',
-      justifyContent: 'center',
-      paddingHorizontal: s.lg,
-    },
-    dsModalCard: {
-      backgroundColor: c.surface,
+      borderColor: theme.border,
       borderRadius: 12,
-      padding: s.md,
+      backgroundColor: theme.surface,
+      paddingVertical: 6,
+      paddingHorizontal: 8,
+      shadowColor: theme.shadow,
+      shadowOpacity: theme.shadowOpacity,
+      shadowRadius: 12,
+      shadowOffset: { width: 0, height: 5 },
+      elevation: theme.shadowOpacity > 0 ? 4 : 0,
+      zIndex: 30,
+    },
+    routineMenuPopover: {
+      position: 'absolute',
+      width: 190,
+      maxHeight: 180,
       borderWidth: 1,
-      borderColor: c.borderVisible,
+      borderColor: theme.border,
+      borderRadius: 12,
+      backgroundColor: theme.surface,
+      paddingVertical: 6,
+      paddingHorizontal: 8,
+      shadowColor: theme.shadow,
+      shadowOpacity: theme.shadowOpacity,
+      shadowRadius: 12,
+      shadowOffset: { width: 0, height: 5 },
+      elevation: theme.shadowOpacity > 0 ? 4 : 0,
+      zIndex: 30,
     },
-    menuModalTitle: {
-      ...ts.body,
-      fontFamily: f.sansMedium,
-      color: c.textDisplay,
-      marginBottom: s.md,
+    filterMenuTitle: {
+      fontSize: 12,
+      lineHeight: 15,
+      fontFamily: f.sansBold,
+      color: theme.textPrimary,
+      paddingHorizontal: 6,
+      paddingVertical: 6,
     },
-    menuOption: {
-      paddingVertical: s.md,
-      alignSelf: 'stretch',
-    },
-    menuOptionTxt: {
-      ...ts.body,
-      fontFamily: f.sans,
-      color: c.textDisplay,
-      textAlign: 'left',
-    },
-    menuOptionDestructiveTxt: {
-      ...ts.body,
-      fontFamily: f.sans,
-      color: c.danger,
-      textAlign: 'left',
-    },
-    menuSep: {
-      height: StyleSheet.hairlineWidth,
-      backgroundColor: c.border,
-      alignSelf: 'stretch',
-    },
-    menuCancel: {
-      marginTop: s.sm,
-      paddingVertical: s.sm,
-      alignSelf: 'stretch',
-      alignItems: 'center',
-    },
-    menuCancelTxt: {
-      fontSize: 11,
-      fontFamily: f.mono,
-      color: c.textSecondary,
-      textTransform: 'uppercase',
-      letterSpacing: 0.5,
-    },
-    borrarModalTitle: {
-      fontSize: 11,
-      fontFamily: f.mono,
-      color: c.textSecondary,
-      textTransform: 'uppercase',
-      letterSpacing: 0.6,
-      marginBottom: s.xs,
-    },
-    borrarModalBody: {
-      ...ts.bodySm,
-      fontFamily: f.sans,
-      color: c.text,
-      marginBottom: s.lg,
-    },
-    borrarModalRow: {
+    filterMenuOption: {
+      minHeight: 36,
       flexDirection: 'row',
-      gap: s.sm,
-      alignItems: 'stretch',
-    },
-    borrarBtnSecondary: {
-      flex: 1,
-      paddingVertical: s.sm,
-      paddingHorizontal: s.md,
-      borderRadius: r.pill,
-      borderWidth: 1,
-      borderColor: c.borderVisible,
       alignItems: 'center',
-      justifyContent: 'center',
+      gap: 8,
+      borderRadius: 8,
+      paddingHorizontal: 6,
     },
-    borrarBtnSecondaryTxt: {
-      ...ts.bodySm,
-      fontFamily: f.sansMedium,
-      color: c.text,
+    filterMenuLogo: {
+      width: 17,
+      height: 17,
     },
-    borrarBtnDestructive: {
+    filterMenuOptionActive: {
+      backgroundColor: theme.mutedSurface,
+    },
+    filterMenuOptionText: {
       flex: 1,
-      paddingVertical: s.sm,
-      paddingHorizontal: s.md,
-      borderRadius: r.pill,
-      borderWidth: 1,
-      borderColor: c.danger,
+      fontSize: 12,
+      lineHeight: 15,
+      fontFamily: f.sansBold,
+      color: theme.textPrimary,
+    },
+    filterMenuOptionDanger: {
+      flex: 1,
+      fontSize: 12,
+      lineHeight: 15,
+      fontFamily: f.sansBold,
+      color: theme.danger,
+    },
+    filterMenuDivider: {
+      height: StyleSheet.hairlineWidth,
+      backgroundColor: theme.border,
+      marginVertical: 2,
+    },
+    listArea: {
+      gap: 12,
+    },
+    loadingBox: {
+      paddingVertical: 24,
       alignItems: 'center',
-      justifyContent: 'center',
     },
-    borrarBtnDestructiveTxt: {
-      ...ts.bodySm,
-      fontFamily: f.sansMedium,
-      color: c.danger,
-    },
-    errorModalBody: {
-      ...ts.bodySm,
+    emptyText: {
+      paddingVertical: 22,
+      textAlign: 'center',
       fontFamily: f.sans,
-      color: c.text,
-      marginBottom: s.md,
+      fontSize: 13,
+      lineHeight: 18,
+      color: theme.textSecondary,
     },
-    errorModalOk: {
-      alignSelf: 'flex-end',
-      paddingVertical: s.sm,
-      paddingHorizontal: s.md,
+    routineCard: {
+      borderRadius: 16,
+      backgroundColor: theme.surface,
+      borderWidth: 1,
+      borderColor: theme.border,
+      padding: 12,
+      shadowColor: theme.shadow,
+      shadowOpacity: theme.shadowOpacity,
+      shadowRadius: 12,
+      shadowOffset: { width: 0, height: 5 },
+      elevation: theme.shadowOpacity > 0 ? 2 : 0,
     },
-    errorModalOkTxt: {
-      ...ts.bodySm,
-      fontFamily: f.sansMedium,
-      color: c.primary,
+    routineTop: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 12,
+    },
+    routineContent: {
+      flex: 1,
+      minWidth: 0,
+      paddingTop: 2,
+      paddingRight: 28,
+    },
+    routineName: {
+      fontFamily: f.sansBold,
+      fontSize: 15,
+      lineHeight: 19,
+      color: theme.textPrimary,
+    },
+    metaRow: {
+      marginTop: 8,
+      flexDirection: 'row',
+      alignItems: 'center',
+      flexWrap: 'wrap',
+      columnGap: 12,
+      rowGap: 4,
+    },
+    metaItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+    },
+    metaText: {
+      fontFamily: f.sans,
+      fontSize: 10,
+      lineHeight: 13,
+      color: theme.textSecondary,
+    },
+    menuButton: {
+      position: 'absolute',
+      top: 4,
+      right: 0,
+      width: 34,
+      height: 30,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    routineDivider: {
+      height: 1,
+      backgroundColor: theme.border,
+      marginTop: 12,
+      marginBottom: 8,
+    },
+    startRoutineButton: {
+      minHeight: 32,
+      alignSelf: 'center',
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+      paddingHorizontal: 12,
+    },
+    startRoutineText: {
+      fontFamily: f.monoBold,
+      fontSize: 10,
+      lineHeight: 14,
+      letterSpacing: 0.8,
+      color: theme.accent,
+    },
+    disabled: {
+      opacity: 0.5,
     },
   });
 }
+// --- RUTINAS STYLES END ---
 
 export function RutinasListadoTab() {
   const router = useRouter();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const { f, scheme } = useTheme();
   const { user } = useAuth();
   const { iniciarEntrenoVacio, iniciarDesdeRutina, entrenoActivo } = useEntreno();
-  const { c, f, ts, s, r } = useTheme();
-  const styles = useMemo(() => makeStyles(c, f, ts, s, r), [c, f, ts, s, r]);
+  const theme = useMemo(() => getRoutineTheme(scheme), [scheme]);
+  const styles = useMemo(() => makeStyles(theme, f), [theme, f]);
+  const VLogo = scheme === 'dark' ? VLogoDark : VLogoLight;
 
-  const [modalEntrenoVacio, setModalEntrenoVacio] = useState(false);
-  const [nombreEntrenoVacio, setNombreEntrenoVacio] = useState('');
-  const [iniciandoEntrenoVacio, setIniciandoEntrenoVacio] = useState(false);
-  const iniciandoEntrenoVacioRef = useRef(false);
+  const [filtroRutinas, setFiltroRutinas] = useState<FiltroRutinas>('mis');
+  const [filtroOpen, setFiltroOpen] = useState(false);
+  const [filtroScrollY, setFiltroScrollY] = useState(0);
+  const [filtroLayout, setFiltroLayout] = useState({ x: 20, y: 0, width: 0, height: 46 });
+  const [routineMenu, setRoutineMenu] = useState<Routine | null>(null);
+  const [routineMenuLayout, setRoutineMenuLayout] = useState<LayoutBox>({ x: 20, y: 0, width: 0, height: 74 });
+  const [listAreaLayout, setListAreaLayout] = useState<LayoutBox>({ x: 20, y: 0, width: 0, height: 0 });
+  const [iniciandoVacio, setIniciandoVacio] = useState(false);
   const [rutinaIniciandoId, setRutinaIniciandoId] = useState<string | null>(null);
+  const iniciandoVacioRef = useRef(false);
   const rutinaIniciandoRef = useRef<string | null>(null);
+  const routineLayoutsRef = useRef<Record<string, LayoutBox>>({});
 
-  const [filtro, setFiltro] = useState<FiltroRutinas>('mis');
-  const [accordionOpen, setAccordionOpen] = useState(false);
-  const [lista, setLista] = useState<RutinaListaVista[]>([]);
-  const [favIds, setFavIds] = useState<Set<string>>(new Set());
-  const [cargando, setCargando] = useState(false);
-
-  const [modalMenuVisible, setModalMenuVisible] = useState(false);
-  const [modalBorrarVisible, setModalBorrarVisible] = useState(false);
-  const [modalNombreVisible, setModalNombreVisible] = useState(false);
-  const [modalErrorVisible, setModalErrorVisible] = useState(false);
-  const [errorModalMensaje, setErrorModalMensaje] = useState('');
-  const [rutinaSeleccionada, setRutinaSeleccionada] = useState<RutinaListaVista | null>(null);
-  const [textoRenombrarDraft, setTextoRenombrarDraft] = useState('');
-  const [guardandoNombre, setGuardandoNombre] = useState(false);
-  const [borrandoRutina, setBorrandoRutina] = useState(false);
-
-  const listaRef = useRef<RutinaListaVista[]>([]);
-  const favIdsRef = useRef<Set<string>>(new Set());
-  useEffect(() => {
-    listaRef.current = lista;
-  }, [lista]);
-  useEffect(() => {
-    favIdsRef.current = favIds;
-  }, [favIds]);
-
-  const cargar = useCallback(async () => {
-    if (!user?.id) {
-      setLista([]);
-      setFavIds(new Set());
-      return;
-    }
-    setCargando(true);
-    try {
-      if (filtro === 'mis') {
-        const [mis, ids] = await Promise.all([
-          entrenamientoService.obtenerMisRutinas(user.id),
-          entrenamientoService.obtenerRoutineIdsFavoritas(user.id),
-        ]);
-        setLista(mis);
-        setFavIds(new Set(ids));
-      } else {
-        const fav = await entrenamientoService.obtenerRutinasFavoritas(user.id);
-        setLista(fav);
-        setFavIds(new Set(fav.map((x) => x.id)));
-      }
-    } finally {
-      setCargando(false);
-    }
-  }, [user?.id, filtro]);
-
-  useEffect(() => {
-    void cargar();
-  }, [cargar]);
-
-  const onToggleFavorito = useCallback(
-    async (routineId: string) => {
-      if (!user?.id) return;
-      await entrenamientoService.toggleFavoritoRutina(user.id, routineId);
-      setFavIds((prev) => {
-        const next = new Set(prev);
-        if (next.has(routineId)) next.delete(routineId);
-        else next.add(routineId);
-        return next;
-      });
-      if (filtro === 'favoritos') {
-        void cargar();
-      }
-    },
-    [user?.id, filtro, cargar],
-  );
-
-  const toggleAccordion = () => {
-    setAccordionOpen((o) => !o);
-  };
-
-  const seleccionarFiltro = (next: FiltroRutinas) => {
-    setFiltro(next);
-    setAccordionOpen(false);
-  };
-
-  const cerrarModalEntrenoVacio = useCallback(() => {
-    setModalEntrenoVacio(false);
-    setNombreEntrenoVacio('');
-    iniciandoEntrenoVacioRef.current = false;
-    setIniciandoEntrenoVacio(false);
-  }, []);
-
-  const puedeComenzarEntrenoVacio = nombreEntrenoVacio.trim() !== '';
-
-  const onComenzarEntrenoVacio = useCallback(async () => {
-    if (!puedeComenzarEntrenoVacio || iniciandoEntrenoVacioRef.current) return;
-    iniciandoEntrenoVacioRef.current = true;
-    setIniciandoEntrenoVacio(true);
-    try {
-      await iniciarEntrenoVacio(nombreEntrenoVacio.trim());
-      cerrarModalEntrenoVacio();
-      router.push('/(tabs)/(entrenamiento)/entreno-activo');
-    } finally {
-      iniciandoEntrenoVacioRef.current = false;
-      setIniciandoEntrenoVacio(false);
-    }
-  }, [puedeComenzarEntrenoVacio, nombreEntrenoVacio, iniciarEntrenoVacio, cerrarModalEntrenoVacio, router]);
-
+  const { misRutinas, favoritas, loading, removeRoutine, removeFavorite } = useRoutines(user?.id);
+  const rutinasFiltradas = filtroRutinas === 'mis' ? misRutinas : favoritas;
   const hayEntrenoActivo = entrenoActivo != null;
 
+  const onEmpezarEntrenoVacio = useCallback(async () => {
+    if (hayEntrenoActivo || iniciandoVacioRef.current) return;
+    iniciandoVacioRef.current = true;
+    setIniciandoVacio(true);
+    try {
+      await iniciarEntrenoVacio('Entreno vacío');
+      router.push('/(tabs)/(entrenamiento)/entreno-activo');
+    } finally {
+      iniciandoVacioRef.current = false;
+      setIniciandoVacio(false);
+    }
+  }, [hayEntrenoActivo, iniciarEntrenoVacio, router]);
+
   const onEmpezarRutina = useCallback(
-    async (rut: RutinaListaVista) => {
+    async (routine: Routine) => {
       if (hayEntrenoActivo || rutinaIniciandoRef.current != null) return;
-      rutinaIniciandoRef.current = rut.id;
-      setRutinaIniciandoId(rut.id);
+      rutinaIniciandoRef.current = routine.id;
+      setRutinaIniciandoId(routine.id);
       try {
-        await iniciarDesdeRutina(rut.id, rut.nombre);
+        await iniciarDesdeRutina(routine.id, routine.nombre);
         router.push('/(tabs)/(entrenamiento)/entreno-activo');
       } finally {
         rutinaIniciandoRef.current = null;
@@ -571,390 +592,445 @@ export function RutinasListadoTab() {
     [hayEntrenoActivo, iniciarDesdeRutina, router],
   );
 
-  const mostrarErrorModal = useCallback((mensaje: string) => {
-    setErrorModalMensaje(mensaje);
-    setModalErrorVisible(true);
+  const filtroLabel = filtroRutinas === 'mis' ? 'Mis rutinas' : 'Favoritas';
+  const rutinaCountLabel = `${rutinasFiltradas.length} rutina${rutinasFiltradas.length === 1 ? '' : 's'}`;
+  const seleccionarFiltro = useCallback((next: FiltroRutinas) => {
+    setFiltroRutinas(next);
+    setFiltroOpen(false);
   }, []);
 
-  const cerrarErrorModal = useCallback(() => {
-    setModalErrorVisible(false);
-    setErrorModalMensaje('');
-  }, []);
+  const onConsultarV = useCallback(() => {
+    if (!routineMenu) return;
+    Alert.alert('Consultar a V', `Consulta sobre ${routineMenu.nombre}`);
+    setRoutineMenu(null);
+  }, [routineMenu]);
 
-  const ejecutarCambiarNombre = useCallback(
-    async (rut: RutinaListaVista, nuevoNombre: string): Promise<boolean> => {
-      const snapshot = listaRef.current.map((r) => ({ ...r, ejercicios: [...r.ejercicios] }));
-      setLista((prev) => prev.map((r) => (r.id === rut.id ? { ...r, nombre: nuevoNombre } : r)));
-      try {
-        await cambiarNombreRutina(rut.id, nuevoNombre);
-        return true;
-      } catch (e) {
-        setLista(snapshot);
-        mostrarErrorModal(e instanceof Error ? e.message : 'No se pudo cambiar el nombre.');
-        return false;
+  const onEliminarRutina = useCallback(() => {
+    const routine = routineMenu;
+    if (!routine) return;
+    setRoutineMenu(null);
+    Alert.alert(
+      'Eliminar rutina',
+      `¿Seguro que quieres eliminar "${routine.nombre}"?`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Eliminar',
+          style: 'destructive',
+          onPress: () => {
+            void (async () => {
+              try {
+                await borrarRutina(routine.id);
+                removeRoutine(routine.id);
+              } catch (error) {
+                Alert.alert('No se pudo eliminar', error instanceof Error ? error.message : 'Inténtalo de nuevo.');
+              }
+            })();
+          },
+        },
+      ],
+    );
+  }, [removeRoutine, routineMenu]);
+
+  const onQuitarFavorito = useCallback(() => {
+    const routine = routineMenu;
+    if (!routine || !user?.id) return;
+    setRoutineMenu(null);
+    void (async () => {
+      const { error } = await supabase
+        .from('user_favorite_routines')
+        .delete()
+        .eq('user_id', user.id)
+        .eq('routine_id', routine.id);
+
+      if (error) {
+        Alert.alert('No se pudo quitar', error.message || 'Inténtalo de nuevo.');
+        return;
       }
-    },
-    [mostrarErrorModal],
-  );
 
-  const cerrarModalNombre = useCallback(() => {
-    setModalNombreVisible(false);
-    setTextoRenombrarDraft('');
-    setGuardandoNombre(false);
-    setRutinaSeleccionada(null);
-  }, []);
-
-  const guardarNombreRutina = useCallback(async () => {
-    const rut = rutinaSeleccionada;
-    const v = textoRenombrarDraft.trim();
-    if (!rut || !v) return;
-    setGuardandoNombre(true);
-    try {
-      const ok = await ejecutarCambiarNombre(rut, v);
-      if (ok) cerrarModalNombre();
-    } finally {
-      setGuardandoNombre(false);
-    }
-  }, [textoRenombrarDraft, rutinaSeleccionada, ejecutarCambiarNombre, cerrarModalNombre]);
-
-  const cerrarMenuModal = useCallback(() => {
-    setModalMenuVisible(false);
-    setRutinaSeleccionada(null);
-  }, []);
-
-  const onMenuCambiarNombre = useCallback(() => {
-    const r = rutinaSeleccionada;
-    if (!r) return;
-    setModalMenuVisible(false);
-    setTextoRenombrarDraft(r.nombre);
-    setModalNombreVisible(true);
-  }, [rutinaSeleccionada]);
-
-  const onMenuBorrarRutina = useCallback(() => {
-    setModalMenuVisible(false);
-    setModalBorrarVisible(true);
-  }, []);
-
-  const cerrarModalBorrar = useCallback(() => {
-    setModalBorrarVisible(false);
-    setRutinaSeleccionada(null);
-  }, []);
-
-  const ejecutarBorrarRutina = useCallback(
-    async (rut: RutinaListaVista): Promise<boolean> => {
-      const snapshotLista = listaRef.current.map((r) => ({ ...r, ejercicios: [...r.ejercicios] }));
-      const snapshotFav = new Set(favIdsRef.current);
-      setLista((prev) => prev.filter((x) => x.id !== rut.id));
-      setFavIds((prev) => {
-        const n = new Set(prev);
-        n.delete(rut.id);
-        return n;
-      });
-      try {
-        await borrarRutina(rut.id);
-        return true;
-      } catch (e) {
-        setLista(snapshotLista);
-        setFavIds(snapshotFav);
-        mostrarErrorModal(e instanceof Error ? e.message : 'No se pudo borrar la rutina.');
-        return false;
-      }
-    },
-    [mostrarErrorModal],
-  );
-
-  const confirmarBorrarRutina = useCallback(async () => {
-    const rut = rutinaSeleccionada;
-    if (!rut) return;
-    setBorrandoRutina(true);
-    try {
-      const ok = await ejecutarBorrarRutina(rut);
-      if (ok) cerrarModalBorrar();
-    } finally {
-      setBorrandoRutina(false);
-    }
-  }, [rutinaSeleccionada, ejecutarBorrarRutina, cerrarModalBorrar]);
+      removeFavorite(routine.id);
+    })();
+  }, [removeFavorite, routineMenu, user?.id]);
 
   return (
     <View style={styles.root}>
-      <Pressable
-        style={styles.primaryBtn}
-        onPress={() => setModalEntrenoVacio(true)}
-        accessibilityRole="button"
+      {/* --- RUTINAS TAB START --- */}
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+        onScroll={(event) => setFiltroScrollY(event.nativeEvent.contentOffset.y)}
+        scrollEventThrottle={16}
+        showsVerticalScrollIndicator={false}
       >
-        <Ionicons name="add" size={22} color={c.textOnPrimary} />
-        <Text style={styles.primaryBtnText}>Empezar entreno vacío</Text>
+      <Pressable
+        style={[styles.ctaCard, (hayEntrenoActivo || iniciandoVacio) && styles.disabled]}
+        onPress={() => void onEmpezarEntrenoVacio()}
+        disabled={hayEntrenoActivo || iniciandoVacio}
+        accessibilityRole="button"
+        accessibilityState={{ disabled: hayEntrenoActivo || iniciandoVacio }}
+      >
+        <View style={styles.ctaGradientLayer} />
+        <View style={styles.waveOne} />
+        <View style={styles.waveTwo} />
+        <View style={styles.waveThree} />
+        <View style={styles.ctaContent}>
+          <View style={styles.ctaIconCircle}>
+            {iniciandoVacio ? (
+              <ActivityIndicator color={theme.white} size="small" />
+            ) : (
+              <Ionicons name="add" size={30} color={theme.white} />
+            )}
+          </View>
+          <View>
+            <Text style={styles.ctaTitle}>Empezar entrenamiento vacío</Text>
+            <Text style={styles.ctaSubtitle}>Crea tu entrenamiento desde cero</Text>
+          </View>
+        </View>
       </Pressable>
 
-      <View style={styles.secondaryRow}>
+      <View style={styles.quickActionsRow}>
         <Pressable
-          style={styles.secondaryBtn}
+          style={styles.quickCard}
           onPress={() => router.push('/(tabs)/(entrenamiento)/crear-rutina')}
           accessibilityRole="button"
         >
-          <Text style={styles.secondaryBtnText}>NUEVA RUTINA</Text>
-        </Pressable>
-        <Pressable style={styles.secondaryBtn} onPress={() => router.push('/(tabs)/(entrenamiento)/explorar-rutinas')} accessibilityRole="button">
-          <Text style={styles.secondaryBtnText}>EXPLORAR</Text>
-        </Pressable>
-      </View>
-
-      <View style={styles.accordionWrap}>
-        <Pressable style={styles.accordionHeader} onPress={toggleAccordion} accessibilityRole="button">
-          <Text style={styles.accordionTitulo}>{filtro === 'mis' ? 'Mis Rutinas' : 'Favoritos'}</Text>
-          <Ionicons name={accordionOpen ? 'chevron-up' : 'chevron-down'} size={18} color={c.textSecondary} />
-        </Pressable>
-        {accordionOpen && (
-          <View style={styles.accordionOptions}>
-            <Pressable
-              style={[styles.accordionOption, filtro === 'mis' && styles.accordionOptionActive]}
-              onPress={() => seleccionarFiltro('mis')}
-            >
-              <Text style={styles.accordionOptionText}>Mis Rutinas</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.accordionOption, filtro === 'favoritos' && styles.accordionOptionActive]}
-              onPress={() => seleccionarFiltro('favoritos')}
-            >
-              <Text style={styles.accordionOptionText}>Favoritos</Text>
-            </Pressable>
+          <View style={styles.quickIconBox}>
+            <Ionicons name="document-text-outline" size={22} color={theme.textPrimary} />
+            <Ionicons
+              name="add"
+              size={13}
+              color={theme.textPrimary}
+              style={styles.quickPlusBadge}
+            />
           </View>
-        )}
+          <View style={styles.quickTextWrap}>
+            <Text style={styles.quickTitle} numberOfLines={1}>Nueva rutina</Text>
+            <Text style={styles.quickSubtitle} numberOfLines={2}>Crea una rutina desde cero</Text>
+          </View>
+        </Pressable>
+
+        <Pressable
+          style={styles.quickCard}
+          onPress={() => router.push('/(tabs)/(entrenamiento)/explorar-rutinas')}
+          accessibilityRole="button"
+        >
+          <View style={styles.quickIconBox}>
+            <Ionicons name="compass-outline" size={23} color={theme.textPrimary} />
+          </View>
+          <View style={styles.quickTextWrap}>
+            <Text style={styles.quickTitle} numberOfLines={1}>Explorar</Text>
+            <Text style={styles.quickSubtitle} numberOfLines={2}>Descubre rutinas de la comunidad</Text>
+          </View>
+        </Pressable>
       </View>
 
-      <Text style={styles.sectionMeta} numberOfLines={1}>
-        {lista.length} RUTINA{lista.length === 1 ? '' : 'S'}
-      </Text>
-
-      {cargando ? (
-        <View style={styles.loadingBox}>
-          <ActivityIndicator color={c.primary} />
+      <Pressable
+        style={styles.sectionHeader}
+        onLayout={(event) => {
+          setFiltroLayout(event.nativeEvent.layout);
+        }}
+        onPress={() => {
+          setRoutineMenu(null);
+          setFiltroOpen((open) => !open);
+        }}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: filtroOpen }}
+      >
+        <View style={styles.sectionTitleRow}>
+          <Ionicons name={filtroRutinas === 'mis' ? 'bookmark' : 'star'} size={18} color={theme.accent} />
+          <Text style={styles.sectionTitle}>{filtroLabel}</Text>
+          <Ionicons
+            name={filtroOpen ? 'chevron-up' : 'chevron-down'}
+            size={16}
+            color={theme.textPrimary}
+          />
         </View>
-      ) : (
-        <View style={styles.listArea}>
-          {!user?.id ? (
-            <Text style={styles.emptyTxt}>Inicia sesión para ver tus rutinas.</Text>
-          ) : lista.length === 0 ? (
-            <Text style={styles.emptyTxt}>
-              {filtro === 'mis' ? 'No tienes rutinas creadas todavía.' : 'Aún no has marcado favoritas.'}
-            </Text>
-          ) : (
-            lista.map((rut) => {
-              const esFav = favIds.has(rut.id);
-              return (
-                <View key={rut.id} style={styles.card}>
-                  {filtro === 'favoritos' ? (
+        <Text style={styles.sectionCount}>{rutinaCountLabel}</Text>
+      </Pressable>
+
+      {loading ? (
+          <View style={styles.loadingBox}>
+            <ActivityIndicator color={theme.accent} />
+          </View>
+        ) : (
+          <View
+            style={styles.listArea}
+            onLayout={(event) => {
+              setListAreaLayout(event.nativeEvent.layout);
+            }}
+          >
+            {!user?.id ? (
+              <Text style={styles.emptyText}>Inicia sesión para ver tus rutinas.</Text>
+            ) : rutinasFiltradas.length === 0 ? (
+              <Text style={styles.emptyText}>
+                {filtroRutinas === 'mis' ? 'No tienes rutinas creadas todavía.' : 'Aún no tienes rutinas favoritas.'}
+              </Text>
+            ) : (
+              rutinasFiltradas.map((routine) => (
+                <View
+                  key={routine.id}
+                  style={styles.routineCard}
+                  onLayout={(event) => {
+                    routineLayoutsRef.current[routine.id] = event.nativeEvent.layout;
+                  }}
+                >
+                  <View style={styles.routineTop}>
+                    <View style={styles.routineContent}>
+                      <Pressable
+                        onPress={() =>
+                          router.push(`/(tabs)/(entrenamiento)/rutina/${routine.id}` as Parameters<typeof router.push>[0])
+                        }
+                        accessibilityRole="button"
+                        accessibilityLabel={`Abrir rutina ${routine.nombre}`}
+                      >
+                        <Text style={styles.routineName} numberOfLines={1}>{routine.nombre}</Text>
+                      </Pressable>
+
+                      <View style={styles.metaRow}>
+                        <View style={styles.metaItem}>
+                          <Ionicons name="barbell-outline" size={11} color={theme.textSecondary} />
+                          <Text style={styles.metaText}>{routine.num_ejercicios} ejercicios</Text>
+                        </View>
+                        <View style={styles.metaItem}>
+                          <Ionicons name="body-outline" size={11} color={theme.textSecondary} />
+                          <Text style={styles.metaText} numberOfLines={2}>
+                            {routine.musculos.length > 0 ? routine.musculos.join(', ') : 'Sin músculos'}
+                          </Text>
+                        </View>
+                      </View>
+                    </View>
+
                     <Pressable
-                      style={styles.actionHit}
-                      onPress={() => onToggleFavorito(rut.id)}
-                      accessibilityRole="button"
-                      accessibilityLabel={esFav ? 'Quitar de favoritos' : 'Añadir a favoritos'}
-                    >
-                      <Ionicons name={esFav ? 'star' : 'star-outline'} size={22} color={esFav ? c.warning : c.textMuted} />
-                    </Pressable>
-                  ) : (
-                    <Pressable
-                      style={styles.actionHit}
+                      style={styles.menuButton}
                       onPress={() => {
-                        setRutinaSeleccionada(rut);
-                        setModalMenuVisible(true);
+                        setFiltroOpen(false);
+                        setRoutineMenuLayout(
+                          routineLayoutsRef.current[routine.id] ?? { x: 20, y: 0, width: 0, height: 74 },
+                        );
+                        setRoutineMenu(routine);
                       }}
                       accessibilityRole="button"
                       accessibilityLabel="Opciones de rutina"
                     >
-                      <Ionicons name="ellipsis-horizontal" size={22} color={c.textMuted} />
+                      <Ionicons name="ellipsis-horizontal" size={20} color={theme.textSecondary} />
                     </Pressable>
-                  )}
-                  <Pressable
-                    onPress={() =>
-                      router.push(`/(tabs)/(entrenamiento)/rutina/${rut.id}` as Parameters<typeof router.push>[0])
-                    }
-                    accessibilityRole="button"
-                    accessibilityLabel={`Abrir rutina ${rut.nombre}`}
-                  >
-                    <Text style={styles.cardTitle} numberOfLines={1}>
-                      {rut.nombre}
-                    </Text>
-                  </Pressable>
+                  </View>
+
+                  <View style={styles.routineDivider} />
+
                   <Pressable
                     style={[
-                      styles.startBtn,
-                      (hayEntrenoActivo || rutinaIniciandoId != null) && styles.startBtnDisabled,
+                      styles.startRoutineButton,
+                      (hayEntrenoActivo || rutinaIniciandoId != null) && styles.disabled,
                     ]}
-                    onPress={() => void onEmpezarRutina(rut)}
+                    onPress={() => void onEmpezarRutina(routine)}
                     disabled={hayEntrenoActivo || rutinaIniciandoId != null}
                     accessibilityRole="button"
                     accessibilityState={{ disabled: hayEntrenoActivo || rutinaIniciandoId != null }}
                   >
-                    {rutinaIniciandoId === rut.id ? (
-                      <ActivityIndicator color={c.primary} size="small" />
+                    {rutinaIniciandoId === routine.id ? (
+                      <ActivityIndicator color={theme.accent} size="small" />
                     ) : (
-                      <Text
-                        style={[styles.startBtnText, hayEntrenoActivo && styles.startBtnTextMuted]}
-                        numberOfLines={1}
-                      >
-                        {hayEntrenoActivo ? 'ENTRENO EN CURSO' : 'EMPEZAR RUTINA'}
-                      </Text>
+                      <>
+                        <Text style={styles.startRoutineText}>
+                          {hayEntrenoActivo ? 'ENTRENO EN CURSO' : 'EMPEZAR RUTINA'}
+                        </Text>
+                        <Ionicons name="play-outline" size={13} color={theme.accent} />
+                      </>
                     )}
                   </Pressable>
                 </View>
-              );
-            })
-          )}
-        </View>
-      )}
+              ))
+            )}
+          </View>
+        )}
+      </ScrollView>
 
-      <Modal visible={modalMenuVisible && rutinaSeleccionada != null} transparent animationType="fade" onRequestClose={cerrarMenuModal}>
-        <Pressable style={styles.dsModalOverlay} onPress={cerrarMenuModal}>
-          <Pressable style={styles.dsModalCard} onPress={(e) => e.stopPropagation()}>
-            {rutinaSeleccionada ? (
-              <>
-                <Text style={styles.menuModalTitle} numberOfLines={2}>
-                  {rutinaSeleccionada.nombre}
-                </Text>
-                <Pressable style={styles.menuOption} onPress={onMenuCambiarNombre} accessibilityRole="button">
-                  <Text style={styles.menuOptionTxt}>Cambiar nombre</Text>
-                </Pressable>
-                <View style={styles.menuSep} />
-                <Pressable style={styles.menuOption} onPress={onMenuBorrarRutina} accessibilityRole="button">
-                  <Text style={styles.menuOptionDestructiveTxt}>Borrar rutina</Text>
-                </Pressable>
-                <Pressable style={styles.menuCancel} onPress={cerrarMenuModal} accessibilityRole="button">
-                  <Text style={styles.menuCancelTxt}>Cancelar</Text>
-                </Pressable>
-              </>
-            ) : null}
-          </Pressable>
-        </Pressable>
-      </Modal>
-
-      <Modal visible={modalBorrarVisible && rutinaSeleccionada != null} transparent animationType="fade" onRequestClose={cerrarModalBorrar}>
-        <Pressable style={styles.dsModalOverlay} onPress={cerrarModalBorrar}>
-          <Pressable style={styles.dsModalCard} onPress={(e) => e.stopPropagation()}>
-            {rutinaSeleccionada ? (
-              <>
-                <Text style={styles.borrarModalTitle}>BORRAR RUTINA</Text>
-                <Text style={styles.borrarModalBody}>
-                  {`¿Seguro que quieres borrar «${rutinaSeleccionada.nombre}»? Esta acción no se puede deshacer.`}
-                </Text>
-                <View style={styles.borrarModalRow}>
-                  <Pressable style={styles.borrarBtnSecondary} onPress={cerrarModalBorrar} accessibilityRole="button">
-                    <Text style={styles.borrarBtnSecondaryTxt}>Cancelar</Text>
-                  </Pressable>
-                  <Pressable
-                    style={[styles.borrarBtnDestructive, borrandoRutina && { opacity: 0.6 }]}
-                    onPress={() => void confirmarBorrarRutina()}
-                    disabled={borrandoRutina}
-                    accessibilityRole="button"
-                  >
-                    {borrandoRutina ? (
-                      <ActivityIndicator color={c.danger} size="small" />
-                    ) : (
-                      <Text style={styles.borrarBtnDestructiveTxt}>Borrar</Text>
-                    )}
-                  </Pressable>
-                </View>
-              </>
-            ) : null}
-          </Pressable>
-        </Pressable>
-      </Modal>
-
-      <Modal visible={modalNombreVisible && rutinaSeleccionada != null} transparent animationType="fade" onRequestClose={cerrarModalNombre}>
-        <Pressable style={styles.renameModalOverlay} onPress={cerrarModalNombre}>
-          <Pressable style={styles.renameModalCard} onPress={(e) => e.stopPropagation()}>
-            <Text style={styles.renameModalTitle}>CAMBIAR NOMBRE</Text>
-            <TextInput
-              style={styles.renameModalInput}
-              value={textoRenombrarDraft}
-              onChangeText={setTextoRenombrarDraft}
-              placeholder="Nombre de la rutina"
-              placeholderTextColor={c.textMuted}
-              autoFocus
-              autoCorrect={false}
-            />
-            <View style={styles.renameModalRow}>
-              <Pressable style={styles.renameBtnGhost} onPress={cerrarModalNombre} accessibilityRole="button">
-                <Text style={styles.renameBtnGhostTxt}>Cancelar</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.renameBtnPrimary, (guardandoNombre || textoRenombrarDraft.trim() === '') && { opacity: 0.5 }]}
-                onPress={() => void guardarNombreRutina()}
-                disabled={guardandoNombre || textoRenombrarDraft.trim() === ''}
-                accessibilityRole="button"
-              >
-                {guardandoNombre ? (
-                  <ActivityIndicator color={c.textOnPrimary} size="small" />
-                ) : (
-                  <Text style={styles.renameBtnPrimaryTxt}>Guardar</Text>
-                )}
-              </Pressable>
-            </View>
-          </Pressable>
-        </Pressable>
-      </Modal>
-
-      <Modal visible={modalErrorVisible} transparent animationType="fade" onRequestClose={cerrarErrorModal}>
-        <Pressable style={styles.dsModalOverlay} onPress={cerrarErrorModal}>
-          <Pressable style={styles.dsModalCard} onPress={(e) => e.stopPropagation()}>
-            <Text style={styles.renameModalTitle}>ERROR</Text>
-            <Text style={styles.errorModalBody}>{errorModalMensaje}</Text>
-            <Pressable style={styles.errorModalOk} onPress={cerrarErrorModal} accessibilityRole="button">
-              <Text style={styles.errorModalOkTxt}>OK</Text>
+      {filtroOpen ? (
+        <View style={styles.filterMenuLayer} pointerEvents="box-none">
+          <Pressable style={styles.filterMenuDismiss} onPress={() => setFiltroOpen(false)} />
+          <View
+            style={[
+              styles.filterMenuPopover,
+              {
+                top: Math.min(filtroLayout.y - filtroScrollY + filtroLayout.height + 6, windowHeight - 188),
+                left: Math.min(Math.max(filtroLayout.x, 20), windowWidth - 210),
+              },
+            ]}
+          >
+            <Text style={styles.filterMenuTitle} numberOfLines={1}>
+              Rutinas
+            </Text>
+            <Pressable
+              style={[styles.filterMenuOption, filtroRutinas === 'mis' && styles.filterMenuOptionActive]}
+              onPress={() => seleccionarFiltro('mis')}
+              accessibilityRole="button"
+            >
+              <Ionicons name="bookmark-outline" size={17} color={theme.textPrimary} />
+              <Text style={styles.filterMenuOptionText}>Mis rutinas</Text>
+              {filtroRutinas === 'mis' ? <Ionicons name="checkmark" size={17} color={theme.accent} /> : null}
             </Pressable>
-          </Pressable>
-        </Pressable>
-      </Modal>
-
-      <Modal visible={modalEntrenoVacio} transparent animationType="fade" onRequestClose={cerrarModalEntrenoVacio}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Nuevo entreno</Text>
-              <Pressable
-                style={styles.modalClose}
-                onPress={cerrarModalEntrenoVacio}
-                accessibilityRole="button"
-                accessibilityLabel="Cerrar"
-              >
-                <Ionicons name="close" size={24} color={c.textDisplay} />
-              </Pressable>
-            </View>
-            <Text style={styles.modalLabel}>NOMBRE</Text>
-            <TextInput
-              style={styles.modalInput}
-              value={nombreEntrenoVacio}
-              onChangeText={setNombreEntrenoVacio}
-              placeholder="Ej. Empuje, Pierna…"
-              placeholderTextColor={c.textMuted}
-              autoCorrect={false}
-              autoFocus
-            />
-            <View style={styles.modalRow}>
-              <Pressable style={styles.modalBtn} onPress={cerrarModalEntrenoVacio} accessibilityRole="button">
-                <Text style={styles.modalBtnTxt}>Cancelar</Text>
-              </Pressable>
-              <Pressable
-                style={[
-                  styles.modalBtn,
-                  styles.modalBtnPrimary,
-                  (!puedeComenzarEntrenoVacio || iniciandoEntrenoVacio) && { opacity: 0.4 },
-                ]}
-                onPress={() => void onComenzarEntrenoVacio()}
-                disabled={!puedeComenzarEntrenoVacio || iniciandoEntrenoVacio}
-                accessibilityRole="button"
-                accessibilityState={{ disabled: !puedeComenzarEntrenoVacio || iniciandoEntrenoVacio }}
-              >
-                {iniciandoEntrenoVacio ? (
-                  <ActivityIndicator color={c.textOnPrimary} size="small" />
-                ) : (
-                  <Text style={[styles.modalBtnTxt, styles.modalBtnTxtPrimary]}>Comenzar</Text>
-                )}
-              </Pressable>
-            </View>
+            <View style={styles.filterMenuDivider} />
+            <Pressable
+              style={[styles.filterMenuOption, filtroRutinas === 'favoritas' && styles.filterMenuOptionActive]}
+              onPress={() => seleccionarFiltro('favoritas')}
+              accessibilityRole="button"
+            >
+              <Ionicons name="star-outline" size={17} color={theme.textPrimary} />
+              <Text style={styles.filterMenuOptionText}>Favoritas</Text>
+              {filtroRutinas === 'favoritas' ? <Ionicons name="checkmark" size={17} color={theme.accent} /> : null}
+            </Pressable>
           </View>
         </View>
-      </Modal>
+      ) : null}
+
+      {routineMenu ? (
+        <View style={styles.filterMenuLayer} pointerEvents="box-none">
+          <Pressable style={styles.filterMenuDismiss} onPress={() => setRoutineMenu(null)} />
+          <View
+            style={[
+              styles.routineMenuPopover,
+              {
+                top: Math.min(listAreaLayout.y + routineMenuLayout.y - filtroScrollY + 44, windowHeight - 188),
+                left: Math.min(
+                  Math.max(listAreaLayout.x + routineMenuLayout.x + routineMenuLayout.width - 190, 20),
+                  windowWidth - 210,
+                ),
+              },
+            ]}
+          >
+            <Text style={styles.filterMenuTitle} numberOfLines={1}>
+              {routineMenu.nombre}
+            </Text>
+            <Pressable style={styles.filterMenuOption} onPress={onConsultarV} accessibilityRole="button">
+              <VLogo width={17} height={17} style={styles.filterMenuLogo} />
+              <Text style={styles.filterMenuOptionText}>Consultar a V</Text>
+            </Pressable>
+            <View style={styles.filterMenuDivider} />
+            {routineMenu.is_community ? (
+              <Pressable style={styles.filterMenuOption} onPress={onQuitarFavorito} accessibilityRole="button">
+                <Ionicons name="star-outline" size={17} color={theme.textPrimary} />
+                <Text style={styles.filterMenuOptionText}>Quitar favorito</Text>
+              </Pressable>
+            ) : (
+              <Pressable style={styles.filterMenuOption} onPress={onEliminarRutina} accessibilityRole="button">
+                <Ionicons name="trash-outline" size={17} color={theme.danger} />
+                <Text style={styles.filterMenuOptionDanger}>Eliminar</Text>
+              </Pressable>
+            )}
+          </View>
+        </View>
+      ) : null}
+      {/* --- RUTINAS TAB END --- */}
     </View>
   );
+}
+
+// --- useRoutines HOOK ---
+function useRoutines(userId?: string) {
+  const [misRutinas, setMisRutinas] = useState<Routine[]>([]);
+  const [favoritas, setFavoritas] = useState<Routine[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+
+    async function load() {
+      if (!userId) {
+        setMisRutinas([]);
+        setFavoritas([]);
+        return;
+      }
+
+        setLoading(true);
+        try {
+        const routineSelect =
+          'id, nombre, created_by, routine_exercises ( orden, exercises ( nombre, musculo_primario, musculos_secundarios ) )';
+
+        const [misRes, favRes] = await Promise.all([
+          supabase
+            .from('routines')
+            .select(routineSelect)
+            .eq('created_by', userId)
+            .order('updated_at', { ascending: false }),
+          supabase
+            .from('user_favorite_routines')
+            .select(`routines ( ${routineSelect} )`)
+            .eq('user_id', userId),
+        ]);
+
+        if (misRes.error || favRes.error) {
+          if (misRes.error) console.error('[useRoutines] mis', misRes.error.message);
+          if (favRes.error) console.error('[useRoutines] favoritas', favRes.error.message);
+          if (alive) {
+            setMisRutinas([]);
+            setFavoritas([]);
+          }
+          return;
+        }
+
+        if (!alive) return;
+
+        const nextMis = (misRes.data ?? []).map((row) => mapRoutine(row as RoutineJoinRow, userId, false));
+        const nextFavoritas = (favRes.data ?? [])
+          .map((row) => {
+            const routine = (row as FavoriteRoutineJoinRow).routines;
+            return Array.isArray(routine) ? routine[0] : routine;
+          })
+          .filter((routine): routine is RoutineJoinRow => routine != null)
+          .map((routine) => mapRoutine(routine, userId, routine.created_by !== userId));
+
+        setMisRutinas(nextMis);
+        setFavoritas(nextFavoritas);
+      } finally {
+        if (alive) setLoading(false);
+      }
+    }
+
+    void load();
+
+    return () => {
+      alive = false;
+    };
+  }, [userId]);
+
+  const removeRoutine = useCallback((routineId: string) => {
+    setMisRutinas((rows) => rows.filter((routine) => routine.id !== routineId));
+    setFavoritas((rows) => rows.filter((routine) => routine.id !== routineId));
+  }, []);
+
+  const removeFavorite = useCallback((routineId: string) => {
+    setFavoritas((rows) => rows.filter((routine) => routine.id !== routineId));
+  }, []);
+
+  return { misRutinas, favoritas, loading, removeRoutine, removeFavorite };
+}
+
+function mapRoutine(row: RoutineJoinRow, userId: string, isCommunity: boolean): Routine {
+  const exercises = (row.routine_exercises ?? [])
+    .slice()
+    .sort((a, b) => a.orden - b.orden)
+    .map((re) => {
+      const ex = re.exercises;
+      return Array.isArray(ex) ? ex[0] : ex;
+    })
+    .filter((ex): ex is RoutineExerciseJoin => ex != null);
+
+  const musculos = uniqueClean(
+    exercises.flatMap((exercise) => [
+      exercise.musculo_primario,
+      ...(Array.isArray(exercise.musculos_secundarios) ? exercise.musculos_secundarios : []),
+    ]),
+  );
+
+  return {
+    id: row.id,
+    user_id: row.created_by ?? userId,
+    nombre: row.nombre,
+    descripcion: exercises.map((exercise) => exercise.nombre?.trim()).filter(Boolean).slice(0, 3).join(', '),
+    num_ejercicios: exercises.length,
+    musculos,
+    imagen_url: null,
+    is_community: isCommunity,
+  };
 }

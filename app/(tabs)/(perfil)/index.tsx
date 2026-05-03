@@ -5,6 +5,7 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   View,
 } from 'react-native';
@@ -14,6 +15,7 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { router, Stack, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useThemeMode } from '@/context/ThemeContext';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/lib/supabase';
 import type { Objetivo, Plan } from '@/types/database.types';
@@ -82,6 +84,26 @@ const COLORS = {
   orange: '#FF9E3D',
   shadow: '#D8E3EE',
 };
+
+const DARK_COLORS: typeof COLORS = {
+  background: '#071018',
+  surface: '#101B25',
+  cardSoft: '#172838',
+  cardBlue: '#102D3A',
+  accent: '#26C6E3',
+  accentBlue: '#6EA8FF',
+  text: '#F4F8FB',
+  muted: '#9AA8B8',
+  faint: '#657384',
+  border: '#203140',
+  danger: '#FF6B6B',
+  dangerBg: '#2A151A',
+  green: '#78D778',
+  orange: '#FFB15F',
+  shadow: '#000000',
+};
+
+type ProfileColors = typeof COLORS;
 
 function getAvatarUrl(user: ReturnType<typeof useAuth>['user']): string | null {
   const meta = user?.user_metadata as { avatar_url?: string } | undefined;
@@ -263,6 +285,8 @@ function useProfileData(userId: string | undefined) {
 export default function PerfilIndex() {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
+  const { isDark, setMode } = useThemeMode();
+  const colors = isDark ? DARK_COLORS : COLORS;
   const { data, loading, error, reload } = useProfileData(user?.id);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(() => getAvatarUrl(user ?? null));
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
@@ -366,18 +390,18 @@ export default function PerfilIndex() {
   };
 
   return (
-    <View style={styles.root}>
+    <View style={[styles.root, { backgroundColor: colors.background }]}>
       <Stack.Screen options={{ headerShown: false }} />
 
       {loading ? (
         <View style={styles.centerState}>
-          <ActivityIndicator color={COLORS.accent} size="large" />
+          <ActivityIndicator color={colors.accent} size="large" />
         </View>
       ) : error ? (
         <View style={styles.centerState}>
-          <Text style={styles.errorTitle}>No se pudo cargar el perfil</Text>
-          <Text style={styles.errorText}>{error}</Text>
-          <Pressable style={styles.retryButton} onPress={reload}>
+          <Text style={[styles.errorTitle, { color: colors.text }]}>No se pudo cargar el perfil</Text>
+          <Text style={[styles.errorText, { color: colors.muted }]}>{error}</Text>
+          <Pressable style={[styles.retryButton, { backgroundColor: colors.accent }]} onPress={reload}>
             <Text style={styles.retryText}>Reintentar</Text>
           </Pressable>
         </View>
@@ -391,33 +415,55 @@ export default function PerfilIndex() {
         >
           <View style={styles.header}>
             <View>
-              <Text style={styles.title}>Perfil</Text>
-              <Text style={styles.subtitle}>
-                Gestiona tu cuenta y <Text style={styles.subtitleAccent}>tu progreso.</Text>
+              <Text style={[styles.title, { color: colors.text }]}>Perfil</Text>
+              <Text style={[styles.subtitle, { color: colors.muted }]}>
+                Gestiona tu cuenta y <Text style={[styles.subtitleAccent, { color: colors.accent }]}>tu progreso.</Text>
               </Text>
             </View>
             <Pressable
-              style={styles.settingsButton}
+              style={[
+                styles.settingsButton,
+                {
+                  backgroundColor: colors.surface,
+                  borderColor: colors.border,
+                  shadowColor: colors.shadow,
+                },
+              ]}
               onPress={() => router.push('/(tabs)/(perfil)/ajustes')}
               accessibilityRole="button"
               accessibilityLabel="Ajustes"
             >
-              <Ionicons name="settings" size={19} color={COLORS.text} />
+              <Ionicons name="settings" size={19} color={colors.text} />
             </Pressable>
           </View>
 
-          <View style={styles.userCard}>
+          <View
+            style={[
+              styles.userCard,
+              {
+                backgroundColor: colors.surface,
+                borderColor: colors.border,
+                shadowColor: colors.shadow,
+              },
+            ]}
+          >
             <View style={styles.userTop}>
               <View style={styles.avatarWrap}>
                 {avatarUrl ? (
-                  <Image source={{ uri: avatarUrl }} style={styles.avatar} contentFit="cover" />
+                  <Image source={{ uri: avatarUrl }} style={[styles.avatar, { borderColor: colors.surface }]} contentFit="cover" />
                 ) : (
-                  <View style={[styles.avatar, styles.avatarFallback]}>
-                    <Text style={styles.avatarInitials}>{profileInitials}</Text>
+                  <View
+                    style={[
+                      styles.avatar,
+                      styles.avatarFallback,
+                      { backgroundColor: colors.cardSoft, borderColor: colors.surface },
+                    ]}
+                  >
+                    <Text style={[styles.avatarInitials, { color: colors.accent }]}>{profileInitials}</Text>
                   </View>
                 )}
                 <Pressable
-                  style={styles.cameraButton}
+                  style={[styles.cameraButton, { backgroundColor: colors.accent, borderColor: colors.surface }]}
                   onPress={changeAvatar}
                   disabled={uploadingAvatar}
                   accessibilityRole="button"
@@ -432,15 +478,15 @@ export default function PerfilIndex() {
               </View>
 
               <View style={styles.identityBlock}>
-                <Text style={styles.nameText} numberOfLines={1}>
+                <Text style={[styles.nameText, { color: colors.text }]} numberOfLines={1}>
                   {displayName}
                 </Text>
-                <Text style={styles.usernameText} numberOfLines={1}>
+                <Text style={[styles.usernameText, { color: colors.muted }]} numberOfLines={1}>
                   {displayUsername}
                 </Text>
                 <View style={styles.motivationChip}>
-                  <Ionicons name="flash" size={13} color={COLORS.accent} />
-                  <Text style={styles.motivationText} numberOfLines={1}>
+                  <Ionicons name="flash" size={13} color={colors.accent} />
+                  <Text style={[styles.motivationText, { color: colors.muted }]} numberOfLines={1}>
                     Disciplina hoy, resultados mañana.
                   </Text>
                 </View>
@@ -448,51 +494,55 @@ export default function PerfilIndex() {
             </View>
 
             <View style={styles.statsRow}>
-              <StatChip icon="scale-outline" value={`${decimal(data.latestMetric?.peso_kg)} kg`} label="Peso" />
-              <StatChip icon="pencil-outline" value={`${decimal(altura)} cm`} label="Altura" />
-              <StatChip icon="calendar-outline" value={edad != null ? `${rounded(edad)} años` : '-- años'} label="Edad" />
+              <StatChip colors={colors} icon="scale-outline" value={`${decimal(data.latestMetric?.peso_kg)} kg`} label="Peso" />
+              <StatChip colors={colors} icon="pencil-outline" value={`${decimal(altura)} cm`} label="Altura" />
+              <StatChip colors={colors} icon="calendar-outline" value={edad != null ? `${rounded(edad)} años` : '-- años'} label="Edad" />
             </View>
           </View>
 
-          <View style={styles.sectionCard}>
+          <View style={[styles.sectionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
             <SectionHeader
+              colors={colors}
               icon="compass-outline"
               title="Plan activo"
               action="Personalizar"
               onPress={() => router.push('/(tabs)/(progreso)/personalizar-plan')}
             />
 
-            <View style={styles.planInner}>
+            <View style={[styles.planInner, { backgroundColor: colors.cardBlue }]}>
               <View style={styles.planMainRow}>
                 <View style={styles.goalBlock}>
-                  <Text style={styles.smallLabel}>Objetivo</Text>
-                  <Text style={styles.goalText} numberOfLines={2}>
+                  <Text style={[styles.smallLabel, { color: colors.muted }]}>Objetivo</Text>
+                  <Text style={[styles.goalText, { color: colors.text }]} numberOfLines={2}>
                     {objectiveText(data.goals?.objetivo ?? null)}
                   </Text>
                 </View>
-                <View style={styles.planDivider} />
+                <View style={[styles.planDivider, { backgroundColor: colors.border }]} />
                 <View style={styles.kcalBlock}>
-                  <Text style={styles.kcalText}>{rounded(data.goals?.calorias_objetivo) ?? '--'}</Text>
-                  <Text style={styles.kcalLabel}>kcal/día</Text>
+                  <Text style={[styles.kcalText, { color: colors.accent }]}>{rounded(data.goals?.calorias_objetivo) ?? '--'}</Text>
+                  <Text style={[styles.kcalLabel, { color: colors.muted }]}>kcal/día</Text>
                 </View>
               </View>
 
-              <View style={styles.macroRow}>
+              <View style={[styles.macroRow, { borderTopColor: colors.border }]}>
                 <MacroItem
+                  colors={colors}
                   type="protein"
-                  color={COLORS.accent}
+                  color={colors.accent}
                   value={`${rounded(data.goals?.proteinas_objetivo) ?? '--'} g`}
                   label="Proteína"
                 />
                 <MacroItem
+                  colors={colors}
                   type="carbs"
-                  color={COLORS.green}
+                  color={colors.green}
                   value={`${rounded(data.goals?.carbos_objetivo) ?? '--'} g`}
                   label="Carbohidratos"
                 />
                 <MacroItem
+                  colors={colors}
                   type="fat"
-                  color={COLORS.orange}
+                  color={colors.orange}
                   value={`${rounded(data.goals?.grasas_objetivo) ?? '--'} g`}
                   label="Grasa"
                 />
@@ -500,15 +550,17 @@ export default function PerfilIndex() {
             </View>
           </View>
 
-          <View style={styles.listCard}>
-            <SectionHeader icon="pulse-outline" title="Mi actividad" />
+          <View style={[styles.listCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <SectionHeader colors={colors} icon="pulse-outline" title="Mi actividad" />
             <ListRow
+              colors={colors}
               icon="barbell-outline"
               title="Ejercicios"
               subtitle="Consulta y gestiona tus ejercicios."
               onPress={() => router.push('/(tabs)/(perfil)/perfil-ejercicios')}
             />
             <ListRow
+              colors={colors}
               icon="bar-chart-outline"
               title="Entrenos"
               subtitle="Historial y estadísticas de entrenos."
@@ -517,11 +569,12 @@ export default function PerfilIndex() {
             />
           </View>
 
-          <View style={styles.listCard}>
-            <SectionHeader icon="person-outline" title="Cuenta" />
-            <ListRow icon="mail-outline" title="Cambiar email" onPress={changeEmail} />
-            <ListRow icon="lock-closed-outline" title="Cambiar contraseña" onPress={changePassword} />
+          <View style={[styles.listCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <SectionHeader colors={colors} icon="person-outline" title="Cuenta" />
+            <ListRow colors={colors} icon="mail-outline" title="Cambiar email" onPress={changeEmail} />
+            <ListRow colors={colors} icon="lock-closed-outline" title="Cambiar contraseña" onPress={changePassword} />
             <ListRow
+              colors={colors}
               icon="shield-checkmark-outline"
               title="Plan actual"
               badge={planBadge}
@@ -529,27 +582,41 @@ export default function PerfilIndex() {
               onPress={() => router.push('/(tabs)/(perfil)/plan')}
             />
 
-            <Pressable style={styles.signOutButton} onPress={signOut} accessibilityRole="button">
-              <Ionicons name="log-out-outline" size={17} color={COLORS.danger} />
-              <Text style={styles.signOutText}>Cerrar sesión</Text>
+            <Pressable style={[styles.signOutButton, { backgroundColor: colors.dangerBg }]} onPress={signOut} accessibilityRole="button">
+              <Ionicons name="log-out-outline" size={17} color={colors.danger} />
+              <Text style={[styles.signOutText, { color: colors.danger }]}>Cerrar sesión</Text>
             </Pressable>
+          </View>
+
+          <View style={styles.themeToggleWrap}>
+            <Ionicons name="sunny-outline" size={18} color={colors.muted} />
+            <Switch
+              value={isDark}
+              onValueChange={(value) => setMode(value ? 'dark' : 'light')}
+              trackColor={{ false: '#DDE5EE', true: '#145363' }}
+              thumbColor={isDark ? colors.accent : '#FFFFFF'}
+            />
+            <Ionicons name="moon-outline" size={18} color={colors.muted} />
           </View>
         </ScrollView>
       )}
 
       <Modal visible={modal.visible} transparent animationType="fade" onRequestClose={closeModal}>
         <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>{modal.title}</Text>
-            <Text style={styles.modalText}>{modal.message}</Text>
+          <View style={[styles.modalCard, { backgroundColor: colors.surface }]}>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>{modal.title}</Text>
+            <Text style={[styles.modalText, { color: colors.muted }]}>{modal.message}</Text>
             <View style={styles.modalActions}>
               {modal.confirmText ? (
-                <Pressable style={styles.modalGhost} onPress={closeModal}>
-                  <Text style={styles.modalGhostText}>Cancelar</Text>
+                <Pressable style={[styles.modalGhost, { borderColor: colors.border }]} onPress={closeModal}>
+                  <Text style={[styles.modalGhostText, { color: colors.text }]}>Cancelar</Text>
                 </Pressable>
               ) : null}
               <Pressable
-                style={[styles.modalPrimary, modal.danger && styles.modalDanger]}
+                style={[
+                  styles.modalPrimary,
+                  { backgroundColor: modal.danger ? colors.danger : colors.accent },
+                ]}
                 onPress={async () => {
                   const action = modal.onConfirm;
                   closeModal();
@@ -567,11 +634,13 @@ export default function PerfilIndex() {
 }
 
 function SectionHeader({
+  colors,
   icon,
   title,
   action,
   onPress,
 }: {
+  colors: ProfileColors;
   icon: keyof typeof Ionicons.glyphMap;
   title: string;
   action?: string;
@@ -580,13 +649,13 @@ function SectionHeader({
   return (
     <View style={styles.sectionHeader}>
       <View style={styles.sectionTitleWrap}>
-        <Ionicons name={icon} size={16} color={COLORS.accent} />
-        <Text style={styles.sectionTitle}>{title}</Text>
+        <Ionicons name={icon} size={16} color={colors.accent} />
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>{title}</Text>
       </View>
       {action ? (
         <Pressable style={styles.sectionAction} onPress={onPress} accessibilityRole="button">
-          <Text style={styles.sectionActionText}>{action}</Text>
-          <Ionicons name="chevron-forward" size={13} color={COLORS.accent} />
+          <Text style={[styles.sectionActionText, { color: colors.accent }]}>{action}</Text>
+          <Ionicons name="chevron-forward" size={13} color={colors.accent} />
         </Pressable>
       ) : null}
     </View>
@@ -594,33 +663,37 @@ function SectionHeader({
 }
 
 function StatChip({
+  colors,
   icon,
   value,
   label,
 }: {
+  colors: ProfileColors;
   icon: keyof typeof Ionicons.glyphMap;
   value: string;
   label: string;
 }) {
   return (
-    <View style={styles.statChip}>
-      <Ionicons name={icon} size={17} color={COLORS.accent} />
+    <View style={[styles.statChip, { backgroundColor: colors.cardSoft }]}>
+      <Ionicons name={icon} size={17} color={colors.accent} />
       <View>
-        <Text style={styles.statValue} numberOfLines={1}>
+        <Text style={[styles.statValue, { color: colors.text }]} numberOfLines={1}>
           {value}
         </Text>
-        <Text style={styles.statLabel}>{label}</Text>
+        <Text style={[styles.statLabel, { color: colors.muted }]}>{label}</Text>
       </View>
     </View>
   );
 }
 
 function MacroItem({
+  colors,
   type,
   color,
   value,
   label,
 }: {
+  colors: ProfileColors;
   type: 'protein' | 'carbs' | 'fat';
   color: string;
   value: string;
@@ -636,14 +709,15 @@ function MacroItem({
         <Ionicons name="water-outline" size={18} color={color} />
       )}
       <View>
-        <Text style={styles.macroValue}>{value}</Text>
-        <Text style={styles.macroLabel}>{label}</Text>
+        <Text style={[styles.macroValue, { color: colors.text }]}>{value}</Text>
+        <Text style={[styles.macroLabel, { color: colors.muted }]}>{label}</Text>
       </View>
     </View>
   );
 }
 
 function ListRow({
+  colors,
   icon,
   title,
   subtitle,
@@ -651,6 +725,7 @@ function ListRow({
   last,
   onPress,
 }: {
+  colors: ProfileColors;
   icon: keyof typeof Ionicons.glyphMap;
   title: string;
   subtitle?: string;
@@ -660,19 +735,19 @@ function ListRow({
 }) {
   return (
     <Pressable
-      style={[styles.listRow, last && styles.listRowLast]}
+      style={[styles.listRow, { borderBottomColor: colors.border }, last && styles.listRowLast]}
       onPress={onPress}
       accessibilityRole="button"
     >
-      <View style={styles.listIcon}>
-        <Ionicons name={icon} size={17} color={COLORS.text} />
+      <View style={[styles.listIcon, { backgroundColor: colors.cardSoft }]}>
+        <Ionicons name={icon} size={17} color={colors.text} />
       </View>
       <View style={styles.listTextWrap}>
-        <Text style={styles.listTitle}>{title}</Text>
-        {subtitle ? <Text style={styles.listSubtitle}>{subtitle}</Text> : null}
+        <Text style={[styles.listTitle, { color: colors.text }]}>{title}</Text>
+        {subtitle ? <Text style={[styles.listSubtitle, { color: colors.muted }]}>{subtitle}</Text> : null}
       </View>
-      {badge ? <Text style={styles.planBadge}>{badge}</Text> : null}
-      <Ionicons name="chevron-forward" size={18} color={COLORS.faint} />
+      {badge ? <Text style={[styles.planBadge, { color: colors.accent }]}>{badge}</Text> : null}
+      <Ionicons name="chevron-forward" size={18} color={colors.faint} />
     </Pressable>
   );
 }
@@ -1024,6 +1099,16 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '900',
     color: COLORS.danger,
+  },
+  themeToggleWrap: {
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    marginTop: 4,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
   },
   modalBackdrop: {
     flex: 1,
