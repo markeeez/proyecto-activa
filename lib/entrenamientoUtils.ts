@@ -7,5 +7,5 @@ export function lid(): string {
 
 /** Crea una serie vacía con valores por defecto para el borrador de entreno. */
 export function seriePorDefecto(): BorradorSerieLinea {
-  return { setId: lid(), tipoUi: 'lineal', kg: '', reps: '', completada: false };
+  return { setId: lid(), tipoUi: 'lineal', kg: '', reps: '', rir: '', completada: false };
 }

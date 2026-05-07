@@ -163,6 +163,7 @@ export interface Exercise {
   musculos_secundarios: string[];
   categoria: CategoriaEjercicio;
   descripcion: string | null;
+  foto_url?: string | null;
   is_custom: boolean;
   created_by: string | null;
   created_at: string;
@@ -216,6 +217,7 @@ export interface WorkoutSet {
   numero_serie: number;
   tipo_serie: TipoSerie;
   repeticiones: number | null;
+  rir: number | null;
   peso_kg: number | null;
   tipo_peso: TipoPeso;
   duracion_seg: number | null;

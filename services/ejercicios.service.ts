@@ -70,7 +70,7 @@ export const ejerciciosService = {
       }
       const { data, error } = await supabase
         .from('exercises')
-        .select('id, nombre, musculo_primario, musculos_secundarios, equipamiento, categoria, foto_url, is_custom, created_by, api_source')
+        .select('id, nombre, musculo_primario, musculos_secundarios, equipamiento, categoria, foto_url, dificultad, is_custom, created_by, api_source')
         .eq('is_custom', true)
         .eq('created_by', userId)
         .order('nombre');
@@ -98,6 +98,10 @@ export const ejerciciosService = {
     }
 
     let q = supabase.from('exercises').select('*');
+
+    if (modoLista === 'general') {
+      q = q.is('created_by', null);
+    }
 
     if (modoLista === 'favoritos') {
       if (!userId) return [];
@@ -147,6 +151,9 @@ export const ejerciciosService = {
 
         const ejecutar = async (words: string[], maxRows: number) => {
           let qq = supabase.from('exercises').select('*');
+          if (modoLista === 'general') {
+            qq = qq.is('created_by', null);
+          }
           if (modoLista === 'favoritos') {
             if (!userId) return [];
             let ids = params.idsFavoritos;

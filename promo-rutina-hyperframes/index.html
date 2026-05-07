@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1080, height=1920, initial-scale=1.0" />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        width: 1080px;
+        height: 1920px;
+        overflow: hidden;
+        background: #020607;
+        color: #f4f7f8;
+        font-family: "Space Grotesk", Arial, sans-serif;
+      }
+
+      #root {
+        position: relative;
+        width: 1080px;
+        height: 1920px;
+        overflow: hidden;
+        background:
+          radial-gradient(circle at 72% 18%, rgba(18, 200, 238, 0.24), rgba(18, 200, 238, 0) 29%),
+          radial-gradient(circle at 16% 78%, rgba(69, 230, 255, 0.16), rgba(69, 230, 255, 0) 26%),
+          #020607;
+      }
+
+      .scene-content {
+        position: relative;
+        z-index: 2;
+        width: 100%;
+        height: 100%;
+        padding: 78px 70px 86px;
+        display: flex;
+        flex-direction: column;
+        gap: 34px;
+      }
+
+      .grid {
+        position: absolute;
+        inset: 0;
+        z-index: 0;
+        background-image:
+          linear-gradient(rgba(18, 200, 238, 0.07) 1px, rgba(18, 200, 238, 0) 1px),
+          linear-gradient(90deg, rgba(18, 200, 238, 0.06) 1px, rgba(18, 200, 238, 0) 1px);
+        background-size: 72px 72px;
+        mask-image: radial-gradient(circle at 54% 42%, black 0%, rgba(0, 0, 0, 0.58) 34%, rgba(0, 0, 0, 0) 72%);
+      }
+
+      .scanline {
+        position: absolute;
+        left: -120px;
+        right: -120px;
+        top: 460px;
+        z-index: 1;
+        height: 2px;
+        background: #12c8ee;
+        box-shadow: 0 0 26px rgba(69, 230, 255, 0.85);
+        opacity: 0.7;
+      }
+
+      .brand-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        min-height: 72px;
+      }
+
+      .brand-mark {
+        width: 72px;
+        height: 72px;
+        border: 2px solid rgba(18, 200, 238, 0.5);
+        border-radius: 50%;
+        display: grid;
+        place-items: center;
+        color: #45e6ff;
+        font-family: "Doto", "Space Mono", monospace;
+        font-size: 34px;
+        font-weight: 900;
+        box-shadow: 0 0 34px rgba(18, 200, 238, 0.24);
+      }
+
+      .route-label {
+        font-family: "Space Mono", monospace;
+        font-size: 24px;
+        color: #9da4a8;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .hero {
+        display: grid;
+        grid-template-columns: 1fr;
+        justify-items: center;
+        align-items: center;
+        flex: 1;
+        min-height: 0;
+        position: relative;
+      }
+
+      .phone-wrap {
+        width: 690px;
+        height: 1534px;
+        border-radius: 72px;
+        padding: 22px;
+        background: linear-gradient(145deg, #242a2d, #06090a 42%, #151b1e);
+        box-shadow:
+          0 52px 120px rgba(0, 0, 0, 0.68),
+          0 0 90px rgba(18, 200, 238, 0.22),
+          inset 0 0 0 2px rgba(244, 247, 248, 0.12);
+        overflow: hidden;
+      }
+
+      .phone-screen {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        border-radius: 52px;
+        overflow: hidden;
+        background: #020607;
+        border: 1px solid rgba(244, 247, 248, 0.12);
+      }
+
+      .phone-screen img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        object-position: center top;
+        display: block;
+      }
+
+      .headline {
+        position: absolute;
+        left: 0;
+        top: 145px;
+        width: 585px;
+        font-size: 86px;
+        line-height: 0.94;
+        font-weight: 900;
+        letter-spacing: 0.01em;
+        text-transform: uppercase;
+        text-shadow: 0 0 34px rgba(18, 200, 238, 0.24);
+      }
+
+      .headline .accent {
+        display: block;
+        color: #12c8ee;
+      }
+
+      .stat-card {
+        position: absolute;
+        right: 0;
+        bottom: 270px;
+        width: 390px;
+        padding: 30px 32px 32px;
+        border-radius: 24px;
+        background: rgba(13, 17, 19, 0.92);
+        border: 1px solid #242a2d;
+        box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45), 0 0 44px rgba(18, 200, 238, 0.15);
+      }
+
+      .stat-label {
+        font-family: "Space Mono", monospace;
+        font-size: 22px;
+        color: #9da4a8;
+        text-transform: uppercase;
+      }
+
+      .stat-value {
+        margin-top: 10px;
+        font-family: "Space Mono", monospace;
+        font-size: 66px;
+        font-weight: 700;
+        color: #f4f7f8;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .stat-note {
+        margin-top: 8px;
+        font-size: 26px;
+        color: #12c8ee;
+        font-weight: 700;
+      }
+
+      .cta {
+        position: absolute;
+        left: 76px;
+        right: 76px;
+        bottom: 88px;
+        z-index: 6;
+        height: 116px;
+        border-radius: 28px;
+        display: grid;
+        place-items: center;
+        background: rgba(13, 17, 19, 0.96);
+        border: 2px solid #45e6ff;
+        color: #45e6ff;
+        font-size: 46px;
+        font-weight: 900;
+        text-transform: uppercase;
+        box-shadow: 0 0 54px rgba(18, 200, 238, 0.55), inset 0 0 28px rgba(18, 200, 238, 0.14);
+      }
+
+      .focus-ring {
+        position: absolute;
+        width: 820px;
+        height: 820px;
+        border: 2px solid rgba(69, 230, 255, 0.36);
+        border-radius: 50%;
+        left: 130px;
+        top: 520px;
+        z-index: 1;
+        box-shadow: 0 0 70px rgba(18, 200, 238, 0.16);
+      }
+
+      .ticker {
+        position: absolute;
+        left: 70px;
+        bottom: 36px;
+        font-family: "Space Mono", monospace;
+        font-size: 20px;
+        color: rgba(157, 164, 168, 0.74);
+        text-transform: uppercase;
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      id="root"
+      data-composition-id="rutina-promo"
+      data-width="1080"
+      data-height="1920"
+      data-start="0"
+      data-duration="5"
+    >
+      <div class="grid" data-layout-ignore></div>
+      <div class="scanline" data-layout-ignore></div>
+      <div class="focus-ring" data-layout-ignore></div>
+      <div class="scene-content">
+        <header class="brand-row">
+          <div class="brand-mark">A</div>
+          <div class="route-label">Rutina / PERF-02</div>
+        </header>
+
+        <main class="hero">
+          <section class="phone-wrap">
+            <div class="phone-screen" data-layout-allow-overflow>
+              <img src="assets/rutina-perf-02.jpg" alt="Pantalla de rutina PERF-02" />
+            </div>
+          </section>
+
+          <h1 class="headline">Entrena con <span class="accent">estructura</span></h1>
+
+          <aside class="stat-card">
+            <div class="stat-label">Volumen preparado</div>
+            <div class="stat-value">5x10</div>
+            <div class="stat-note">Core listo para iniciar</div>
+          </aside>
+
+          <div class="cta">Empezar rutina</div>
+        </main>
+
+        <div class="ticker">Activa entrenamiento</div>
+      </div>
+    </div>
+
+    <script>
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true });
+
+      tl.from(".grid", { opacity: 0, scale: 1.08, duration: 0.55, ease: "sine.out" }, 0.12);
+      tl.from(".brand-mark", { y: -28, opacity: 0, scale: 0.78, duration: 0.45, ease: "back.out(1.7)" }, 0.18);
+      tl.from(".route-label", { x: 36, opacity: 0, duration: 0.42, ease: "power3.out" }, 0.22);
+      tl.from(".phone-wrap", { y: 92, opacity: 0, scale: 0.86, rotation: -1.6, duration: 0.82, ease: "expo.out" }, 0.34);
+      tl.from(".focus-ring", { opacity: 0, scale: 0.68, duration: 0.7, ease: "power2.out" }, 0.46);
+      tl.from(".headline", { x: -78, y: 24, opacity: 0, duration: 0.58, ease: "power4.out" }, 0.82);
+      tl.from(".stat-card", { x: 76, y: 42, opacity: 0, scale: 0.9, duration: 0.58, ease: "back.out(1.35)" }, 1.42);
+      tl.from(".stat-value", { textShadow: "0 0 0 rgba(69,230,255,0)", scale: 0.86, duration: 0.38, ease: "circ.out" }, 1.78);
+      tl.from(".cta", { y: 76, scale: 0.9, duration: 0.56, ease: "power3.out" }, 2.34);
+      tl.from(".ticker", { opacity: 0, y: 18, duration: 0.38, ease: "sine.out" }, 2.56);
+      tl.fromTo(".scanline", { y: -420, opacity: 0 }, { y: 1080, opacity: 0.72, duration: 2.65, ease: "none" }, 0.7);
+      tl.to(".phone-screen img", { scale: 1.045, y: -34, duration: 3.6, ease: "sine.inOut" }, 0.9);
+      tl.to(".focus-ring", { scale: 1.08, opacity: 0.55, duration: 2.8, ease: "sine.inOut" }, 1.24);
+      tl.to(".cta", { boxShadow: "0 0 80px rgba(18,200,238,0.78), inset 0 0 34px rgba(18,200,238,0.22)", scale: 1.025, duration: 0.38, repeat: 4, yoyo: true, ease: "sine.inOut" }, 2.9);
+      tl.to(".scene-content", { opacity: 0, duration: 0.45, ease: "power2.in" }, 4.52);
+      tl.to(".grid", { opacity: 0, duration: 0.45, ease: "power2.in" }, 4.52);
+
+      window.__timelines["rutina-promo"] = tl;
+    </script>
+  </body>
+</html>

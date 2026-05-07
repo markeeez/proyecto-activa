@@ -8,6 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -529,6 +530,90 @@ function makeStyles(
       letterSpacing: 0.8,
       color: theme.accent,
     },
+    modalOverlay: {
+      flex: 1,
+      justifyContent: 'center',
+      paddingHorizontal: 20,
+      backgroundColor: 'rgba(0,0,0,0.58)',
+    },
+    confirmCard: {
+      width: '100%',
+      maxWidth: 360,
+      alignSelf: 'center',
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: theme.border,
+      backgroundColor: theme.surface,
+      paddingHorizontal: 16,
+      paddingTop: 24,
+      paddingBottom: 16,
+      overflow: 'hidden',
+      shadowColor: theme.shadow,
+      shadowOpacity: theme.shadowOpacity,
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: theme.shadowOpacity > 0 ? 4 : 0,
+    },
+    confirmAccent: {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      height: 2,
+      backgroundColor: theme.accent,
+    },
+    confirmTitle: {
+      fontFamily: f.sansBold,
+      fontSize: 18,
+      lineHeight: 23,
+      color: theme.textPrimary,
+    },
+    confirmBody: {
+      marginTop: 8,
+      fontFamily: f.sans,
+      fontSize: 14,
+      lineHeight: 22,
+      color: theme.textSecondary,
+      marginBottom: 18,
+    },
+    confirmRoutineName: {
+      fontFamily: f.sansBold,
+      color: theme.textPrimary,
+    },
+    confirmActions: {
+      flexDirection: 'column',
+      gap: 8,
+    },
+    confirmButton: {
+      minHeight: 48,
+      borderRadius: 8,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: 16,
+      borderWidth: 1,
+    },
+    confirmCancelButton: {
+      borderColor: theme.accent,
+      backgroundColor: theme.surface,
+    },
+    confirmDeleteButton: {
+      borderColor: theme.danger,
+      backgroundColor: theme.danger,
+    },
+    confirmCancelText: {
+      fontFamily: f.sansMedium,
+      fontSize: 16,
+      lineHeight: 24,
+      color: theme.accent,
+      textAlign: 'center',
+    },
+    confirmDeleteText: {
+      fontFamily: f.sansBold,
+      fontSize: 16,
+      lineHeight: 24,
+      color: theme.white,
+      textAlign: 'center',
+    },
     disabled: {
       opacity: 0.5,
     },
@@ -553,6 +638,8 @@ export function RutinasListadoTab() {
   const [routineMenu, setRoutineMenu] = useState<Routine | null>(null);
   const [routineMenuLayout, setRoutineMenuLayout] = useState<LayoutBox>({ x: 20, y: 0, width: 0, height: 74 });
   const [listAreaLayout, setListAreaLayout] = useState<LayoutBox>({ x: 20, y: 0, width: 0, height: 0 });
+  const [confirmRoutine, setConfirmRoutine] = useState<Routine | null>(null);
+  const [eliminandoRoutineId, setEliminandoRoutineId] = useState<string | null>(null);
   const [iniciandoVacio, setIniciandoVacio] = useState(false);
   const [rutinaIniciandoId, setRutinaIniciandoId] = useState<string | null>(null);
   const iniciandoVacioRef = useRef(false);
@@ -609,28 +696,23 @@ export function RutinasListadoTab() {
     const routine = routineMenu;
     if (!routine) return;
     setRoutineMenu(null);
-    Alert.alert(
-      'Eliminar rutina',
-      `¿Seguro que quieres eliminar "${routine.nombre}"?`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Eliminar',
-          style: 'destructive',
-          onPress: () => {
-            void (async () => {
-              try {
-                await borrarRutina(routine.id);
-                removeRoutine(routine.id);
-              } catch (error) {
-                Alert.alert('No se pudo eliminar', error instanceof Error ? error.message : 'Inténtalo de nuevo.');
-              }
-            })();
-          },
-        },
-      ],
-    );
-  }, [removeRoutine, routineMenu]);
+    setConfirmRoutine(routine);
+  }, [routineMenu]);
+
+  const onConfirmarEliminarRutina = useCallback(async () => {
+    if (!confirmRoutine || eliminandoRoutineId) return;
+
+    setEliminandoRoutineId(confirmRoutine.id);
+    try {
+      await borrarRutina(confirmRoutine.id);
+      removeRoutine(confirmRoutine.id);
+      setConfirmRoutine(null);
+    } catch (error) {
+      Alert.alert('No se pudo eliminar', error instanceof Error ? error.message : 'Inténtalo de nuevo.');
+    } finally {
+      setEliminandoRoutineId(null);
+    }
+  }, [confirmRoutine, eliminandoRoutineId, removeRoutine]);
 
   const onQuitarFavorito = useCallback(() => {
     const routine = routineMenu;
@@ -921,6 +1003,54 @@ export function RutinasListadoTab() {
           </View>
         </View>
       ) : null}
+
+      <Modal
+        visible={confirmRoutine != null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          if (!eliminandoRoutineId) setConfirmRoutine(null);
+        }}
+      >
+        <Pressable
+          style={styles.modalOverlay}
+          onPress={() => {
+            if (!eliminandoRoutineId) setConfirmRoutine(null);
+          }}
+        >
+          <Pressable style={styles.confirmCard} onPress={(event) => event.stopPropagation()}>
+            <View style={styles.confirmAccent} />
+            <Text style={styles.confirmTitle}>Eliminar rutina</Text>
+            <Text style={styles.confirmBody}>
+              ¿Seguro que quieres eliminar{' '}
+              <Text style={styles.confirmRoutineName}>{confirmRoutine?.nombre ?? 'esta rutina'}</Text>
+              ? Esta acción no se puede deshacer.
+            </Text>
+            <View style={styles.confirmActions}>
+              <Pressable
+                style={[styles.confirmButton, styles.confirmDeleteButton]}
+                onPress={() => void onConfirmarEliminarRutina()}
+                disabled={Boolean(eliminandoRoutineId)}
+                accessibilityRole="button"
+              >
+                {eliminandoRoutineId ? (
+                  <ActivityIndicator color={theme.danger} size="small" />
+                ) : (
+                  <Text style={styles.confirmDeleteText}>Eliminar</Text>
+                )}
+              </Pressable>
+              <Pressable
+                style={[styles.confirmButton, styles.confirmCancelButton]}
+                onPress={() => setConfirmRoutine(null)}
+                disabled={Boolean(eliminandoRoutineId)}
+                accessibilityRole="button"
+              >
+                <Text style={styles.confirmCancelText}>Cancelar</Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
       {/* --- RUTINAS TAB END --- */}
     </View>
   );

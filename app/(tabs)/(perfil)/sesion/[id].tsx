@@ -1,1 +1,1 @@
-export { default } from '@/app/(tabs)/(entrenamiento)/sesion/[id]';
+export { default } from '@/components/entrenamiento/SesionDetalleScreen';

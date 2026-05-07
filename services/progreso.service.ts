@@ -758,7 +758,7 @@ export const progresoService = {
     let q = supabase
       .from('workout_sets')
       .select(
-        'peso_kg, repeticiones, tipo_peso, workout_session_exercises!inner ( exercise_id, workout_sessions!inner ( user_id, fecha ) )',
+        'peso_kg, repeticiones, tipo_peso, workout_session_exercises!inner ( exercise_id, session_id, workout_sessions!inner ( user_id, fecha ) )',
       )
       .eq('completada', true)
       .eq('workout_session_exercises.exercise_id', exerciseId)
@@ -769,34 +769,40 @@ export const progresoService = {
     const { data, error } = await q;
     if (error) throw error;
 
-    type Agg = {
+    type AggSession = {
       pesos: number[];
       epleys: number[];
       volSeries: number[];
       totalReps: number;
     };
-    const byDay = new Map<string, Agg>();
+    // Agrupamos primero por (fecha, sessionId) para no mezclar sesiones distintas del mismo día
+    const bySession = new Map<string, AggSession>();
+    const sessionFecha = new Map<string, string>();
 
     for (const row of data ?? []) {
       const wse = (row as {
         peso_kg?: unknown;
         repeticiones?: unknown;
         workout_session_exercises?: {
+          session_id?: string;
           workout_sessions?: { fecha?: string };
         };
       }).workout_session_exercises;
       const fecha = wse?.workout_sessions?.fecha;
-      if (!fecha) continue;
+      const sessionId = wse?.session_id;
+      if (!fecha || !sessionId) continue;
 
       const pesoRaw = (row as { peso_kg?: unknown }).peso_kg;
       const repsRaw = (row as { repeticiones?: unknown }).repeticiones;
       const peso = pesoRaw != null && pesoRaw !== '' ? Number(pesoRaw) : null;
       const reps = repsRaw != null && repsRaw !== '' ? Number(repsRaw) : null;
 
-      let agg = byDay.get(fecha);
+      const key = `${fecha}__${sessionId}`;
+      let agg = bySession.get(key);
       if (!agg) {
         agg = { pesos: [], epleys: [], volSeries: [], totalReps: 0 };
-        byDay.set(fecha, agg);
+        bySession.set(key, agg);
+        sessionFecha.set(key, fecha);
       }
 
       const r = reps != null && !Number.isNaN(reps) ? reps : 0;
@@ -815,19 +821,47 @@ export const progresoService = {
       agg.volSeries.push(pVol * r);
     }
 
-    const out: EstadisticaEjercicioDia[] = [...byDay.entries()]
-      .map(([fecha, agg]) => {
-        const mayorPeso = agg.pesos.length ? Math.max(...agg.pesos) : 0;
-        const oneRepMax = agg.epleys.length ? Math.max(...agg.epleys) : 0;
-        const mejorVolumenSerie = agg.volSeries.length ? Math.max(...agg.volSeries) : 0;
-        return {
-          fecha,
-          mayorPeso,
-          oneRepMax,
-          mejorVolumenSerie,
+    // Consolidamos por día tomando el mejor valor de cada sesión (no la suma entre sesiones)
+    type AggDay = {
+      mayorPeso: number;
+      oneRepMax: number;
+      mejorVolumenSerie: number;
+      totalRepeticiones: number;
+    };
+    const byDay = new Map<string, AggDay>();
+
+    for (const [key, agg] of bySession.entries()) {
+      const fecha = sessionFecha.get(key)!;
+      const mayorPesoSesion = agg.pesos.length ? Math.max(...agg.pesos) : 0;
+      const oneRepMaxSesion = agg.epleys.length ? Math.max(...agg.epleys) : 0;
+      const mejorVolSesion = agg.volSeries.length ? Math.max(...agg.volSeries) : 0;
+
+      const prev = byDay.get(fecha);
+      if (!prev) {
+        byDay.set(fecha, {
+          mayorPeso: mayorPesoSesion,
+          oneRepMax: oneRepMaxSesion,
+          mejorVolumenSerie: mejorVolSesion,
           totalRepeticiones: agg.totalReps,
-        };
-      })
+        });
+      } else {
+        byDay.set(fecha, {
+          mayorPeso: Math.max(prev.mayorPeso, mayorPesoSesion),
+          oneRepMax: Math.max(prev.oneRepMax, oneRepMaxSesion),
+          mejorVolumenSerie: Math.max(prev.mejorVolumenSerie, mejorVolSesion),
+          totalRepeticiones: Math.max(prev.totalRepeticiones, agg.totalReps),
+        });
+      }
+    }
+
+    const out: EstadisticaEjercicioDia[] = [...byDay.entries()]
+      .map(([fecha, agg]) => ({
+        fecha,
+        mayorPeso: agg.mayorPeso,
+        oneRepMax: agg.oneRepMax,
+        mejorVolumenSerie: agg.mejorVolumenSerie,
+        totalRepeticiones: agg.totalRepeticiones,
+      }))
       .filter((row) => row.totalRepeticiones > 0 || row.mayorPeso > 0 || row.oneRepMax > 0 || row.mejorVolumenSerie > 0)
       .sort((a, b) => a.fecha.localeCompare(b.fecha));
 

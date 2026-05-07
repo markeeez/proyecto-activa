@@ -73,10 +73,10 @@ export const Colors = {
     textOnPrimary:    Palette.textDisplay,
 
     // Acento Active Sky (reemplaza rojo Nothing como acción primaria)
-    primary:          Palette.sky,
+    primary:          Palette.skyNeon,
     primaryHover:     '#0096C7',
     primaryBg:        Palette.skyBg,
-    primaryText:      Palette.sky,
+    primaryText:      Palette.skyNeon,
 
     // Bordes Nothing
     border:           Palette.lightBorderSubtle,
@@ -86,7 +86,7 @@ export const Colors = {
     // Navegación
     tabBar:           Palette.lightSurface,
     tabIconDefault:   Palette.lightTextDisabled,
-    tabIconSelected:  Palette.sky,
+    tabIconSelected:  Palette.skyNeon,
 
     // Semáforo de calorías
     success:          Palette.success,
@@ -103,14 +103,14 @@ export const Colors = {
     dangerText:       '#8B0000',
 
     // Macros nutrición
-    macroCalories:    Palette.sky,
+    macroCalories:    Palette.skyNeon,
     macroProtein:     Palette.protein,
     macroCarbs:       Palette.carbs,
     macroFat:         Palette.fat,
 
     // Planes
     planFree:         Palette.lightTextSecondary,
-    planPlus:         Palette.sky,
+    planPlus:         Palette.skyNeon,
     planPremium:      Palette.protein,
 
     // Sombras — Nothing no usa sombras, pero se mantiene para compatibilidad
@@ -118,7 +118,7 @@ export const Colors = {
     shadowOpacity:    0,  // Flat surfaces, border separation
 
     // Compat legacy
-    tint:             Palette.sky,
+    tint:             Palette.skyNeon,
     icon:             Palette.lightTextSecondary,
   },
 
@@ -280,6 +280,46 @@ export const Radius = {
   lg:        16,
   pill:      9999,
 } as const;
+
+// ─── Estilos de texto listos para usar ───────────────────────────────────────
+//
+//  Combina FontFamily + TypeScale en un solo objeto.
+//  Uso: import { TextStyles } from '@/constants/theme'
+//       style={TextStyles.heading}
+//
+//  Jerarquía:
+//    displayXl / displayLg / displayMd  → Doto, hero moments
+//    heading / subheading               → SpaceGrotesk Bold, títulos
+//    body / bodySm                      → SpaceGrotesk Regular, cuerpo
+//    caption                            → SpaceGrotesk Regular, timestamps
+//    label                              → SpaceMono Bold, ALL CAPS
+//    labelRegular                       → SpaceMono Regular
+//
+export const TextStyles = {
+  // Display — dot-matrix (Doto), solo hero numbers / big moments
+  displayXl:   { fontFamily: FontFamily.display,   ...TypeScale.displayXl },
+  displayLg:   { fontFamily: FontFamily.display,   ...TypeScale.displayLg },
+  displayMd:   { fontFamily: FontFamily.display,   ...TypeScale.displayMd },
+
+  // Títulos UI — SpaceGrotesk Bold (la fuente que ves en Rutinas)
+  heading:     { fontFamily: FontFamily.sansBold,   ...TypeScale.heading     },
+  subheading:  { fontFamily: FontFamily.sansBold,   ...TypeScale.subheading  },
+
+  // Cuerpo — SpaceGrotesk Regular / Medium
+  body:        { fontFamily: FontFamily.sans,       ...TypeScale.body        },
+  bodyMedium:  { fontFamily: FontFamily.sansMedium, ...TypeScale.body        },
+  bodySm:      { fontFamily: FontFamily.sans,       ...TypeScale.bodySm      },
+  bodySmMedium:{ fontFamily: FontFamily.sansMedium, ...TypeScale.bodySm      },
+
+  // Secundario / timestamps
+  caption:     { fontFamily: FontFamily.sans,       ...TypeScale.caption     },
+
+  // Labels ALL CAPS — SpaceMono (botones de acción, "EMPEZAR RUTINA")
+  label:       { fontFamily: FontFamily.monoBold,   ...TypeScale.label       },
+  labelRegular:{ fontFamily: FontFamily.mono,       ...TypeScale.label       },
+} as const;
+
+export type TextStyleKey = keyof typeof TextStyles;
 
 // ─── Fuentes del sistema (fallback) ───────────────────────────────────────────
 

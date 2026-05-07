@@ -381,7 +381,7 @@ export default function HomeScreen() {
 
         {/* Icono estadísticas */}
         <TouchableOpacity onPress={() => router.push('/(tabs)/(progreso)/estadisticas-ejercicio')} activeOpacity={0.7}>
-          <Ionicons name="bar-chart-outline" size={24} color={c.textDisplay} />
+          <Ionicons name="notifications-outline" size={24} color={c.textDisplay} />
         </TouchableOpacity>
       </View>
 

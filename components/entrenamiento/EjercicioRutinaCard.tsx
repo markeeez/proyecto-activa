@@ -20,6 +20,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 
+import LogoLight from '@/assets/images/logo_light_sb.svg';
+import LogoDark from '@/assets/images/logo_sb.svg';
 import { useTheme } from '@/hooks/useTheme';
 import type { Theme } from '@/constants/theme';
 import type { BorradorEjercicioLinea, BorradorSerieLinea } from '@/types/entrenamientoBorrador.types';
@@ -120,16 +122,17 @@ function makeStyles(c: Theme, f: ReturnType<typeof useTheme>['f'], ts: ReturnTyp
     },
     colSerie: { width: 56 },
     /** Modo entreno: mismas columnas en cabecera y filas (flex compartido) */
-    entrenoColSerie: { flex: 0.5, alignItems: 'center', justifyContent: 'center', minWidth: 0 },
-    entrenoColAnt: { flex: 1.5, alignItems: 'center', justifyContent: 'center', minWidth: 0 },
-    entrenoColKg: { flex: 1, alignItems: 'center', justifyContent: 'center', minWidth: 0 },
-    entrenoColReps: { flex: 1, alignItems: 'center', justifyContent: 'center', minWidth: 0 },
-    entrenoColCheck: { width: 44, alignItems: 'center', justifyContent: 'center' },
+    entrenoColSerie: { width: 40, alignItems: 'center', justifyContent: 'center', minWidth: 0 },
+    entrenoColAnt: { flex: 1.15, alignItems: 'center', justifyContent: 'center', minWidth: 0 },
+    entrenoColKg: { width: 52, alignItems: 'center', justifyContent: 'center', minWidth: 0 },
+    entrenoColReps: { width: 40, alignItems: 'center', justifyContent: 'center', minWidth: 0 },
+    entrenoColRir: { width: 40, alignItems: 'center', justifyContent: 'center', minWidth: 0 },
+    entrenoColCheck: { width: 26, alignItems: 'center', justifyContent: 'center' },
     entrenoInputInner: { flex: 1, minWidth: 0, width: '100%', alignSelf: 'stretch' },
     colKg: { flex: 1, minWidth: 44 },
     colReps: { flex: 1, minWidth: 44 },
     colCheck: { width: 44, alignItems: 'center', justifyContent: 'center' },
-    colMenu: { width: 36 },
+    colMenu: { width: 22 },
     row: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -203,6 +206,13 @@ function makeStyles(c: Theme, f: ReturnType<typeof useTheme>['f'], ts: ReturnTyp
       textAlign: 'center' as const,
       width: '100%',
     },
+    rirInput: {
+      borderWidth: 1,
+      borderColor: c.borderVisible,
+      borderRadius: r.technical,
+      backgroundColor: c.surface,
+      paddingVertical: 2,
+    },
     /** Cabecera SERIE modo entreno: cabe en columna estrecha sin partir líneas */
     thEntrenoSerie: {
       ...ts.label,
@@ -215,6 +225,10 @@ function makeStyles(c: Theme, f: ReturnType<typeof useTheme>['f'], ts: ReturnTyp
     chatHit: {
       padding: s.xs,
       justifyContent: 'center',
+    },
+    chatLogo: {
+      width: 22,
+      height: 22,
     },
     aiModalBackdrop: {
       flex: 1,
@@ -362,6 +376,26 @@ function actualizarSet(sets: BorradorSerieLinea[], setId: string, patch: Partial
   return sets.map((x) => (x.setId === setId ? { ...x, ...patch } : x));
 }
 
+function normalizarDecimalInput(texto: string): string {
+  let out = '';
+  let separadorUsado = false;
+  for (const ch of texto) {
+    if (ch >= '0' && ch <= '9') {
+      out += ch;
+      continue;
+    }
+    if ((ch === ',' || ch === '.') && !separadorUsado) {
+      out += ch;
+      separadorUsado = true;
+    }
+  }
+  return out;
+}
+
+function normalizarEnteroInput(texto: string): string {
+  return texto.replace(/[^\d]/g, '');
+}
+
 export function EjercicioRutinaCard({
   data,
   onChange,
@@ -377,7 +411,7 @@ export function EjercicioRutinaCard({
   onNotaChange,
 }: Props) {
   const router = useRouter();
-  const { c, f, ts, s, r } = useTheme();
+  const { c, f, ts, s, r, isDark } = useTheme();
   const styles = useMemo(() => makeStyles(c, f, ts, s, r), [c, f, ts, s, r]);
   const esEntreno = modo === 'entreno';
   const { height: windowH } = useWindowDimensions();
@@ -436,7 +470,7 @@ export function EjercicioRutinaCard({
       ...data,
       sets: [
         ...data.sets,
-        { setId: lid(), tipoUi: 'lineal', kg: '', reps: '' },
+        { setId: lid(), tipoUi: 'lineal', kg: '', reps: '', rir: '' },
       ],
     });
   };
@@ -506,7 +540,11 @@ export function EjercicioRutinaCard({
           accessibilityRole="button"
           accessibilityLabel="Chat sobre el ejercicio"
         >
-          <Ionicons name="chatbubble-outline" size={20} color={c.textSecondary} />
+          {isDark ? (
+            <LogoDark width={22} height={22} style={styles.chatLogo} />
+          ) : (
+            <LogoLight width={22} height={22} style={styles.chatLogo} />
+          )}
         </Pressable>
         <Pressable style={styles.menuHit} onPress={() => setMenuEjercicio(true)} hitSlop={8}>
           <Ionicons name="ellipsis-horizontal" size={22} color={c.textSecondary} />
@@ -552,7 +590,7 @@ export function EjercicioRutinaCard({
         <View style={styles.tableHead}>
           <View style={styles.entrenoColSerie}>
             <Text style={[styles.thEntrenoSerie, styles.entrenoThCenter]} numberOfLines={1}>
-              SERIE
+              S
             </Text>
           </View>
           <View style={styles.entrenoColAnt}>
@@ -563,6 +601,9 @@ export function EjercicioRutinaCard({
           </View>
           <View style={styles.entrenoColReps}>
             <Text style={[styles.th, styles.entrenoThCenter]}>REPS</Text>
+          </View>
+          <View style={styles.entrenoColRir}>
+            <Text style={[styles.th, styles.entrenoThCenter]}>RIR</Text>
           </View>
           <View style={styles.entrenoColCheck} />
           <View style={styles.colMenu} />
@@ -634,7 +675,10 @@ export function EjercicioRutinaCard({
                     placeholderTextColor={c.textMuted}
                     value={set.kg}
                     onChangeText={(t) =>
-                      onChange({ ...data, sets: actualizarSet(data.sets, set.setId, { kg: t }) })
+                      onChange({
+                        ...data,
+                        sets: actualizarSet(data.sets, set.setId, { kg: normalizarDecimalInput(t) }),
+                      })
                     }
                     keyboardType="decimal-pad"
                   />
@@ -648,7 +692,10 @@ export function EjercicioRutinaCard({
                   placeholderTextColor={c.textMuted}
                   value={set.kg}
                   onChangeText={(t) =>
-                    onChange({ ...data, sets: actualizarSet(data.sets, set.setId, { kg: t }) })
+                    onChange({
+                      ...data,
+                      sets: actualizarSet(data.sets, set.setId, { kg: normalizarDecimalInput(t) }),
+                    })
                   }
                   keyboardType="decimal-pad"
                 />
@@ -667,7 +714,10 @@ export function EjercicioRutinaCard({
                     placeholderTextColor={c.textMuted}
                     value={set.reps}
                     onChangeText={(t) =>
-                      onChange({ ...data, sets: actualizarSet(data.sets, set.setId, { reps: t }) })
+                      onChange({
+                        ...data,
+                        sets: actualizarSet(data.sets, set.setId, { reps: normalizarEnteroInput(t) }),
+                      })
                     }
                     keyboardType="number-pad"
                   />
@@ -681,12 +731,39 @@ export function EjercicioRutinaCard({
                   placeholderTextColor={c.textMuted}
                   value={set.reps}
                   onChangeText={(t) =>
-                    onChange({ ...data, sets: actualizarSet(data.sets, set.setId, { reps: t }) })
+                    onChange({
+                      ...data,
+                      sets: actualizarSet(data.sets, set.setId, { reps: normalizarEnteroInput(t) }),
+                    })
                   }
                   keyboardType="number-pad"
                 />
               </View>
             )}
+            {esEntreno ? (
+              <View style={styles.entrenoColRir}>
+                <View style={styles.entrenoInputInner}>
+                  <TextInput
+                    style={[
+                      styles.cellInput,
+                      styles.cellInputEntrenoCenter,
+                      styles.rirInput,
+                      hecho ? styles.inputHecho : null,
+                    ]}
+                    placeholder="—"
+                    placeholderTextColor={c.textMuted}
+                    value={set.rir ?? ''}
+                    onChangeText={(t) =>
+                      onChange({
+                        ...data,
+                        sets: actualizarSet(data.sets, set.setId, { rir: normalizarEnteroInput(t) }),
+                      })
+                    }
+                    keyboardType="number-pad"
+                  />
+                </View>
+              </View>
+            ) : null}
             {esEntreno ? (
               <Pressable
                 style={styles.entrenoColCheck}

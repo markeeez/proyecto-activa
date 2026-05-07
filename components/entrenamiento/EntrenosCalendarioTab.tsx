@@ -8,6 +8,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Modal,
   Pressable,
   ScrollView,
@@ -581,6 +582,8 @@ export function EntrenosCalendarioTab({
                     await entrenamientoService.descartarSesionHuerfana(modalRecuperacion.id);
                     setModalRecuperacion(null);
                     setSemanaRecarga((n) => n + 1);
+                  } catch {
+                    Alert.alert('Error', 'No se pudo descartar el entreno.');
                   } finally {
                     setRecuperando(false);
                   }

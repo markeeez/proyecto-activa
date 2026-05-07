@@ -24,6 +24,8 @@ import { CalendarioNutricion } from '@/components/nutricion/CalendarioNutricion'
 import { SortableMealList } from '@/components/SortableMealList';
 import { GlowButton } from '@/components/ui/GlowButton';
 
+import LogoDark from '@/assets/images/logo_sb.svg';
+import LogoLight from '@/assets/images/logo_light_sb.svg';
 import { COMIDAS_PREDETERMINADAS } from '@/constants/comidasPredeterminadas';
 import { useComidaPortapapeles } from '@/context/ComidaPortapapelesContext';
 import { useAuth } from '@/hooks/useAuth';
@@ -224,6 +226,7 @@ function ordenarComidas(comidas: ComidaConAlimentos[], ordenIds: string[] | null
 
 export default function NutricionIndex() {
   const { c, f, ts, s, r, isDark } = useTheme();
+  const MealAiLogo = isDark ? LogoDark : LogoLight;
   const insets = useSafeAreaInsets();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const { user } = useAuth();
@@ -629,9 +632,6 @@ export default function NutricionIndex() {
             </View>
           </View>
 
-          <View style={styles.statsButton}>
-            <Ionicons name="bar-chart-outline" size={22} color={c.textDisplay} />
-          </View>
         </View>
 
         <View style={styles.weekStripCard}>
@@ -739,7 +739,7 @@ export default function NutricionIndex() {
 
                 <View style={styles.mealActionRow}>
                   <Pressable style={styles.mealAiBtn} accessibilityRole="button" accessibilityLabel="Asistente IA">
-                    <Ionicons name="sparkles-outline" size={18} color={c.primary} />
+                    <MealAiLogo width={18} height={18} />
                   </Pressable>
                   <Pressable
                     style={styles.mealMenuBtn}
@@ -832,6 +832,7 @@ export default function NutricionIndex() {
       c.textDisplay,
       contentOpacity,
       abrirRegistrarComida,
+      MealAiLogo,
     ],
   );
 

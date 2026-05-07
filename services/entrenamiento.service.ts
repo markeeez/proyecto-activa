@@ -26,6 +26,7 @@ export type DetalleRutinaSet = {
   numero_serie: number;
   tipo_serie: TipoSeriePlantillaDb;
   reps: number | null;
+  rir: number | null;
   peso_kg: number | null;
   tipo_peso: TipoPeso;
 };
@@ -107,6 +108,7 @@ export type EntrenoEjercicioPersistido = {
     numero_serie: number;
     tipo_serie: TipoSeriePlantillaDb;
     repeticiones: number | null;
+    rir?: number | null;
     peso_kg: number | null;
     tipo_peso: TipoPeso;
   }[];
@@ -143,6 +145,7 @@ export type DetalleSesionSet = {
   tipo_serie: TipoSerie;
   peso_kg: number | null;
   repeticiones: number | null;
+  rir: number | null;
   tipo_peso: TipoPeso;
   completada: boolean;
 };
@@ -227,6 +230,7 @@ type DetalleSesionRow = {
       tipo_serie: TipoSerie;
       peso_kg: number | null;
       repeticiones: number | null;
+      rir: number | null;
       tipo_peso: TipoPeso;
       completada: boolean;
     }[] | null;
@@ -668,6 +672,51 @@ export const entrenamientoService = {
     }
     if (!data) return null;
 
+    const rirPorSet = new Map<string, number | null>();
+    const { data: ultimaSesion, error: ultimaSesionError } = await supabase
+      .from('workout_sessions')
+      .select('id')
+      .eq('routine_id', routineId)
+      .not('hora_fin', 'is', null)
+      .order('fecha', { ascending: false })
+      .order('hora_inicio', { ascending: false })
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (ultimaSesionError) {
+      console.error('[obtenerDetalleRutina] ultima sesion', ultimaSesionError.message);
+    } else if (ultimaSesion?.id) {
+      type UltimaWseRow = {
+        orden: number;
+        exercise_id: string;
+        workout_sets:
+          | {
+              numero_serie: number;
+              rir: number | null;
+              completada: boolean;
+            }[]
+          | null;
+      };
+
+      const { data: ultimaWse, error: ultimaWseError } = await supabase
+        .from('workout_session_exercises')
+        .select('orden, exercise_id, workout_sets ( numero_serie, rir, completada )')
+        .eq('session_id', ultimaSesion.id)
+        .order('orden');
+
+      if (ultimaWseError) {
+        console.error('[obtenerDetalleRutina] ultima sesion sets', ultimaWseError.message);
+      } else {
+        for (const wse of (ultimaWse ?? []) as UltimaWseRow[]) {
+          for (const set of wse.workout_sets ?? []) {
+            if (!set.completada) continue;
+            rirPorSet.set(`${wse.exercise_id}:${wse.orden}:${set.numero_serie}`, set.rir ?? null);
+          }
+        }
+      }
+    }
+
     type ReRow = {
       id: string;
       exercise_id: string;
@@ -702,6 +751,7 @@ export const entrenamientoService = {
           numero_serie: s.numero_serie,
           tipo_serie: s.tipo_serie,
           reps: s.reps,
+          rir: rirPorSet.get(`${re.exercise_id}:${re.orden}:${s.numero_serie}`) ?? null,
           peso_kg: s.peso_kg,
           tipo_peso: (s.tipo_peso ?? 'kg') as TipoPeso,
         }));
@@ -839,6 +889,18 @@ export const entrenamientoService = {
     if (error) console.error('[marcarHoraFinWorkoutSession]', error.message);
   },
 
+  async actualizarWorkoutSession(
+    sessionId: string,
+    datos: { nombre?: string; routine_id?: string | null },
+  ): Promise<void> {
+    const payload: { nombre?: string; routine_id?: string | null } = {};
+    if (datos.nombre !== undefined) payload.nombre = datos.nombre;
+    if (datos.routine_id !== undefined) payload.routine_id = datos.routine_id;
+    if (Object.keys(payload).length === 0) return;
+    const { error } = await supabase.from('workout_sessions').update(payload).eq('id', sessionId);
+    if (error) console.error('[actualizarWorkoutSession]', error.message);
+  },
+
   async cargarEjerciciosDesdeRutina(routineId: string): Promise<EjercicioBorrador[]> {
     const { data, error } = await supabase
       .from('routine_exercises')
@@ -928,6 +990,7 @@ export const entrenamientoService = {
           numero_serie: set.numero_serie,
           tipo_serie: set.tipo_serie,
           repeticiones: set.repeticiones,
+          rir: set.rir ?? null,
           peso_kg: set.peso_kg,
           tipo_peso: set.tipo_peso,
           duracion_seg: null,
@@ -940,18 +1003,41 @@ export const entrenamientoService = {
   },
 
   async descartarWorkoutSession(sessionId: string): Promise<void> {
+    const { data: ejercicios, error: errEjercicios } = await supabase
+      .from('workout_session_exercises')
+      .select('id')
+      .eq('session_id', sessionId);
+
+    if (errEjercicios) {
+      console.error('[descartarWorkoutSession] workout_session_exercises', errEjercicios.message);
+      throw new Error(errEjercicios.message);
+    }
+
+    const ejercicioIds = (ejercicios ?? []).map((row) => row.id as string);
+    if (ejercicioIds.length > 0) {
+      const { error: errSets } = await supabase.from('workout_sets').delete().in('session_exercise_id', ejercicioIds);
+      if (errSets) {
+        console.error('[descartarWorkoutSession] workout_sets', errSets.message);
+        throw new Error(errSets.message);
+      }
+
+      const { error: errWse } = await supabase.from('workout_session_exercises').delete().eq('session_id', sessionId);
+      if (errWse) {
+        console.error('[descartarWorkoutSession] workout_session_exercises delete', errWse.message);
+        throw new Error(errWse.message);
+      }
+    }
+
     const { error } = await supabase.from('workout_sessions').delete().eq('id', sessionId);
-    if (error) console.error('[descartarWorkoutSession]', error.message);
+    if (error) {
+      console.error('[descartarWorkoutSession]', error.message);
+      throw new Error(error.message);
+    }
   },
 
-  /**
-   * Marca la sesión como finalizada (hora_fin = ahora) sin borrar datos.
-   * Para sesiones huérfanas en calendario "En curso" cuando no hay contexto en memoria.
-   */
+  /** Borra por completo la sesion huerfana del calendario. */
   async descartarSesionHuerfana(sessionId: string): Promise<void> {
-    const horaFin = new Date().toISOString();
-    const { error } = await supabase.from('workout_sessions').update({ hora_fin: horaFin }).eq('id', sessionId);
-    if (error) console.error('[descartarSesionHuerfana]', error.message);
+    await entrenamientoService.descartarWorkoutSession(sessionId);
   },
 
   async eliminarSesion(sessionId: string): Promise<void> {
@@ -1090,7 +1176,7 @@ export const entrenamientoService = {
         workout_session_exercises (
           id, orden, exercise_id, notas,
           exercises ( nombre, musculo_primario, foto_url ),
-          workout_sets ( numero_serie, tipo_serie, peso_kg, repeticiones, tipo_peso, completada )
+          workout_sets ( numero_serie, tipo_serie, peso_kg, repeticiones, rir, tipo_peso, completada )
         )`,
       )
       .eq('id', sessionId)
@@ -1122,6 +1208,7 @@ export const entrenamientoService = {
           tipo_serie: s.tipo_serie,
           peso_kg: s.peso_kg,
           repeticiones: s.repeticiones,
+          rir: s.rir ?? null,
           tipo_peso: s.tipo_peso,
           completada: s.completada,
         }));

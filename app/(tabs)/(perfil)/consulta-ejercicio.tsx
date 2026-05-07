@@ -1,1 +1,1 @@
-export { default } from '@/app/(tabs)/(entrenamiento)/consulta-ejercicio';
+export { default } from '@/components/entrenamiento/ConsultaEjercicioScreen';

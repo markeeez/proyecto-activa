@@ -384,6 +384,12 @@ function makeStyles(c: Theme, f: ReturnType<typeof useTheme>['f'], ts: ReturnTyp
       alignItems: 'center',
       justifyContent: 'center',
     },
+    colRir: {
+      flex: 0.7,
+      minWidth: 0,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
     colTipo: {
       flex: 0.8,
       minWidth: 0,
@@ -1119,6 +1125,9 @@ export default function RutinaDetallePantalla() {
                               <View style={styles.colReps}>
                                 <Text style={styles.thText}>REPS</Text>
                               </View>
+                              <View style={styles.colRir}>
+                                <Text style={styles.thText}>RIR</Text>
+                              </View>
                               <View style={styles.colTipo}>
                                 <View style={styles.thTipoHeadRow}>
                                   <Text style={styles.thTextTipo}>TIPO</Text>
@@ -1142,6 +1151,9 @@ export default function RutinaDetallePantalla() {
                                 </View>
                                 <View style={styles.colReps}>
                                   <Text style={styles.tdText}>{st.reps != null ? String(st.reps) : '—'}</Text>
+                                </View>
+                                <View style={styles.colRir}>
+                                  <Text style={styles.tdText}>{st.rir != null ? String(st.rir) : ''}</Text>
                                 </View>
                                 <View style={styles.colTipo}>
                                   <View style={styles.badge}>

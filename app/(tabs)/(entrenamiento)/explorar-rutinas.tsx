@@ -124,12 +124,10 @@ function makeStyles(c: Theme, f: ReturnType<typeof useTheme>['f'], ts: ReturnTyp
     header: {
       flexDirection: 'row',
       alignItems: 'center',
-      paddingHorizontal: s.sm,
-      paddingBottom: s.sm,
-      minHeight: 48,
-      borderBottomWidth: 1,
-      borderBottomColor: c.border,
-      backgroundColor: c.surface,
+      paddingHorizontal: s.xs,
+      paddingBottom: s.xs,
+      minHeight: 50,
+      backgroundColor: c.background,
     },
     headerSide: {
       width: 44,
@@ -147,13 +145,35 @@ function makeStyles(c: Theme, f: ReturnType<typeof useTheme>['f'], ts: ReturnTyp
       borderBottomWidth: 1,
       borderBottomColor: c.border,
       backgroundColor: c.background,
-      paddingVertical: s.sm,
+      paddingTop: s.sm,
+      paddingBottom: s.xs,
+    },
+    filterHeader: {
+      minHeight: 28,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: s.md,
+      marginBottom: s.sm,
+    },
+    filterTitle: {
+      ...ts.label,
+      fontFamily: f.sansBold,
+      color: c.textDisplay,
+      letterSpacing: 0,
+      textTransform: 'uppercase',
+    },
+    filterIconBtn: {
+      width: 32,
+      height: 28,
+      alignItems: 'flex-end',
+      justifyContent: 'center',
     },
     filterGroupLabel: {
-      ...ts.caption,
+      ...ts.label,
       fontFamily: f.mono,
       color: c.textMuted,
-      letterSpacing: 0.6,
+      letterSpacing: 0,
       paddingHorizontal: s.md,
       marginBottom: s.xs,
     },
@@ -162,11 +182,13 @@ function makeStyles(c: Theme, f: ReturnType<typeof useTheme>['f'], ts: ReturnTyp
       flexDirection: 'row',
       gap: s.xs,
       paddingHorizontal: s.md,
-      paddingBottom: s.sm,
+      paddingBottom: s.md,
     },
     chip: {
-      paddingHorizontal: s.sm,
-      paddingVertical: s.xs,
+      minHeight: 30,
+      justifyContent: 'center',
+      paddingHorizontal: 12,
+      paddingVertical: 5,
       borderRadius: r.pill,
       borderWidth: 1,
       borderColor: c.borderVisible,
@@ -178,64 +200,102 @@ function makeStyles(c: Theme, f: ReturnType<typeof useTheme>['f'], ts: ReturnTyp
     },
     chipText: {
       ...ts.caption,
-      fontFamily: f.mono,
+      fontFamily: f.sansMedium,
+      fontSize: 12,
+      lineHeight: 16,
       color: c.textSecondary,
     },
     chipTextOn: { color: c.primary },
-    groupDivider: { height: s.xs },
+    groupDivider: { height: 0 },
     list: { flex: 1 },
-    listContent: { paddingHorizontal: s.md, paddingTop: s.sm, paddingBottom: s.xl },
+    listContent: { paddingHorizontal: s.md, paddingTop: s.md, paddingBottom: s.xxl },
     card: {
       backgroundColor: c.surface,
-      borderRadius: 12,
-      padding: 16,
+      borderRadius: r.md,
       marginBottom: s.md,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: c.border,
+      overflow: 'hidden',
+      minHeight: 92,
+    },
+    cardPressable: {
+      flex: 1,
+      paddingHorizontal: 14,
+      paddingVertical: 15,
+      paddingRight: 48,
+    },
+    cardMain: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+    },
+    cardTextArea: {
+      flex: 1,
+      minWidth: 0,
     },
     cardTop: {
       flexDirection: 'row',
       alignItems: 'flex-start',
       justifyContent: 'space-between',
-      gap: s.sm,
+      gap: s.xs,
     },
     cardTitle: {
       flex: 1,
-      fontSize: 16,
+      fontSize: 14,
+      lineHeight: 18,
       fontFamily: f.sansBold,
       color: c.textDisplay,
     },
     diffChip: {
-      paddingHorizontal: s.sm,
-      paddingVertical: 4,
+      paddingHorizontal: 7,
+      paddingVertical: 3,
       borderRadius: r.technical,
       borderWidth: 1,
-      maxWidth: '42%',
+      maxWidth: 96,
     },
     diffChipText: {
-      ...ts.caption,
       fontFamily: f.mono,
       fontSize: 10,
+      lineHeight: 13,
+      letterSpacing: 0,
     },
     musclesLine: {
-      marginTop: s.xs,
+      marginTop: 4,
       ...ts.caption,
-      fontSize: 11,
+      fontSize: 10,
+      lineHeight: 13,
       fontFamily: f.mono,
       color: c.textSecondary,
       textTransform: 'uppercase',
-      letterSpacing: 0.4,
+      letterSpacing: 0,
     },
-    cardFooter: {
+    metricsRow: {
       flexDirection: 'row',
       alignItems: 'center',
-      marginTop: s.md,
+      gap: 12,
+      marginTop: 13,
+    },
+    metricItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+    },
+    metricText: {
+      fontFamily: f.sansMedium,
+      fontSize: 11,
+      lineHeight: 14,
+      color: c.textSecondary,
+    },
+    cardFooter: {
+      position: 'absolute',
+      right: 8,
+      bottom: 12,
     },
     favBtn: {
       width: 40,
       height: 40,
       alignItems: 'center',
       justifyContent: 'center',
+      borderRadius: 20,
     },
     centerMono: {
       ...ts.bodySm,
@@ -259,12 +319,14 @@ function makeStyles(c: Theme, f: ReturnType<typeof useTheme>['f'], ts: ReturnTyp
       backgroundColor: c.background,
       borderBottomWidth: 1,
       borderBottomColor: c.border,
+      paddingHorizontal: s.md,
     },
     tabBtn: {
       flex: 1,
       alignItems: 'center',
       justifyContent: 'center',
-      paddingVertical: s.sm,
+      paddingTop: s.sm,
+      paddingBottom: 10,
       borderBottomWidth: 2,
       borderBottomColor: 'transparent',
     },
@@ -277,15 +339,15 @@ function makeStyles(c: Theme, f: ReturnType<typeof useTheme>['f'], ts: ReturnTyp
       fontFamily: f.mono,
       color: c.textSecondary,
       textTransform: 'uppercase',
-      letterSpacing: 0.6,
+      letterSpacing: 0,
     },
     tabTxtActive: {
       fontSize: 11,
       lineHeight: 14,
-      fontFamily: f.sansMedium,
-      color: c.textDisplay,
+      fontFamily: f.monoBold,
+      color: c.primary,
       textTransform: 'uppercase',
-      letterSpacing: 0.6,
+      letterSpacing: 0,
     },
     tabContent: {
       flex: 1,
@@ -370,6 +432,8 @@ export default function ExplorarRutinasScreen() {
     return `${head.join(' · ')}${extra}`;
   };
 
+  const hayFiltrosActivos = difSel !== null || musculoSel.length > 0;
+
   return (
     <>
       <Stack.Screen options={{ headerShown: false }} />
@@ -404,6 +468,22 @@ export default function ExplorarRutinasScreen() {
           {tabExplorar === 0 ? (
             <>
               <View style={styles.filtersOuter}>
+                <View style={styles.filterHeader}>
+                  <Text style={styles.filterTitle}>FILTRAR</Text>
+                  <Pressable
+                    style={[styles.filterIconBtn, !hayFiltrosActivos && { opacity: 0.72 }]}
+                    onPress={() => {
+                      setDifSel(null);
+                      setMusculoSel([]);
+                    }}
+                    disabled={!hayFiltrosActivos}
+                    accessibilityRole="button"
+                    accessibilityLabel="Limpiar filtros"
+                  >
+                    <Ionicons name="options-outline" size={20} color={c.primary} />
+                  </Pressable>
+                </View>
+
                 <Text style={styles.filterGroupLabel}>DIFICULTAD</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipsScroll}>
                   <View style={styles.chipsRow}>
@@ -460,25 +540,39 @@ export default function ExplorarRutinasScreen() {
                   }
                   renderItem={({ item }) => {
                     const diffSt = estiloChipDificultad(item.dificultad, c);
+                    const totalEjercicios = item.musculosPorEjercicio.length;
                     return (
                       <View style={styles.card}>
                         <Pressable
+                          style={styles.cardPressable}
                           onPress={() => router.push(`/(tabs)/(entrenamiento)/rutina/${item.id}`)}
                           accessibilityRole="button"
                         >
-                          <View style={styles.cardTop}>
-                            <Text style={styles.cardTitle} numberOfLines={2}>
-                              {item.nombre}
-                            </Text>
-                            <View style={[styles.diffChip, { backgroundColor: diffSt.bg, borderColor: diffSt.border }]}>
-                              <Text style={[styles.diffChipText, { color: diffSt.fg }]} numberOfLines={1}>
-                                {diffSt.label}
+                          <View style={styles.cardMain}>
+                            <View style={styles.cardTextArea}>
+                              <View style={styles.cardTop}>
+                                <Text style={styles.cardTitle} numberOfLines={2}>
+                                  {item.nombre}
+                                </Text>
+                                <View style={[styles.diffChip, { backgroundColor: diffSt.bg, borderColor: diffSt.border }]}>
+                                  <Text style={[styles.diffChipText, { color: diffSt.fg }]} numberOfLines={1}>
+                                    {diffSt.label}
+                                  </Text>
+                                </View>
+                              </View>
+                              <Text style={styles.musclesLine} numberOfLines={2}>
+                                {textoMusculosResumen(item)}
                               </Text>
+                              <View style={styles.metricsRow}>
+                                <View style={styles.metricItem}>
+                                  <Ionicons name="barbell" size={12} color={c.primary} />
+                                  <Text style={styles.metricText} numberOfLines={1}>
+                                    {totalEjercicios} ejercicios
+                                  </Text>
+                                </View>
+                              </View>
                             </View>
                           </View>
-                          <Text style={styles.musclesLine} numberOfLines={3}>
-                            {textoMusculosResumen(item)}
-                          </Text>
                         </Pressable>
                         <View style={styles.cardFooter}>
                           <Pressable

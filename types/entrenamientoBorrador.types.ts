@@ -6,6 +6,7 @@ export type BorradorSerieLinea = {
   kg: string;
   reps: string;
   /** Solo pantalla entreno activo */
+  rir?: string;
   completada?: boolean;
 };
 

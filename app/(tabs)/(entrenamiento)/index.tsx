@@ -364,7 +364,7 @@ export default function EntrenamientoIndex() {
             </View>
           </View>
           <Pressable style={styles.headerStatsButton} accessibilityRole="button">
-            <Ionicons name="bar-chart" size={20} color={palette.accent} />
+            <Ionicons name="settings-outline" size={20} color={palette.accent} />
           </Pressable>
         </View>
 

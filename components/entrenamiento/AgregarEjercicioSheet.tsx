@@ -2,6 +2,7 @@
  * Bottom sheet a pantalla completa: buscar ejercicios en Supabase (tabla exercises).
  */
 
+import type { ComponentProps } from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -38,19 +39,31 @@ import { supabase } from '@/lib/supabase';
 // sesión de app y se reutiliza entre aperturas del sheet. ~260KB en memoria.
 let catalogoCache: Exercise[] | null = null;
 let catalogoCargando: Promise<Exercise[]> | null = null;
+const CATALOGO_PAGE_SIZE = 1000;
 
 async function obtenerCatalogo(): Promise<Exercise[]> {
   if (catalogoCache) return catalogoCache;
   if (catalogoCargando) return catalogoCargando;
 
   catalogoCargando = (async () => {
-    const { data, error } = await supabase
-      .from('exercises')
-      .select('id, api_id, nombre, descripcion, musculo_primario, musculos_secundarios, equipamiento, categoria, foto_url, is_custom, created_by, api_source, created_at')
-      .eq('is_custom', false)
-      .order('nombre');
-    if (error) throw new Error(error.message);
-    const ejercicios = (data ?? []) as Exercise[];
+    const ejercicios: Exercise[] = [];
+
+    for (let from = 0; ; from += CATALOGO_PAGE_SIZE) {
+      const to = from + CATALOGO_PAGE_SIZE - 1;
+      const { data, error } = await supabase
+        .from('exercises')
+        .select('id, api_id, nombre, descripcion, musculo_primario, musculos_secundarios, equipamiento, categoria, foto_url, dificultad, is_custom, created_by, api_source, created_at')
+        .eq('is_custom', false)
+        .order('nombre')
+        .range(from, to);
+
+      if (error) throw new Error(error.message);
+
+      const page = (data ?? []) as Exercise[];
+      ejercicios.push(...page);
+      if (page.length < CATALOGO_PAGE_SIZE) break;
+    }
+
     catalogoCache = ejercicios;
     return ejercicios;
   })();
@@ -98,6 +111,12 @@ type Props = {
 };
 
 type FiltroModalTipo = 'general' | 'musculo' | 'equipamiento';
+type IoniconName = ComponentProps<typeof Ionicons>['name'];
+type ExerciseListRow = Exercise & {
+  foto_url?: string | null;
+  dificultad?: string | null;
+  nivel?: string | null;
+};
 
 const OPCIONES_GENERAL: { key: ModoListaEjercicios; label: string }[] = [
   { key: 'general', label: 'General' },
@@ -134,116 +153,165 @@ function makeStyles(c: Theme, f: ReturnType<typeof useTheme>['f'], ts: ReturnTyp
     searchWrap: {
       marginHorizontal: s.md,
       marginTop: s.md,
-      borderBottomWidth: 1,
+      minHeight: 42,
+      borderWidth: 1,
       borderBottomColor: c.borderVisible,
+      borderColor: c.borderVisible,
+      borderRadius: r.md,
+      backgroundColor: c.surface,
       flexDirection: 'row',
       alignItems: 'center',
-      gap: s.sm,
-      paddingBottom: s.xs,
+      gap: 10,
+      paddingHorizontal: 14,
     },
     searchInput: {
       flex: 1,
-      ...ts.body,
+      fontSize: 14,
+      lineHeight: 18,
       fontFamily: f.sans,
       color: c.textDisplay,
-      paddingVertical: s.xs,
+      paddingVertical: s.sm,
     },
     chipsRow: {
       flexDirection: 'row',
       flexWrap: 'nowrap',
-      gap: s.xs,
+      gap: 8,
       paddingHorizontal: s.md,
-      marginTop: s.md,
+      marginTop: 14,
     },
     chipShell: {
       flex: 1,
       minWidth: 0,
       flexDirection: 'row',
       alignItems: 'center',
+      justifyContent: 'center',
       borderRadius: r.pill,
       borderWidth: 1,
       borderColor: c.borderVisible,
-      backgroundColor: c.surface,
+      backgroundColor: c.background,
       overflow: 'hidden',
     },
     chipShellOn: {
       borderColor: c.primary,
-      backgroundColor: c.primaryBg,
+      backgroundColor: c.background,
     },
     chipLabelPress: {
       flex: 1,
       minWidth: 0,
-      paddingVertical: s.xs,
-      paddingLeft: s.sm,
-      paddingRight: s.xxs,
+      minHeight: 34,
+      paddingVertical: 7,
+      paddingHorizontal: 10,
       justifyContent: 'center',
+      alignItems: 'center',
+      flexDirection: 'row',
+      gap: 7,
     },
     chipTxt: {
-      ...ts.caption,
-      fontFamily: f.mono,
+      fontSize: 12,
+      lineHeight: 16,
+      fontFamily: f.sansMedium,
       color: c.textSecondary,
     },
     chipTxtOn: {
       color: c.primary,
     },
     chipClear: {
-      width: 44,
-      height: 44,
+      width: 30,
+      height: 34,
       alignItems: 'center',
       justifyContent: 'center',
       flexShrink: 0,
     },
     list: {
       flex: 1,
-      marginTop: s.md,
+      marginTop: 14,
+    },
+    listContent: {
+      paddingHorizontal: s.md,
+      paddingBottom: s.xxl,
     },
     itemRow: {
       flexDirection: 'row',
       alignItems: 'center',
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: c.border,
+      minHeight: 74,
+      marginBottom: 8,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+      borderRadius: r.md,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: c.border,
+      backgroundColor: c.surface,
     },
     ejercicioImg: {
       width: 56,
       height: 56,
-      borderRadius: 8,
+      borderRadius: r.sm,
+      backgroundColor: c.surfaceElevated,
     },
     ejercicioImgPlaceholder: {
       width: 56,
       height: 56,
-      borderRadius: 8,
-      backgroundColor: c.surface,
+      borderRadius: r.sm,
+      backgroundColor: c.surfaceElevated,
       alignItems: 'center',
       justifyContent: 'center',
     },
     itemMain: {
       flex: 1,
       minWidth: 0,
-      paddingHorizontal: s.md,
-      paddingVertical: s.md,
+      paddingLeft: 14,
+      paddingRight: s.sm,
+      paddingVertical: 2,
     },
     itemName: {
-      ...ts.body,
-      fontFamily: f.sansMedium,
+      fontSize: 15,
+      lineHeight: 18,
+      fontFamily: f.sansBold,
       color: c.textDisplay,
     },
-    itemMuscle: {
-      ...ts.caption,
-      fontFamily: f.mono,
+    metaRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      flexWrap: 'wrap',
+      gap: 8,
+      marginTop: 6,
+    },
+    metaItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+    },
+    metaDot: {
+      width: 6,
+      height: 6,
+      borderRadius: 3,
+      backgroundColor: c.primary,
+    },
+    itemMetaText: {
+      fontSize: 11,
+      lineHeight: 14,
+      fontFamily: f.sans,
       color: c.textSecondary,
-      marginTop: 2,
+    },
+    levelText: {
+      fontSize: 11,
+      lineHeight: 14,
+      fontFamily: f.sansMedium,
     },
     favBtn: {
+      width: 34,
+      height: 30,
       alignItems: 'center',
       justifyContent: 'center',
       flexShrink: 0,
+      borderRadius: 17,
     },
     actionCol: {
       alignItems: 'center',
       justifyContent: 'space-between',
-      height: 56,
-      paddingVertical: 4,
-      paddingHorizontal: s.sm,
+      alignSelf: 'stretch',
+      paddingVertical: 2,
+      paddingLeft: 2,
     },
     empty: {
       padding: s.xl,
@@ -280,10 +348,12 @@ function makeStyles(c: Theme, f: ReturnType<typeof useTheme>['f'], ts: ReturnTyp
     filtModalBusqueda: {
       borderBottomWidth: 1,
       borderBottomColor: c.borderVisible,
+      fontSize: 14,
+      lineHeight: 18,
       fontFamily: f.sans,
       color: c.textDisplay,
       paddingHorizontal: s.md,
-      paddingVertical: s.xs,
+      paddingVertical: s.sm,
       marginBottom: s.sm,
     },
     filtroItem: {
@@ -304,6 +374,29 @@ function etiquetaModoGeneral(m: ModoListaEjercicios): string {
   if (m === 'favoritos') return 'Favoritos';
   if (m === 'creados') return 'Creados';
   return 'General';
+}
+
+function dificultadEjercicio(e: ExerciseListRow): string {
+  return (e.dificultad ?? e.nivel ?? '').trim();
+}
+
+function estiloNivelEjercicio(
+  nivelRaw: string,
+  c: Theme,
+): { label: string; color: string; dot: string } | null {
+  const label = nivelRaw.trim();
+  if (!label) return null;
+  const n = normalizarTexto(label);
+  if (n.includes('basico') || n.includes('principiante') || n.includes('facil')) {
+    return { label: 'Básico', color: c.successText, dot: c.success };
+  }
+  if (n.includes('intermedio') || n.includes('medio')) {
+    return { label, color: c.warningText, dot: c.warning };
+  }
+  if (n.includes('avanzado') || n.includes('dificil')) {
+    return { label, color: c.dangerText, dot: c.danger };
+  }
+  return { label, color: c.textSecondary, dot: c.textMuted };
 }
 
 export function AgregarEjercicioSheet({ visible, onClose, onSeleccionar, onCrearPersonalizado }: Props) {
@@ -491,12 +584,14 @@ export function AgregarEjercicioSheet({ visible, onClose, onSeleccionar, onCrear
     labelBase: string,
     valorMostrar: string | null,
     activo: boolean,
+    icon: IoniconName,
     showClear: boolean,
     onOpen: () => void,
     onClear: () => void,
   ) => (
     <View style={[styles.chipShell, activo && styles.chipShellOn]}>
       <Pressable style={styles.chipLabelPress} onPress={onOpen} accessibilityRole="button">
+        <Ionicons name={icon} size={17} color={activo ? c.primary : c.textSecondary} />
         <Text
           style={[styles.chipTxt, activo && styles.chipTxtOn]}
           numberOfLines={1}
@@ -555,7 +650,8 @@ export function AgregarEjercicioSheet({ visible, onClose, onSeleccionar, onCrear
             {renderChip(
               'General',
               modoGeneral === 'general' ? null : etiquetaModoGeneral(modoGeneral),
-              modoGeneral !== 'general',
+              true,
+              'grid-outline',
               modoGeneral !== 'general',
               () => setFiltroModal('general'),
               () => setModoGeneral('general'),
@@ -564,6 +660,7 @@ export function AgregarEjercicioSheet({ visible, onClose, onSeleccionar, onCrear
               'Músculo',
               musculo,
               Boolean(musculo),
+              'body-outline',
               Boolean(musculo),
               () => setFiltroModal('musculo'),
               () => setMusculo(null),
@@ -572,6 +669,7 @@ export function AgregarEjercicioSheet({ visible, onClose, onSeleccionar, onCrear
               'Equipamiento',
               equipamiento,
               Boolean(equipamiento),
+              'barbell-outline',
               Boolean(equipamiento),
               () => setFiltroModal('equipamiento'),
               () => setEquipamiento(null),
@@ -585,6 +683,7 @@ export function AgregarEjercicioSheet({ visible, onClose, onSeleccionar, onCrear
           ) : (
             <FlatList
               style={styles.list}
+              contentContainerStyle={styles.listContent}
               data={lista}
               keyExtractor={(item) => item.id}
               keyboardShouldPersistTaps="handled"
@@ -597,21 +696,23 @@ export function AgregarEjercicioSheet({ visible, onClose, onSeleccionar, onCrear
               }
               renderItem={({ item }) => {
                 const esFav = favSet.has(item.id);
-                const fotoRaw = (item as Exercise & { foto_url?: string | null }).foto_url;
+                const row = item as ExerciseListRow;
+                const nivel = estiloNivelEjercicio(dificultadEjercicio(row), c);
+                const fotoRaw = row.foto_url;
                 const fotoUri = fotoRaw?.trim() ?? '';
                 return (
                   <View style={styles.itemRow}>
                     {fotoUri ? (
                       <Image
                         source={{ uri: fotoUri }}
-                        style={[styles.ejercicioImg, { marginLeft: s.md, marginRight: s.sm }]}
-                        contentFit="cover"
+                        style={styles.ejercicioImg}
+                        contentFit="contain"
                         cachePolicy="memory-disk"
                         autoplay={false}
                         recyclingKey={item.id}
                       />
                     ) : (
-                      <View style={[styles.ejercicioImgPlaceholder, { marginLeft: s.md, marginRight: s.sm }]}>
+                      <View style={styles.ejercicioImgPlaceholder}>
                         <Ionicons name="barbell-outline" size={24} color={c.textMuted} />
                       </View>
                     )}
@@ -621,9 +722,34 @@ export function AgregarEjercicioSheet({ visible, onClose, onSeleccionar, onCrear
                         onSeleccionar(item);
                         cerrar();
                       }}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Agregar ${item.nombre}`}
                     >
-                      <Text style={styles.itemName}>{item.nombre}</Text>
-                      <Text style={styles.itemMuscle}>{item.musculo_primario}</Text>
+                      <Text style={styles.itemName} numberOfLines={2}>
+                        {item.nombre}
+                      </Text>
+                      <View style={styles.metaRow}>
+                        <View style={styles.metaItem}>
+                          <View style={styles.metaDot} />
+                          <Text style={styles.itemMetaText} numberOfLines={1}>
+                            {item.musculo_primario}
+                          </Text>
+                        </View>
+                        {nivel ? (
+                          <View style={styles.metaItem}>
+                            <Ionicons name="stats-chart" size={12} color={c.textSecondary} />
+                            <View
+                              style={[
+                                styles.metaDot,
+                                { backgroundColor: nivel.dot, width: 5, height: 5, borderRadius: 2.5 },
+                              ]}
+                            />
+                            <Text style={[styles.levelText, { color: nivel.color }]} numberOfLines={1}>
+                              {nivel.label}
+                            </Text>
+                          </View>
+                        ) : null}
+                      </View>
                     </Pressable>
                     <View style={styles.actionCol}>
                       <Pressable

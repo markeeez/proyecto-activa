@@ -23,6 +23,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AgregarEjercicioSheet } from '@/components/entrenamiento/AgregarEjercicioSheet';
 import { CrearEjercicioModal } from '@/components/entrenamiento/CrearEjercicioModal';
 import { EjercicioRutinaCard } from '@/components/entrenamiento/EjercicioRutinaCard';
+import { GlowButton } from '@/components/ui/GlowButton';
 import type { Theme } from '@/constants/theme';
 import { useEntreno, useEntrenoDuracionTexto, type SnapshotRutina } from '@/context/EntrenoContext';
 import { useAuth } from '@/hooks/useAuth';
@@ -37,7 +38,7 @@ import {
   type UltimaSesionRutina,
 } from '@/services/entrenamiento.service';
 import type { Exercise } from '@/types/database.types';
-import type { BorradorEjercicioLinea, BorradorSerieLinea } from '@/types/entrenamientoBorrador.types';
+import type { BorradorEjercicioLinea } from '@/types/entrenamientoBorrador.types';
 
 
 function parseOptFloat(s: string): number | null {
@@ -70,6 +71,7 @@ function lineasAPersistido(lineas: BorradorEjercicioLinea[]): EntrenoEjercicioPe
           numero_serie: i + 1,
           tipo_serie: tipoSerieUiADb(s.tipoUi),
           repeticiones: parseOptInt(s.reps),
+          rir: parseOptInt(s.rir ?? ''),
           peso_kg: pesoKg,
           tipo_peso: pesoKg === null ? 'bodyweight' : 'kg',
         };
@@ -198,22 +200,59 @@ function makeStyles(c: Theme, f: ReturnType<typeof useTheme>['f'], ts: ReturnTyp
       marginHorizontal: -s.md,
       paddingHorizontal: s.md,
     },
-    footerBtnText: { ...ts.label, fontFamily: f.mono, color: c.primary, letterSpacing: 0.7 },
+    footerGlowWrap: {
+      width: '100%',
+      maxWidth: 360,
+      alignSelf: 'center',
+      marginBottom: -30
+    },
+    footerGlowPressable: {
+      minHeight: 46,
+      borderRadius: r.sm,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: s.md,
+      backgroundColor: c.primary,
+    },
+    footerBtnText: { ...ts.label, fontFamily: f.mono, color: c.textOnPrimary, letterSpacing: 0.7 },
     modalOverlay: {
       flex: 1,
-      backgroundColor: 'rgba(0,0,0,0.55)',
+      backgroundColor: 'rgba(0,0,0,0.68)',
       justifyContent: 'center',
       padding: s.lg,
     },
     modalCard: {
       backgroundColor: c.surface,
-      borderRadius: r.lg,
+      borderRadius: 18,
       borderWidth: 1,
       borderColor: c.borderVisible,
-      padding: s.md,
+      paddingHorizontal: s.md,
+      paddingTop: s.lg,
+      paddingBottom: s.md,
+      overflow: 'hidden',
     },
-    modalTitle: { ...ts.subheading, fontFamily: f.sansMedium, color: c.textDisplay, marginBottom: s.sm },
-    modalBody: { ...ts.bodySm, fontFamily: f.sans, color: c.textSecondary, marginBottom: s.md },
+    modalAccent: {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      height: 2,
+      backgroundColor: c.primary,
+    },
+    modalTitle: {
+      ...ts.subheading,
+      fontFamily: f.sansBold,
+      color: c.textDisplay,
+      marginBottom: s.sm,
+      letterSpacing: 0,
+    },
+    modalBody: {
+      ...ts.body,
+      fontFamily: f.sans,
+      color: c.textSecondary,
+      marginBottom: s.lg,
+      lineHeight: 25,
+    },
     modalRow: { flexDirection: 'row', gap: s.sm, justifyContent: 'flex-end', flexWrap: 'wrap' },
     modalBtn: {
       paddingVertical: s.sm,
@@ -229,14 +268,54 @@ function makeStyles(c: Theme, f: ReturnType<typeof useTheme>['f'], ts: ReturnTyp
       ...ts.body,
       fontFamily: f.sans,
       color: c.textDisplay,
-      borderBottomWidth: 1,
-      borderBottomColor: c.borderVisible,
-      paddingVertical: s.xs,
-      marginBottom: s.md,
+      borderWidth: 1,
+      borderColor: c.borderVisible,
+      borderRadius: r.sm,
+      backgroundColor: c.surfaceElevated,
+      paddingHorizontal: s.md,
+      paddingVertical: s.sm,
+      marginBottom: s.lg,
     },
     modalIncompletasColumn: {
       flexDirection: 'column',
       gap: s.sm,
+    },
+    modalAction: {
+      minHeight: 48,
+      borderRadius: r.sm,
+      borderWidth: 1,
+      borderColor: c.borderVisible,
+      backgroundColor: c.surface,
+      alignSelf: 'stretch',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: s.md,
+    },
+    modalActionPrimary: {
+      minHeight: 48,
+      borderRadius: r.sm,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: s.md,
+      backgroundColor: c.primary,
+    },
+    modalActionDanger: {
+      borderColor: c.danger,
+      backgroundColor: c.surface,
+    },
+    modalActionText: {
+      ...ts.body,
+      fontFamily: f.sansMedium,
+      color: c.textDisplay,
+      textAlign: 'center' as const,
+      letterSpacing: 0,
+    },
+    modalActionTextPrimary: {
+      color: c.textOnPrimary,
+      fontFamily: f.sansBold,
+    },
+    modalActionBusy: {
+      opacity: 0.65,
     },
     modalBtnDestructive: {
       borderWidth: 1,
@@ -253,10 +332,30 @@ function makeStyles(c: Theme, f: ReturnType<typeof useTheme>['f'], ts: ReturnTyp
 }
 
 type PostSnap = {
+  sessionId: string;
   lineas: BorradorEjercicioLinea[];
   routineId: string | null;
   nombre: string;
 };
+
+const MESES_ENTRENO = [
+  'Enero',
+  'Febrero',
+  'Marzo',
+  'Abril',
+  'Mayo',
+  'Junio',
+  'Julio',
+  'Agosto',
+  'Septiembre',
+  'Octubre',
+  'Noviembre',
+  'Diciembre',
+] as const;
+
+function nombreEntrenoPorFecha(fecha = new Date()): string {
+  return `Entreno ${fecha.getDate()} ${MESES_ENTRENO[fecha.getMonth()]}`;
+}
 
 export default function EntrenoActivoScreen() {
   const router = useRouter();
@@ -272,7 +371,7 @@ export default function EntrenoActivoScreen() {
     minimizar,
   } = useEntreno();
   const duracionTxt = useEntrenoDuracionTexto();
-  const { c, f, ts, s, r } = useTheme();
+  const { c, f, ts, s, r, isDark } = useTheme();
   const styles = useMemo(() => makeStyles(c, f, ts, s, r), [c, f, ts, s, r]);
 
   const [sheetAbierto, setSheetAbierto] = useState(false);
@@ -300,7 +399,10 @@ export default function EntrenoActivoScreen() {
     return () => clearTimeout(t);
   }, [entrenoActivo, postSnap, router]);
 
-  const lineas = useMemo(() => entrenoActivo?.lineas ?? [], [entrenoActivo?.lineas]);
+  const lineas = useMemo(
+    () => entrenoActivo?.lineas ?? postSnap?.lineas ?? [],
+    [entrenoActivo?.lineas, postSnap?.lineas],
+  );
 
   /** Rutas/recuperación no rellenan `foto_url`; se hidrata desde catálogo sin bloquear la UI. */
   const claveFotosPendientes = useMemo(
@@ -486,6 +588,7 @@ export default function EntrenoActivoScreen() {
     if (!entrenoActivo || !user?.id) return;
     const snapshot = entrenoActivo.snapshotRutina;
     const snap: PostSnap = {
+      sessionId: entrenoActivo.sessionId,
       lineas: entrenoActivo.lineas.map((l) => ({
         ...l,
         sets: l.sets.map((s) => ({ ...s })),
@@ -497,15 +600,15 @@ export default function EntrenoActivoScreen() {
     const payload = lineasAPersistido(entrenoActivo.lineas);
     try {
       await entrenamientoService.guardarSetsCompletados(entrenoActivo.sessionId, payload);
+      if (snap.routineId == null || hayModificaciones) {
+        postSnapRef.current = snap;
+        setPostSnap(snap);
+      }
       await terminarEntreno();
       setNombreNuevaRutina(snap.nombre || 'Mi rutina');
       if (snap.routineId == null) {
-        postSnapRef.current = snap;
-        setPostSnap(snap);
         setModalGuardarRutina(true);
       } else if (hayModificaciones) {
-        postSnapRef.current = snap;
-        setPostSnap(snap);
         setModalActualizarRutina(true);
       } else {
         postSnapRef.current = null;
@@ -571,7 +674,13 @@ export default function EntrenoActivoScreen() {
     setGuardandoRutina(true);
     try {
       const res = await entrenamientoService.guardarRutinaDesdeBorrador(user.id, titulo, borrador);
-      if (res.ok) cerrarPostModalsYSalir();
+      if (res.ok) {
+        await entrenamientoService.actualizarWorkoutSession(postSnap.sessionId, {
+          nombre: titulo,
+          routine_id: res.routineId,
+        });
+        cerrarPostModalsYSalir();
+      }
       else Alert.alert('Error', res.error);
     } finally {
       setGuardandoRutina(false);
@@ -590,20 +699,39 @@ export default function EntrenoActivoScreen() {
     }
   }, [postSnap, cerrarPostModalsYSalir]);
 
-  const onDescartarEntreno = useCallback(async () => {
-    setModalDescartar(false);
-    await descartarEntreno();
-  }, [descartarEntreno]);
+  const onCerrarGuardarRutinaSinGuardar = useCallback(async () => {
+    const snap = postSnapRef.current;
+    if (snap?.sessionId && snap.routineId == null) {
+      await entrenamientoService.actualizarWorkoutSession(snap.sessionId, {
+        nombre: nombreEntrenoPorFecha(),
+      });
+    }
+    cerrarPostModalsYSalir();
+  }, [cerrarPostModalsYSalir]);
 
-  const onDescartarEntrenoDesdeIncompletas = useCallback(async () => {
-    setModalIncompletas(false);
-    await descartarEntreno();
+  const descartarEntrenoYSalir = useCallback(async () => {
+    try {
+      await descartarEntreno();
+    } catch {
+      Alert.alert('Error', 'No se pudo descartar el entreno.');
+      return;
+    }
     allowNavAway.current = true;
     router.replace('/(tabs)/(entrenamiento)');
     setTimeout(() => {
       allowNavAway.current = false;
     }, 500);
   }, [descartarEntreno, router]);
+
+  const onDescartarEntreno = useCallback(async () => {
+    setModalDescartar(false);
+    await descartarEntrenoYSalir();
+  }, [descartarEntrenoYSalir]);
+
+  const onDescartarEntrenoDesdeIncompletas = useCallback(async () => {
+    setModalIncompletas(false);
+    await descartarEntrenoYSalir();
+  }, [descartarEntrenoYSalir]);
 
   if (!entrenoActivo && !postSnap) {
     return (
@@ -613,7 +741,9 @@ export default function EntrenoActivoScreen() {
     );
   }
 
-  const cuerpoEntreno = entrenoActivo != null;
+  const cuerpoEntreno = entrenoActivo != null || postSnap != null;
+  const fondoPostEntreno = entrenoActivo == null && postSnap != null;
+  const nombrePantalla = entrenoActivo?.nombre ?? postSnap?.nombre ?? 'Entreno';
 
   return (
     <>
@@ -623,16 +753,26 @@ export default function EntrenoActivoScreen() {
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         >
       <View style={styles.header}>
-        <Pressable style={styles.headerBtn} onPress={onMinimizar} accessibilityLabel="Minimizar entreno">
+        <Pressable
+          style={styles.headerBtn}
+          onPress={onMinimizar}
+          disabled={fondoPostEntreno}
+          accessibilityLabel="Minimizar entreno"
+        >
           <Ionicons name="chevron-down" size={26} color={c.textDisplay} />
         </Pressable>
         <View style={styles.headerCenter}>
           <Text style={styles.headerTitle} numberOfLines={1}>
-            {entrenoActivo.nombre}
+            {nombrePantalla}
           </Text>
           <Text style={styles.cron}>{duracionTxt}</Text>
         </View>
-        <Pressable style={styles.terminarBtn} onPress={onTerminar} accessibilityLabel="Terminar entreno">
+        <Pressable
+          style={styles.terminarBtn}
+          onPress={onTerminar}
+          disabled={fondoPostEntreno}
+          accessibilityLabel="Terminar entreno"
+        >
           <Text style={styles.terminarTxt}>Terminar</Text>
         </Pressable>
       </View>
@@ -643,12 +783,27 @@ export default function EntrenoActivoScreen() {
             <Text style={{ ...ts.body, fontFamily: f.sans, color: c.textSecondary, textAlign: 'center' }}>
               Añade ejercicios para empezar
             </Text>
-            <Pressable
-              style={[styles.terminarBtn, { paddingHorizontal: s.lg, paddingVertical: s.md }]}
-              onPress={() => setSheetAbierto(true)}
-            >
-              <Text style={styles.terminarTxt}>+ Agregar ejercicio</Text>
-            </Pressable>
+            <View style={styles.footerGlowWrap}>
+              {isDark ? (
+                <GlowButton borderRadius={r.sm} glowPadding={24}>
+                  <Pressable
+                    style={styles.footerGlowPressable}
+                    onPress={() => setSheetAbierto(true)}
+                    accessibilityRole="button"
+                  >
+                    <Text style={styles.footerBtnText}>+ AGREGAR EJERCICIO</Text>
+                  </Pressable>
+                </GlowButton>
+              ) : (
+                <Pressable
+                  style={styles.footerGlowPressable}
+                  onPress={() => setSheetAbierto(true)}
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.footerBtnText}>+ AGREGAR EJERCICIO</Text>
+                </Pressable>
+              )}
+            </View>
           </View>
         ) : (
           <>
@@ -662,22 +817,56 @@ export default function EntrenoActivoScreen() {
                   key={line.lineId}
                   modo="entreno"
                   nota={line.nota ?? ''}
-                  onNotaChange={(texto: string) => actualizarNotaLinea(line.lineId, texto)}
+                  onNotaChange={(texto: string) => {
+                    if (!fondoPostEntreno) actualizarNotaLinea(line.lineId, texto);
+                  }}
                   textoAnteriorSeries={textosAnteriorPorLineId.get(line.lineId)}
                   data={line}
-                  onChange={(next) => actualizarLinea(line.lineId, next)}
-                  onMoveUp={() => moverLinea(index, -1)}
-                  onMoveDown={() => moverLinea(index, 1)}
-                  onReplace={() => abrirSheetReemplazar(line.lineId)}
-                  onDelete={() => eliminarLinea(line.lineId)}
-                  canMoveUp={index > 0}
-                  canMoveDown={index < lineas.length - 1}
+                  onChange={(next) => {
+                    if (!fondoPostEntreno) actualizarLinea(line.lineId, next);
+                  }}
+                  onMoveUp={() => {
+                    if (!fondoPostEntreno) moverLinea(index, -1);
+                  }}
+                  onMoveDown={() => {
+                    if (!fondoPostEntreno) moverLinea(index, 1);
+                  }}
+                  onReplace={() => {
+                    if (!fondoPostEntreno) abrirSheetReemplazar(line.lineId);
+                  }}
+                  onDelete={() => {
+                    if (!fondoPostEntreno) eliminarLinea(line.lineId);
+                  }}
+                  canMoveUp={!fondoPostEntreno && index > 0}
+                  canMoveDown={!fondoPostEntreno && index < lineas.length - 1}
                 />
               ))}
             </ScrollView>
-            <Pressable style={styles.footerBtn} onPress={() => setSheetAbierto(true)}>
-              <Text style={styles.footerBtnText}>+ AGREGAR EJERCICIO</Text>
-            </Pressable>
+            {!fondoPostEntreno ? (
+              <View style={styles.footerBtn}>
+                <View style={styles.footerGlowWrap}>
+                  {isDark ? (
+                    <GlowButton borderRadius={r.sm} glowPadding={24}>
+                      <Pressable
+                        style={styles.footerGlowPressable}
+                        onPress={() => setSheetAbierto(true)}
+                        accessibilityRole="button"
+                      >
+                        <Text style={styles.footerBtnText}>+ AGREGAR EJERCICIO</Text>
+                      </Pressable>
+                    </GlowButton>
+                  ) : (
+                    <Pressable
+                      style={styles.footerGlowPressable}
+                      onPress={() => setSheetAbierto(true)}
+                      accessibilityRole="button"
+                    >
+                      <Text style={styles.footerBtnText}>+ AGREGAR EJERCICIO</Text>
+                    </Pressable>
+                  )}
+                </View>
+              </View>
+            ) : null}
           </>
         )}
       </View>
@@ -698,13 +887,12 @@ export default function EntrenoActivoScreen() {
         onSubmit={onCrearEjercicioListo}
       />
         </KeyboardAvoidingView>
-      ) : (
-        <View style={[styles.root, { paddingTop: insets.top, backgroundColor: c.background }]} />
-      )}
+      ) : null}
 
       <Modal visible={modalIncompletas} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
+            <View style={styles.modalAccent} />
             <Text style={styles.modalTitle}>Series sin completar</Text>
             <Text style={styles.modalBody}>
               Hay series que no marcaste como hechas. Puedes revisarlas o terminar y descartar las incompletas del
@@ -712,23 +900,28 @@ export default function EntrenoActivoScreen() {
             </Text>
             <View style={styles.modalIncompletasColumn}>
               <Pressable
-                style={[styles.modalBtn, { alignSelf: 'stretch', alignItems: 'center' }]}
+                style={styles.modalAction}
                 onPress={() => setModalIncompletas(false)}
+                accessibilityRole="button"
               >
-                <Text style={styles.modalBtnTxt}>Revisar</Text>
+                <Text style={styles.modalActionText}>Revisar</Text>
               </Pressable>
               <Pressable
-                style={[styles.modalBtn, styles.modalBtnPrimary, { alignSelf: 'stretch', alignItems: 'center' }]}
+                style={styles.modalActionPrimary}
                 onPress={() => {
                   setModalIncompletas(false);
                   void ejecutarTerminar();
                 }}
+                accessibilityRole="button"
               >
-                <Text style={[styles.modalBtnTxt, styles.modalBtnTxtOn]}>Descartar incompletas</Text>
+                <Text style={[styles.modalActionText, styles.modalActionTextPrimary]}>
+                  Descartar incompletas
+                </Text>
               </Pressable>
               <Pressable
-                style={[styles.modalBtn, styles.modalBtnDestructive, { alignSelf: 'stretch', alignItems: 'center' }]}
+                style={[styles.modalAction, styles.modalActionDanger]}
                 onPress={() => void onDescartarEntrenoDesdeIncompletas()}
+                accessibilityRole="button"
               >
                 <Text style={styles.modalBtnTxtDestructive}>Descartar entreno</Text>
               </Pressable>
@@ -740,26 +933,29 @@ export default function EntrenoActivoScreen() {
       <Modal visible={modalConfirmarTerminar} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
+            <View style={styles.modalAccent} />
             <Text style={styles.modalTitle}>¿Terminar entreno?</Text>
             <Text style={styles.modalBody}>
               Se guardarán las series completadas y podrás guardar o actualizar la rutina si aplica.
             </Text>
             <View style={styles.modalIncompletasColumn}>
               <Pressable
-                style={[styles.modalBtn, styles.modalBtnPrimary, { alignSelf: 'stretch', alignItems: 'center' }]}
+                style={styles.modalActionPrimary}
                 onPress={() => {
                   setModalConfirmarTerminar(false);
                   void ejecutarTerminar();
                 }}
+                accessibilityRole="button"
               >
-                <Text style={[styles.modalBtnTxt, styles.modalBtnTxtOn]}>Terminar</Text>
+                <Text style={[styles.modalActionText, styles.modalActionTextPrimary]}>Terminar</Text>
               </Pressable>
               <Pressable
-                style={[styles.modalBtn, styles.modalBtnDestructive, { alignSelf: 'stretch', alignItems: 'center' }]}
+                style={[styles.modalAction, styles.modalActionDanger]}
                 onPress={() => {
                   setModalConfirmarTerminar(false);
                   void onDescartarEntrenoDesdeIncompletas();
                 }}
+                accessibilityRole="button"
               >
                 <Text style={styles.modalBtnTxtDestructive}>Descartar entreno</Text>
               </Pressable>
@@ -788,6 +984,7 @@ export default function EntrenoActivoScreen() {
       <Modal visible={modalGuardarRutina} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
+            <View style={styles.modalAccent} />
             <Text style={styles.modalTitle}>¿Guardar como rutina?</Text>
             <Text style={styles.modalBody}>Se creará una plantilla con las series que completaste.</Text>
             <TextInput
@@ -797,19 +994,25 @@ export default function EntrenoActivoScreen() {
               placeholder="Nombre de la rutina"
               placeholderTextColor={c.textMuted}
             />
-            <View style={styles.modalRow}>
-              <Pressable style={styles.modalBtn} onPress={cerrarPostModalsYSalir} disabled={guardandoRutina}>
-                <Text style={styles.modalBtnTxt}>Ahora no</Text>
+            <View style={styles.modalIncompletasColumn}>
+              <Pressable
+                style={[styles.modalAction, guardandoRutina ? styles.modalActionBusy : null]}
+                onPress={() => void onCerrarGuardarRutinaSinGuardar()}
+                disabled={guardandoRutina}
+                accessibilityRole="button"
+              >
+                <Text style={styles.modalActionText}>Ahora no</Text>
               </Pressable>
               <Pressable
-                style={[styles.modalBtn, styles.modalBtnPrimary]}
+                style={[styles.modalActionPrimary, guardandoRutina ? styles.modalActionBusy : null]}
                 onPress={() => void onConfirmarGuardarRutina()}
                 disabled={guardandoRutina}
+                accessibilityRole="button"
               >
                 {guardandoRutina ? (
                   <ActivityIndicator color={c.textOnPrimary} />
                 ) : (
-                  <Text style={[styles.modalBtnTxt, styles.modalBtnTxtOn]}>Guardar</Text>
+                  <Text style={[styles.modalActionText, styles.modalActionTextPrimary]}>Guardar rutina</Text>
                 )}
               </Pressable>
             </View>
@@ -820,24 +1023,33 @@ export default function EntrenoActivoScreen() {
       <Modal visible={modalActualizarRutina} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
+            <View style={styles.modalAccent} />
             <Text style={styles.modalTitle}>¿Actualizar rutina?</Text>
             <Text style={styles.modalBody}>
               La plantilla de la rutina se reemplazará por los ejercicios y series que tienes ahora en pantalla.
             </Text>
-            <View style={styles.modalRow}>
+            <View style={styles.modalIncompletasColumn}>
               <Pressable
-                style={styles.modalBtn}
+                style={[styles.modalAction, guardandoRutina ? styles.modalActionBusy : null]}
                 onPress={() => void onConfirmarActualizarRutina()}
                 disabled={guardandoRutina}
+                accessibilityRole="button"
               >
                 {guardandoRutina ? (
-                  <ActivityIndicator color={c.textOnPrimary} />
+                  <ActivityIndicator color={c.primary} />
                 ) : (
-                  <Text style={styles.modalBtnTxt}>Actualizar</Text>
+                  <Text style={styles.modalActionText}>Actualizar rutina</Text>
                 )}
               </Pressable>
-              <Pressable style={[styles.modalBtn, styles.modalBtnPrimary]} onPress={cerrarPostModalsYSalir} disabled={guardandoRutina}>
-                <Text style={[styles.modalBtnTxt, styles.modalBtnTxtOn]}>Continuar</Text>
+              <Pressable
+                style={[styles.modalActionPrimary, guardandoRutina ? styles.modalActionBusy : null]}
+                onPress={cerrarPostModalsYSalir}
+                disabled={guardandoRutina}
+                accessibilityRole="button"
+              >
+                <Text style={[styles.modalActionText, styles.modalActionTextPrimary]}>
+                  Continuar
+                </Text>
               </Pressable>
             </View>
           </View>

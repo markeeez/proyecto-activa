@@ -84,6 +84,7 @@ function mapCargadoALineaDesdeUltima(ej: EjercicioBorrador, ultima: UltimaSesion
             tipoUi: tipoSerieDbAUi(s.tipo_serie),
             kg,
             reps,
+            rir: '',
             completada: false,
           };
         })
@@ -109,6 +110,7 @@ type WseRecuperacionRow = {
         tipo_serie: TipoSerie;
         peso_kg: number | null;
         repeticiones: number | null;
+        rir: number | null;
         tipo_peso: string;
         completada: boolean;
       }[]
@@ -137,6 +139,7 @@ function mapWseRecuperadoALinea(wse: WseRecuperacionRow): BorradorEjercicioLinea
           tipoUi: tipoSerieDbAUi(st.tipo_serie),
           kg: st.peso_kg != null ? String(st.peso_kg) : '',
           reps: st.repeticiones != null ? String(st.repeticiones) : '',
+          rir: st.rir != null ? String(st.rir) : '',
           completada: st.completada,
         }))
       : [seriePorDefecto()];
@@ -285,7 +288,7 @@ export function EntrenoProvider({ children }: { children: ReactNode }) {
         workout_session_exercises (
           orden, exercise_id,
           exercises ( nombre, musculo_primario ),
-          workout_sets ( numero_serie, tipo_serie, peso_kg, repeticiones, tipo_peso, completada )
+          workout_sets ( numero_serie, tipo_serie, peso_kg, repeticiones, rir, tipo_peso, completada )
         )`,
       )
       .eq('id', sessionId)

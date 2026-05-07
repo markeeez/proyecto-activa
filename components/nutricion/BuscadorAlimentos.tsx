@@ -4,7 +4,7 @@ import { alimentosService } from '@/services/alimentos.service';
 import type { Food } from '@/types/database.types';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Modal,
@@ -18,6 +18,8 @@ import {
 } from 'react-native';
 
 type TabKey = 'base' | 'favoritos' | 'creados';
+
+const BUSQUEDA_TIMEOUT_MS = 25_000;
 
 export type BuscadorAlimentosProps = {
   visible: boolean;
@@ -41,6 +43,25 @@ function normalizarParaBuscar(texto: string): string {
 
 function soloEnterosPositivos(texto: string): string {
   return texto.replace(/\D/g, '');
+}
+
+function conTimeoutBusqueda<T>(promise: Promise<T>, ms = BUSQUEDA_TIMEOUT_MS): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error('La busqueda tardo demasiado. Intentalo de nuevo.'));
+    }, ms);
+
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
 }
 
 export function BuscadorAlimentos({
@@ -70,8 +91,29 @@ export function BuscadorAlimentos({
   const [okMsg, setOkMsg] = useState<string | null>(null);
   const [crearAlimentoModo, setCrearAlimentoModo] = useState<'foto' | 'manual' | 'escaner' | null>(null);
   const [inputCantidadEnfocado, setInputCantidadEnfocado] = useState(false);
+  const busquedaVersionRef = useRef(0);
 
   const favStorageKey = userId ? `activa_food_favorites_${userId}` : '';
+
+  useEffect(() => {
+    if (visible) return;
+
+    busquedaVersionRef.current += 1;
+    setTab('base');
+    setQuery('');
+    setResultados([]);
+    setUltimaBusqueda([]);
+    setCargandoBase(false);
+    setCargandoApis(false);
+    setCargandoCreados(false);
+    setError(null);
+    setOkMsg(null);
+    setFoodSeleccionado(null);
+    setGramos('100');
+    setGuardando(false);
+    setCrearAlimentoModo(null);
+    setInputCantidadEnfocado(false);
+  }, [visible]);
 
   const alimentoCreadoOResuelto = (food: Food) => {
     if (food.is_custom && userId && food.created_by === userId) {
@@ -114,28 +156,8 @@ export function BuscadorAlimentos({
   }, [userId, visible]);
 
   useEffect(() => {
-    if (!visible) return;
-    if (!userId) {
-      setUltimaBusqueda([]);
-      return;
-    }
-    let active = true;
-    (async () => {
-      try {
-        const raw = await AsyncStorage.getItem(storageKeyUltimaBusqueda(userId));
-        if (!active || !raw) return;
-        const parsed = JSON.parse(raw) as unknown;
-        if (Array.isArray(parsed)) {
-          setUltimaBusqueda(parsed as Food[]);
-        }
-      } catch {
-        if (active) setUltimaBusqueda([]);
-      }
-    })();
-    return () => {
-      active = false;
-    };
-  }, [userId, visible]);
+    if (visible) setUltimaBusqueda([]);
+  }, [visible]);
 
   useEffect(() => {
     if (!visible) return;
@@ -177,21 +199,27 @@ export function BuscadorAlimentos({
   useEffect(() => {
     const term = query.trim();
     if (!visible || tab !== 'base' || term.length < 2) {
+      setResultados([]);
+      setCargandoBase(false);
+      setCargandoApis(false);
       return;
     }
 
     let cancelado = false;
+    const version = ++busquedaVersionRef.current;
+    const sigueActiva = () => !cancelado && busquedaVersionRef.current === version;
 
     const timer = setTimeout(async () => {
-      if (cancelado) return;
+      if (!sigueActiva()) return;
 
+      const inicioBusqueda = Date.now();
       setCargandoBase(true);
       setError(null);
       setOkMsg(null);
       let localData: Food[] = [];
       try {
-        localData = await alimentosService.buscarAlimentoLocal(term, userId);
-        if (cancelado) return;
+        localData = await conTimeoutBusqueda(alimentosService.buscarAlimentoLocal(term, userId));
+        if (!sigueActiva()) return;
         setResultados(localData);
         setUltimaBusqueda(localData);
         if (userId && localData.length > 0) {
@@ -201,27 +229,31 @@ export function BuscadorAlimentos({
           ).catch(() => {});
         }
       } catch (e: unknown) {
-        if (!cancelado) {
+        if (sigueActiva()) {
           setError(e instanceof Error ? e.message : 'No se pudo buscar alimentos.');
         }
+        return;
       } finally {
-        if (!cancelado) setCargandoBase(false);
+        if (sigueActiva()) setCargandoBase(false);
       }
 
-      if (cancelado) return;
+      if (!sigueActiva()) return;
 
       setCargandoApis(true);
       try {
         const idsLocales = new Set(localData.map((food) => food.id).filter(Boolean));
-        const apiData = await alimentosService.enriquecerConApis(term, userId, idsLocales);
-        if (cancelado) return;
+        const apiData = await conTimeoutBusqueda(
+          alimentosService.enriquecerConApis(term, userId, idsLocales),
+          Math.max(1_000, BUSQUEDA_TIMEOUT_MS - (Date.now() - inicioBusqueda)),
+        );
+        if (!sigueActiva()) return;
 
         if (apiData.length > 0) {
           const reranked = await alimentosService.rankearResultados(
             term,
             [...localData, ...apiData],
           );
-          if (cancelado) return;
+          if (!sigueActiva()) return;
           setResultados(reranked);
           setUltimaBusqueda(reranked);
           if (userId && reranked.length > 0) {
@@ -234,12 +266,13 @@ export function BuscadorAlimentos({
       } catch {
         /* La fase de APIs falla en silencio; la búsqueda local ya queda visible. */
       } finally {
-        if (!cancelado) setCargandoApis(false);
+        if (sigueActiva()) setCargandoApis(false);
       }
     }, 300);
 
     return () => {
       cancelado = true;
+      busquedaVersionRef.current += 1;
       clearTimeout(timer);
       setCargandoBase(false);
       setCargandoApis(false);
@@ -251,14 +284,16 @@ export function BuscadorAlimentos({
     if (!visible || tab !== 'creados' || !userId) return;
 
     let cancelado = false;
+    const version = ++busquedaVersionRef.current;
+    const sigueActiva = () => !cancelado && busquedaVersionRef.current === version;
 
     const timer = setTimeout(async () => {
-      if (cancelado) return;
+      if (!sigueActiva()) return;
       setCargandoCreados(true);
       setError(null);
       try {
-        const data = await alimentosService.obtenerAlimentosCreados(userId);
-        if (cancelado) return;
+        const data = await conTimeoutBusqueda(alimentosService.obtenerAlimentosCreados(userId));
+        if (!sigueActiva()) return;
         if (!term) {
           setCreados(data);
           return;
@@ -266,15 +301,16 @@ export function BuscadorAlimentos({
         const nq = normalizarParaBuscar(term);
         setCreados(data.filter((food) => normalizarParaBuscar(food.nombre ?? '').includes(nq)));
       } catch (e: unknown) {
-        if (!cancelado) {
+        if (sigueActiva()) {
           setError(e instanceof Error ? e.message : 'No se pudo cargar alimentos creados.');
         }
       } finally {
-        if (!cancelado) setCargandoCreados(false);
+        if (sigueActiva()) setCargandoCreados(false);
       }
     }, 250);
     return () => {
       cancelado = true;
+      busquedaVersionRef.current += 1;
       clearTimeout(timer);
       setCargandoCreados(false);
     };
@@ -697,7 +733,6 @@ function badgeOrigenAlimento(food: Food): 'basico' | 'marca' | null {
   return null;
 }
 
-const FAV_GOLD = '#E8A317';
 const MACRO_CARBS_COLOR = '#16C862';
 
 function formatMacro(value: number): string {
