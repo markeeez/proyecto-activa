@@ -20,6 +20,7 @@ import {
   Text,
   TextInput,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -39,8 +40,9 @@ interface Props {
 }
 
 export function ModalRegistrarEntreno({ visible, onClose }: Props) {
-  const { c, f, ts, s, r } = useTheme();
+  const { c, f, s } = useTheme();
   const insets = useSafeAreaInsets();
+  const { height } = useWindowDimensions();
   const { user } = useAuth();
   const { iniciarEntrenoVacio, iniciarDesdeRutina, entrenoActivo } = useEntreno();
 
@@ -127,6 +129,7 @@ export function ModalRegistrarEntreno({ visible, onClose }: Props) {
   );
 
   const hayEntrenoActivo = entrenoActivo != null;
+  const sheetHeight = Math.round(height * 0.6);
 
   const st = StyleSheet.create({
     overlay: {
@@ -139,7 +142,7 @@ export function ModalRegistrarEntreno({ visible, onClose }: Props) {
       borderTopLeftRadius: 20,
       borderTopRightRadius: 20,
       paddingBottom: insets.bottom + 8,
-      maxHeight: '80%',
+      height: sheetHeight,
       // Necesario para que el FlatList con flexShrink funcione dentro
       overflow: 'hidden',
     },
@@ -260,14 +263,18 @@ export function ModalRegistrarEntreno({ visible, onClose }: Props) {
       paddingLeft: s.sm,
     },
     emptyTxt: {
+      flex: 1,
       fontSize: 13,
       color: c.textMuted,
       textAlign: 'center',
       paddingVertical: s.lg,
+      textAlignVertical: 'center',
     },
     loadingWrap: {
+      flex: 1,
       paddingVertical: s.lg,
       alignItems: 'center',
+      justifyContent: 'center',
     },
     /* Modal entreno vacío */
     vModalOverlay: {
@@ -413,7 +420,8 @@ export function ModalRegistrarEntreno({ visible, onClose }: Props) {
               <FlatList
                 data={lista}
                 keyExtractor={(item) => item.id}
-                style={{ flexShrink: 1 }}
+                style={{ flex: 1 }}
+                contentContainerStyle={{ paddingBottom: s.sm }}
                 showsVerticalScrollIndicator={false}
                 renderItem={({ item: rut }) => {
                   const esFav = favIds.has(rut.id);

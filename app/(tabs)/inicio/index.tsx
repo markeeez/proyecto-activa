@@ -11,12 +11,14 @@ import { useCallback, useEffect, useState } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Polyline, Rect } from 'react-native-svg';
 import {
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
 
+import { FontFamily } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
 import { useNutricion } from '@/hooks/useNutricion';
 import { useTheme } from '@/hooks/useTheme';
@@ -350,7 +352,12 @@ export default function HomeScreen() {
   const ph = s.md; // padding horizontal
 
   return (
-    <View style={{ flex: 1, backgroundColor: c.background, paddingTop: insets.top + 6, paddingBottom: 8 }}>
+    <View style={{ flex: 1, backgroundColor: c.background, paddingTop: insets.top + 6 }}>
+      <ScrollView
+        contentInsetAdjustmentBehavior="automatic"
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: insets.bottom + 96 }}
+      >
 
       {/* ── Header ─────────────────────────────────────────────────── */}
       <View style={[row, { paddingHorizontal: ph, marginBottom: s.md }]}>
@@ -380,7 +387,11 @@ export default function HomeScreen() {
         </View>
 
         {/* Icono estadísticas */}
-        <TouchableOpacity onPress={() => router.push('/(tabs)/(progreso)/estadisticas-ejercicio')} activeOpacity={0.7}>
+        <TouchableOpacity
+          onPress={() => router.push('/(tabs)/(progreso)/estadisticas-ejercicio')}
+          activeOpacity={0.7}
+          style={[st.headerIconButton, { backgroundColor: c.surface, borderColor: c.border }]}
+        >
           <Ionicons name="notifications-outline" size={24} color={c.textDisplay} />
         </TouchableOpacity>
       </View>
@@ -417,18 +428,6 @@ export default function HomeScreen() {
                   strokeLinecap="round"
                   strokeDasharray={`${GAUGE_ARC * gaugeProgress} ${GAUGE_CIRCUMFERENCE}`}
                   transform={`rotate(${GAUGE_START_ANGLE} ${GAUGE_SIZE / 2} ${GAUGE_SIZE / 2})`}
-                />
-                <Circle
-                  cx={GAUGE_SIZE / 2}
-                  cy={GAUGE_SIZE / 2}
-                  r={GAUGE_RADIUS - 12}
-                  stroke={colorGauge}
-                  strokeWidth={GAUGE_STROKE}
-                  fill="none"
-                  strokeLinecap="round"
-                  strokeDasharray={`${GAUGE_ARC * gaugeProgress} ${GAUGE_CIRCUMFERENCE}`}
-                  transform={`rotate(150 ${GAUGE_SIZE / 2} ${GAUGE_SIZE / 2})`}
-                  opacity={0.45}
                 />
               </Svg>
 
@@ -519,7 +518,7 @@ export default function HomeScreen() {
                 activeOpacity={0.8}
                 onPress={a.onPlus ?? (() => router.push(a.ruta))}
               >
-                <Ionicons name="add" size={18} color="#fff" />
+                <Ionicons name="add" size={18} color={c.textOnPrimary} />
               </TouchableOpacity>
             </View>
           </TouchableOpacity>
@@ -662,6 +661,7 @@ export default function HomeScreen() {
           </View>
         </View>
       </View>
+      </ScrollView>
 
       {/* ── Modal registrar comida ─────────────────────────────────── */}
       <ModalRegistrarComida
@@ -704,16 +704,48 @@ const st = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
     overflow: 'hidden',
   },
-  greeting: { fontSize: 17, fontWeight: '600' },
-  date:     { fontSize: 13, marginTop: 1 },
+  headerIconButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  greeting: {
+    fontFamily: FontFamily.sansBold,
+    fontSize: 18,
+    lineHeight: 23,
+    letterSpacing: 0,
+  },
+  date: {
+    fontFamily: FontFamily.sans,
+    fontSize: 12,
+    lineHeight: 17,
+    letterSpacing: 0,
+    marginTop: 1,
+  },
 
 
   /* Card base */
   card: {
-    borderRadius: 16, borderWidth: 1, padding: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 14,
   },
-  cardTitle: { fontSize: 17, fontWeight: '600' },
-  seeAll:    { fontSize: 14 },
+  cardTitle: {
+    fontFamily: FontFamily.sansBold,
+    fontSize: 16,
+    lineHeight: 21,
+    letterSpacing: 0,
+  },
+  seeAll: {
+    fontFamily: FontFamily.monoBold,
+    fontSize: 11,
+    lineHeight: 13,
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+  },
 
   /* Nutrition summary */
   nutritionSummaryCard: {
@@ -743,8 +775,18 @@ const st = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  gaugeValue: { fontSize: 24, fontWeight: '600', lineHeight: 28, letterSpacing: -0.24 },
-  gaugeUnit: { fontSize: 11, lineHeight: 14, letterSpacing: 0.88 },
+  gaugeValue: {
+    fontFamily: FontFamily.sansBold,
+    fontSize: 26,
+    lineHeight: 30,
+    letterSpacing: 0,
+  },
+  gaugeUnit: {
+    fontFamily: FontFamily.monoBold,
+    fontSize: 10,
+    lineHeight: 12,
+    letterSpacing: 0.8,
+  },
   remainingBadge: {
     borderWidth: 1,
     borderRadius: 4,
@@ -753,6 +795,7 @@ const st = StyleSheet.create({
     alignSelf: 'stretch',
   },
   remainingText: {
+    fontFamily: FontFamily.monoBold,
     fontSize: 11,
     lineHeight: 13,
     letterSpacing: 0.9,
@@ -770,6 +813,7 @@ const st = StyleSheet.create({
     gap: 3,
   },
   summaryEyebrow: {
+    fontFamily: FontFamily.monoBold,
     fontSize: 11,
     lineHeight: 13,
     letterSpacing: 1.1,
@@ -780,8 +824,18 @@ const st = StyleSheet.create({
     borderRadius: 4,
     overflow: 'hidden',
   },
-  summaryValue: { fontSize: 18, fontWeight: '600', lineHeight: 23 },
-  summaryUnit: { fontSize: 14, lineHeight: 21, fontWeight: '400' },
+  summaryValue: {
+    fontFamily: FontFamily.sansBold,
+    fontSize: 22,
+    lineHeight: 27,
+    letterSpacing: 0,
+  },
+  summaryUnit: {
+    fontFamily: FontFamily.sans,
+    fontSize: 13,
+    lineHeight: 18,
+    letterSpacing: 0,
+  },
   nutritionMacroRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -804,8 +858,19 @@ const st = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 8,
   },
-  nutritionMacroLabel: { fontSize: 12, lineHeight: 17, letterSpacing: 0.48, fontWeight: '500', flexShrink: 1 },
-  nutritionMacroValue: { fontSize: 12, lineHeight: 17, letterSpacing: 0.48 },
+  nutritionMacroLabel: {
+    fontFamily: FontFamily.sansMedium,
+    fontSize: 12,
+    lineHeight: 17,
+    letterSpacing: 0,
+    flexShrink: 1,
+  },
+  nutritionMacroValue: {
+    fontFamily: FontFamily.monoBold,
+    fontSize: 11,
+    lineHeight: 13,
+    letterSpacing: 0.4,
+  },
   nutritionMacroTrack: {
     height: 5,
     borderRadius: 4,
@@ -818,9 +883,16 @@ const st = StyleSheet.create({
 
   /* Quick actions */
   quickCard: {
-    borderRadius: 14, borderWidth: 1, padding: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    padding: 12,
   },
-  quickLabel: { fontSize: 14, fontWeight: '500', lineHeight: 18 },
+  quickLabel: {
+    fontFamily: FontFamily.sansBold,
+    fontSize: 14,
+    lineHeight: 18,
+    letterSpacing: 0,
+  },
   fabSmall: {
     width: 32, height: 32, borderRadius: 16,
     alignItems: 'center', justifyContent: 'center',
@@ -831,22 +903,66 @@ const st = StyleSheet.create({
     width: 52, height: 52, borderRadius: 12,
     alignItems: 'center', justifyContent: 'center',
   },
-  workoutName:    { fontSize: 16, fontWeight: '600' },
-  workoutMuscles: { fontSize: 13, marginTop: 2 },
-  workoutMeta:    { fontSize: 12 },
+  workoutName: {
+    fontFamily: FontFamily.sansBold,
+    fontSize: 16,
+    lineHeight: 21,
+    letterSpacing: 0,
+  },
+  workoutMuscles: {
+    fontFamily: FontFamily.sans,
+    fontSize: 13,
+    lineHeight: 18,
+    letterSpacing: 0,
+    marginTop: 2,
+  },
+  workoutMeta: {
+    fontFamily: FontFamily.sans,
+    fontSize: 12,
+    lineHeight: 17,
+    letterSpacing: 0,
+  },
   ejCircle: {
     width: 54, height: 54, borderRadius: 27,
     borderWidth: 2,
     alignItems: 'center', justifyContent: 'center',
   },
-  ejNum:   { fontSize: 18, fontWeight: '700', lineHeight: 22 },
-  ejLabel: { fontSize: 10, fontWeight: '500' },
+  ejNum: {
+    fontFamily: FontFamily.monoBold,
+    fontSize: 18,
+    lineHeight: 22,
+    letterSpacing: 0,
+  },
+  ejLabel: {
+    fontFamily: FontFamily.monoBold,
+    fontSize: 10,
+    lineHeight: 12,
+    letterSpacing: 0.6,
+  },
 
   /* Progress */
   statCard: {
-    borderRadius: 12, borderWidth: 1, padding: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 10,
   },
-  statLabel: { fontSize: 10, marginBottom: 2 },
-  statVal:   { fontSize: 13, fontWeight: '700' },
-  statDelta: { fontSize: 9 },
+  statLabel: {
+    fontFamily: FontFamily.monoBold,
+    fontSize: 10,
+    lineHeight: 12,
+    letterSpacing: 0.6,
+    marginBottom: 2,
+  },
+  statVal: {
+    fontFamily: FontFamily.sansBold,
+    fontSize: 14,
+    lineHeight: 18,
+    letterSpacing: 0,
+  },
+  statDelta: {
+    fontFamily: FontFamily.sansMedium,
+    fontSize: 10,
+    lineHeight: 13,
+    letterSpacing: 0,
+  },
 });

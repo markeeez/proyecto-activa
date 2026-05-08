@@ -671,6 +671,7 @@ export function BuscadorAlimentos({
                       placeholder="100"
                       placeholderTextColor={c.textMuted}
                       maxLength={5}
+                      selectTextOnFocus
                       onFocus={() => setInputCantidadEnfocado(true)}
                       onBlur={() => setInputCantidadEnfocado(false)}
                     />

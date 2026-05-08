@@ -8,6 +8,7 @@ import {
   StyleSheet,
   Text,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -38,6 +39,7 @@ export function ModalRegistrarComida({
 }: Props) {
   const { c, s } = useTheme();
   const insets = useSafeAreaInsets();
+  const { height } = useWindowDimensions();
 
   const [selectedMealId, setSelectedMealId] = useState<string | null>(null);
   const [eliminandoId, setEliminandoId] = useState<string | null>(null);
@@ -63,6 +65,7 @@ export function ModalRegistrarComida({
     },
     [eliminandoId, eliminarAlimento],
   );
+  const sheetHeight = Math.round(height * 0.6);
 
   const st = StyleSheet.create({
     overlay: {
@@ -75,6 +78,8 @@ export function ModalRegistrarComida({
       borderTopLeftRadius: 20,
       borderTopRightRadius: 20,
       paddingBottom: insets.bottom + 8,
+      height: sheetHeight,
+      overflow: 'hidden',
     },
     handle: {
       width: 36,
@@ -107,6 +112,12 @@ export function ModalRegistrarComida({
       marginBottom: s.sm,
     },
     /* Tabs de comidas */
+    mealTabsScroll: {
+      flexGrow: 0,
+      flexShrink: 0,
+      height: 86,
+      maxHeight: 86,
+    },
     mealTab: {
       alignItems: 'center',
       gap: 6,
@@ -114,6 +125,8 @@ export function ModalRegistrarComida({
       paddingVertical: 10,
       borderRadius: 12,
       minWidth: 72,
+      height: 76,
+      justifyContent: 'center',
     },
     mealTabLabel: {
       fontSize: 11,
@@ -179,7 +192,8 @@ export function ModalRegistrarComida({
     },
     /* Lista de alimentos */
     itemsWrap: {
-      maxHeight: 160,
+      flex: 1,
+      minHeight: 0,
       marginHorizontal: s.md,
       borderRadius: 10,
       backgroundColor: c.surfaceElevated,
@@ -203,15 +217,18 @@ export function ModalRegistrarComida({
       marginRight: s.sm,
     },
     emptyTxt: {
+      flex: 1,
       fontSize: 13,
       color: c.textMuted,
       textAlign: 'center',
-      paddingVertical: s.md,
+      textAlignVertical: 'center',
+      paddingHorizontal: s.md,
     },
     /* Botón añadir */
     addBtn: {
       marginHorizontal: s.md,
       marginTop: s.md,
+      flexShrink: 0,
       backgroundColor: c.primary,
       borderRadius: 12,
       paddingVertical: 14,
@@ -255,6 +272,7 @@ export function ModalRegistrarComida({
             ) : (
               <ScrollView
                 horizontal
+                style={st.mealTabsScroll}
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={{ paddingHorizontal: s.md, gap: 8, paddingBottom: 4 }}
               >
@@ -316,7 +334,11 @@ export function ModalRegistrarComida({
 
                 {/* Lista de alimentos */}
                 <View style={st.itemsWrap}>
-                  <ScrollView nestedScrollEnabled showsVerticalScrollIndicator={false}>
+                  <ScrollView
+                    nestedScrollEnabled
+                    showsVerticalScrollIndicator={false}
+                    contentContainerStyle={comidaSeleccionada.items.length === 0 ? { flexGrow: 1 } : undefined}
+                  >
                     {comidaSeleccionada.items.length === 0 ? (
                       <Text style={st.emptyTxt}>Todavía no hay alimentos en esta comida.</Text>
                     ) : (
