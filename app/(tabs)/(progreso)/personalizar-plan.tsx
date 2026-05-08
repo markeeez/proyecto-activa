@@ -1,15 +1,12 @@
-/**
- * Edición del plan nutricional (user_goals) — misma lógica de cálculo que onboarding objetivo.
- */
-
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
   Modal,
+  PanResponder,
   Platform,
   Pressable,
   ScrollView,
@@ -17,19 +14,50 @@ import {
   Text,
   TextInput,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import LogoLightSb from '@/assets/images/logo_light_sb.svg';
+import LogoDarkSb from '@/assets/images/logo_sb.svg';
 import type { Theme } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from '@/hooks/useTheme';
 import { supabase } from '@/lib/supabase';
 import { progresoService, type ContextoPlanNutricion } from '@/services/progreso.service';
 import type { Objetivo } from '@/types/database.types';
-import { ACTIVIDAD_OPCIONES, type GeneroOnboarding } from '../../(onboarding)/datos';
 
 type ObjetivoUi = 'perder' | 'mantener' | 'ganar';
 type MacroPerfil = 'alta_proteina' | 'equilibrado' | 'alta_carbos';
+type GeneroPlan = 'hombre' | 'mujer';
+
+const ACTIVIDAD_OPCIONES = [
+  { key: 'sedentario', label: 'Poco o ningun ejercicio', factor: 1.2 },
+  { key: 'ligero', label: 'Ejercicio ligero 1-3 dias/semana', factor: 1.375 },
+  { key: 'moderado', label: 'Ejercicio moderado 3-5 dias/semana', factor: 1.55 },
+  { key: 'activo', label: 'Ejercicio intenso 6-7 dias/semana', factor: 1.725 },
+  { key: 'muy_activo', label: 'Entrenamiento muy intenso o trabajo fisico', factor: 1.9 },
+] as const;
+
+const OBJETIVOS: {
+  id: ObjetivoUi;
+  label: string;
+  icon: 'fire' | 'account-outline' | 'arm-flex-outline';
+}[] = [
+  { id: 'perder', label: 'Perder\ngrasa', icon: 'fire' },
+  { id: 'mantener', label: 'Mantenerse', icon: 'account-outline' },
+  { id: 'ganar', label: 'Ganar\nmusculo', icon: 'arm-flex-outline' },
+];
+
+const PERFILES: {
+  id: MacroPerfil;
+  label: string;
+  icon: 'leaf' | 'scale-balance' | 'barley';
+}[] = [
+  { id: 'alta_proteina', label: 'Alta en\nproteina', icon: 'leaf' },
+  { id: 'equilibrado', label: 'Equilibrado', icon: 'scale-balance' },
+  { id: 'alta_carbos', label: 'Alta en\ncarbohidratos', icon: 'barley' },
+];
 
 function indiceDesdeFactor(f: number | null | undefined): number {
   if (f == null || !Number.isFinite(f)) return 2;
@@ -46,40 +74,33 @@ function indiceDesdeFactor(f: number | null | undefined): number {
 }
 
 function macrosDesdePerfil(perfil: MacroPerfil, pesoKg: number, kcalObjetivo: number): { p: number; c: number; f: number } {
-  let proteinas_g: number;
-  let grasas_g: number;
+  let proteinasG: number;
+  let grasasG: number;
   switch (perfil) {
     case 'alta_proteina':
-      proteinas_g = pesoKg * 2.2;
-      grasas_g = pesoKg * 0.8;
+      proteinasG = pesoKg * 2.2;
+      grasasG = pesoKg * 0.8;
       break;
     case 'equilibrado':
-      proteinas_g = pesoKg * 2.0;
-      grasas_g = pesoKg * 1.0;
+      proteinasG = pesoKg * 2;
+      grasasG = pesoKg * 1;
       break;
     case 'alta_carbos':
-      proteinas_g = pesoKg * 1.8;
-      grasas_g = pesoKg * 0.8;
+      proteinasG = pesoKg * 1.8;
+      grasasG = pesoKg * 0.8;
       break;
   }
-  const carbos_g = (kcalObjetivo - proteinas_g * 4 - grasas_g * 9) / 4;
-  const c = Math.max(0, carbos_g);
   return {
-    p: Math.round(proteinas_g),
-    c: Math.round(c),
-    f: Math.round(grasas_g),
+    p: Math.round(proteinasG),
+    c: Math.round(Math.max(0, (kcalObjetivo - proteinasG * 4 - grasasG * 9) / 4)),
+    f: Math.round(grasasG),
   };
 }
 
 function objetivoDbDesdeUi(ui: ObjetivoUi): Objetivo {
-  switch (ui) {
-    case 'perder':
-      return 'perder_peso';
-    case 'mantener':
-      return 'mantener';
-    case 'ganar':
-      return 'ganar_masa';
-  }
+  if (ui === 'perder') return 'perder_peso';
+  if (ui === 'ganar') return 'ganar_masa';
+  return 'mantener';
 }
 
 function uiDesdeObjetivoDb(o: string): ObjetivoUi {
@@ -88,13 +109,36 @@ function uiDesdeObjetivoDb(o: string): ObjetivoUi {
   return 'perder';
 }
 
-function fmtKgRef(kg: number): string {
-  const t = kg.toFixed(1);
-  return t.endsWith('.0') ? String(Math.round(kg)) : t;
+function fmtDecimal(value: number, decimals = 1): string {
+  const t = value.toFixed(decimals);
+  return t.endsWith('.0') ? String(Math.round(value)) : t.replace('.', ',');
+}
+
+function parseDecimal(raw: string): number {
+  return parseFloat(raw.trim().replace(',', '.'));
+}
+
+function sanitizeKgInput(raw: string): string {
+  let value = '';
+  let hasSeparator = false;
+
+  for (const char of raw) {
+    if (char >= '0' && char <= '9') {
+      value += char;
+      continue;
+    }
+
+    if ((char === ',' || char === '.') && !hasSeparator) {
+      value += char;
+      hasSeparator = true;
+    }
+  }
+
+  return value;
 }
 
 function calcularKcalObjetivo(
-  genero: GeneroOnboarding,
+  genero: GeneroPlan,
   peso: number,
   altura: number,
   edad: number,
@@ -102,178 +146,218 @@ function calcularKcalObjetivo(
   objetivoUi: ObjetivoUi,
   velocidadKgSem: number,
 ): number {
-  const tmb =
-    genero === 'hombre'
-      ? 10 * peso + 6.25 * altura - 5 * edad + 5
-      : 10 * peso + 6.25 * altura - 5 * edad - 161;
+  const tmb = genero === 'hombre'
+    ? 10 * peso + 6.25 * altura - 5 * edad + 5
+    : 10 * peso + 6.25 * altura - 5 * edad - 161;
   const tdee = tmb * factor;
   if (objetivoUi === 'perder') return tdee - velocidadKgSem * 1100;
   if (objetivoUi === 'ganar') return tdee + velocidadKgSem * 500;
   return tdee;
 }
 
-const PERFILES: { id: MacroPerfil; label: string }[] = [
-  { id: 'alta_proteina', label: 'Alta proteína' },
-  { id: 'equilibrado', label: 'Equilibrado' },
-  { id: 'alta_carbos', label: 'Alta en carbos' },
-];
-
-function makeStyles(c: Theme, f: ReturnType<typeof useTheme>['f'], ts: ReturnType<typeof useTheme>['ts'], s: ReturnType<typeof useTheme>['s'], r: ReturnType<typeof useTheme>['r']) {
+function makeStyles(
+  c: Theme,
+  f: ReturnType<typeof useTheme>['f'],
+  ts: ReturnType<typeof useTheme>['ts'],
+  s: ReturnType<typeof useTheme>['s'],
+  r: ReturnType<typeof useTheme>['r'],
+) {
   return StyleSheet.create({
     root: { flex: 1, backgroundColor: c.background },
+    centered: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: s.lg },
     header: {
-      flexDirection: 'row',
-      alignItems: 'center',
+      minHeight: 48,
       paddingHorizontal: s.md,
-      paddingBottom: s.xs,
-      minHeight: 44,
-      flexShrink: 0,
-    },
-    headerSide: { width: 44, alignItems: 'flex-start', justifyContent: 'center' },
-    headerTitle: {
-      flex: 1,
-      ...ts.subheading,
-      fontFamily: f.sansMedium,
-      color: c.textDisplay,
-      textAlign: 'center',
-    },
-    body: {
-      flex: 1,
-      flexDirection: 'column',
-      paddingHorizontal: s.md,
-      paddingTop: s.sm,
-      gap: s.sm,
-      minHeight: 0,
-    },
-    hintPerfil: {
-      ...ts.caption,
-      fontFamily: f.sans,
-      color: c.textSecondary,
-      textAlign: 'center',
-      marginBottom: s.xs,
-      flexShrink: 0,
-    },
-    label: {
-      ...ts.caption,
-      fontFamily: f.mono,
-      color: c.textSecondary,
-      marginBottom: 2,
-      letterSpacing: 0.6,
-      flexShrink: 0,
-    },
-    labelFirst: {
-      ...ts.caption,
-      fontFamily: f.mono,
-      color: c.textSecondary,
-      marginBottom: 2,
-      letterSpacing: 0.6,
-      flexShrink: 0,
-    },
-    selectorActividad: {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
+    },
+    headerButton: {
+      width: 42,
+      height: 42,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    headerTitle: {
+      ...ts.subheading,
+      flex: 1,
+      fontFamily: f.sansBold,
+      color: c.textDisplay,
+      textAlign: 'center',
+    },
+    logoButton: {
+      width: 34,
+      height: 34,
+      borderRadius: 17,
       borderWidth: 1,
       borderColor: c.borderVisible,
-      borderRadius: r.sm,
-      paddingHorizontal: s.sm,
-      paddingVertical: s.sm,
+      alignItems: 'center',
+      justifyContent: 'center',
       backgroundColor: c.surface,
-      flexShrink: 0,
     },
-    selectorActividadTxt: {
+    logo: { width: 21, height: 21 },
+    scrollContent: {
+      paddingHorizontal: s.md,
+      paddingTop: s.xs,
+      gap: s.sm,
+    },
+    card: {
+      borderRadius: r.md,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surface,
+      padding: s.md,
+      gap: s.sm,
+    },
+    compactCard: {
+      paddingVertical: s.sm,
+      gap: s.xs,
+    },
+    daysSelect: {
+      minHeight: 42,
+      borderRadius: r.md,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surface,
+      paddingHorizontal: s.md,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: s.sm,
+    },
+    daysSelectText: {
+      ...ts.bodySm,
+      flex: 1,
+      fontFamily: f.sansBold,
+      color: c.textDisplay,
+    },
+    title: {
+      ...ts.bodySm,
+      fontFamily: f.sansBold,
+      color: c.textDisplay,
+    },
+    subtitle: {
       ...ts.caption,
       fontFamily: f.sans,
+      color: c.textSecondary,
+    },
+    objetivoTitle: {
+      ...ts.bodySm,
+      fontFamily: f.sansBold,
       color: c.textDisplay,
+      textAlign: 'center',
+    },
+    objetivosRow: { flexDirection: 'row', gap: s.sm },
+    objetivoButton: {
       flex: 1,
-      paddingRight: s.sm,
-    },
-    chevronActividad: {
-      ...ts.caption,
-      fontFamily: f.mono,
-      color: c.primary,
-    },
-    segmentRowObj: {
-      flexDirection: 'row',
+      minHeight: 76,
+      alignItems: 'center',
+      justifyContent: 'center',
       gap: s.xs,
-      flexWrap: 'wrap',
-      justifyContent: 'center',
-      flexShrink: 0,
-    },
-    segmentBtnObj: {
-      paddingVertical: 6,
-      paddingHorizontal: s.xs,
-      borderRadius: r.sm,
+      borderRadius: r.md,
       borderWidth: 1,
       borderColor: c.borderVisible,
       backgroundColor: c.surface,
-      minHeight: 36,
-      justifyContent: 'center',
     },
-    segmentBtnObjOn: { borderColor: c.primary, backgroundColor: c.primaryBg },
-    segmentTxtObj: {
-      ...ts.caption,
-      fontFamily: f.sansMedium,
-      color: c.textSecondary,
+    objetivoButtonOn: {
+      borderColor: c.primary,
+      backgroundColor: c.primaryBg,
     },
-    segmentTxtObjOn: { color: c.primary },
-    pesoBlock: {
+    objetivoIconRing: {
+      width: 42,
+      height: 42,
+      borderRadius: 21,
       alignItems: 'center',
-      flexShrink: 0,
-    },
-    pesoLabelCenter: {
-      ...ts.caption,
-      fontFamily: f.mono,
-      color: c.textSecondary,
-      letterSpacing: 0.6,
-      marginBottom: 2,
-    },
-    pesoValorCenter: {
-      ...ts.body,
-      fontFamily: f.mono,
-      fontWeight: '500',
-      color: c.textDisplay,
-      textAlign: 'center',
-    },
-    macroPerfilRow: { flexDirection: 'row', gap: s.xs, flexShrink: 0 },
-    macroPerfilBtn: {
-      flex: 1,
-      paddingVertical: 4,
-      paddingHorizontal: 2,
-      borderRadius: r.sm,
+      justifyContent: 'center',
       borderWidth: 1,
       borderColor: c.borderVisible,
-      backgroundColor: c.surface,
-      alignItems: 'center',
-      justifyContent: 'center',
-      minHeight: 32,
     },
-    macroPerfilBtnOn: { borderColor: c.primary, backgroundColor: c.primaryBg },
-    macroPerfilTxt: {
-      ...ts.caption,
-      fontFamily: f.sansMedium,
+    objetivoIconRingOn: { borderColor: c.primary },
+    objetivoLabel: {
+      ...ts.label,
+      fontFamily: f.sansBold,
       color: c.textSecondary,
       textAlign: 'center',
-      fontSize: 11,
     },
-    macroPerfilTxtOn: { color: c.primary },
-    velocidadRow: {
+    objetivoLabelOn: { color: c.primary },
+    targetRow: {
+      minHeight: 50,
+      borderRadius: r.sm,
+      borderWidth: 1,
+      borderColor: c.primary,
+      backgroundColor: c.background,
       flexDirection: 'row',
       alignItems: 'center',
-      justifyContent: 'center',
       gap: s.sm,
-      flexShrink: 0,
+      paddingHorizontal: s.sm,
     },
-    velocidadValor: {
-      ...ts.body,
-      fontFamily: f.mono,
+    targetLabel: {
+      ...ts.caption,
+      flex: 1,
+      fontFamily: f.sansMedium,
       color: c.textDisplay,
-      minWidth: 48,
-      textAlign: 'center',
     },
-    stepBtn: {
-      width: 40,
-      height: 40,
+    targetInputWrap: {
+      width: 116,
+      height: 36,
+      borderRadius: r.technical,
+      borderWidth: 1,
+      borderColor: c.borderVisible,
+      backgroundColor: c.surface,
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: s.xs,
+    },
+    targetInput: {
+      ...ts.bodySm,
+      flex: 1,
+      padding: 0,
+      fontFamily: f.monoBold,
+      color: c.textDisplay,
+      textAlign: 'right',
+    },
+    kgText: {
+      ...ts.caption,
+      fontFamily: f.monoBold,
+      color: c.textSecondary,
+      marginLeft: s.xs,
+    },
+    errorText: {
+      ...ts.caption,
+      fontFamily: f.sansMedium,
+      color: c.danger,
+    },
+    rowBetween: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: s.md,
+    },
+    valuePill: {
+      minWidth: 74,
+      minHeight: 40,
+      borderRadius: r.sm,
+      borderWidth: 1,
+      borderColor: c.borderVisible,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: s.sm,
+      backgroundColor: c.background,
+    },
+    valuePillText: {
+      ...ts.bodySm,
+      fontFamily: f.monoBold,
+      color: c.textDisplay,
+      fontVariant: ['tabular-nums'],
+    },
+    stepperRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: s.sm,
+    },
+    stepButton: {
+      width: 38,
+      height: 38,
       borderRadius: r.technical,
       borderWidth: 1,
       borderColor: c.borderVisible,
@@ -281,239 +365,454 @@ function makeStyles(c: Theme, f: ReturnType<typeof useTheme>['f'], ts: ReturnTyp
       justifyContent: 'center',
       backgroundColor: c.surface,
     },
-    stepBtnTxt: {
-      ...ts.body,
+    fakeTrack: {
+      flex: 1,
+      height: 4,
+      borderRadius: 2,
+      backgroundColor: c.borderVisible,
+      overflow: 'hidden',
+    },
+    fakeTrackFill: {
+      height: 4,
+      borderRadius: 2,
+      backgroundColor: c.primary,
+    },
+    sliderWrap: {
+      flex: 1,
+      minWidth: 0,
+      height: 22,
+      justifyContent: 'center',
+    },
+    sliderDisabled: {
+      opacity: 0.5,
+    },
+    sliderLine: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: s.sm,
+    },
+    sliderLimit: {
+      ...ts.label,
+      minWidth: 42,
+      fontFamily: f.mono,
+      color: c.textSecondary,
+      fontVariant: ['tabular-nums'],
+    },
+    sliderTrack: {
+      height: 4,
+      borderRadius: 2,
+      backgroundColor: c.borderVisible,
+      overflow: 'visible',
+    },
+    sliderFill: {
+      height: 4,
+      borderRadius: 2,
+      backgroundColor: c.primary,
+    },
+    sliderThumb: {
+      position: 'absolute',
+      top: -6,
+      width: 16,
+      height: 16,
+      marginLeft: -8,
+      borderRadius: 8,
+      backgroundColor: c.primary,
+      borderWidth: 2,
+      borderColor: c.surface,
+    },
+    sliderValue: {
+      ...ts.caption,
       fontFamily: f.monoBold,
       color: c.textDisplay,
-    },
-    kcalBlock: { alignItems: 'center', flexShrink: 0 },
-    kcalValor: {
-      fontSize: 48,
-      lineHeight: 56,
-      fontFamily: f.mono,
-      color: c.primary,
-    },
-    kcalHint: {
-      ...ts.caption,
-      fontFamily: f.mono,
-      color: c.textMuted,
-      marginTop: 2,
-    },
-    macroCardsRow: { flexDirection: 'row', gap: 4, flexShrink: 0 },
-    macroCard: {
-      flex: 1,
-      borderWidth: 1,
-      borderColor: c.borderVisible,
-      borderRadius: r.sm,
-      paddingVertical: s.xs,
-      paddingHorizontal: 4,
-      backgroundColor: c.surface,
-      alignItems: 'center',
-    },
-    macroCardLabel: {
-      ...ts.caption,
-      fontFamily: f.mono,
-      color: c.textSecondary,
-      letterSpacing: 0.5,
-      fontSize: 10,
       textAlign: 'center',
+      fontVariant: ['tabular-nums'],
+      marginTop: -4,
     },
-    macroCardGrams: {
-      ...ts.body,
-      fontFamily: f.sansMedium,
-      color: c.textDisplay,
-      marginTop: 2,
-      fontSize: 14,
+    scaleRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
     },
-    macroCardMeta: {
-      ...ts.caption,
-      fontFamily: f.mono,
-      color: c.textSecondary,
-      marginTop: 2,
-      fontSize: 10,
-      textAlign: 'center',
-    },
-    linkPlan: {
-      ...ts.caption,
-      fontFamily: f.sansMedium,
-      color: c.primary,
-      textDecorationLine: 'underline',
-    },
-    planLinksBlock: {
+    sectionHeader: {
+      flexDirection: 'row',
       alignItems: 'center',
-      marginTop: s.xs,
+      justifyContent: 'space-between',
+      gap: s.sm,
+    },
+    planMenuButton: {
+      width: 34,
+      height: 34,
+      borderRadius: 17,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: c.background,
+    },
+    kcalRow: {
+      flexDirection: 'row',
+      alignItems: 'baseline',
+      justifyContent: 'space-between',
+      gap: s.md,
+    },
+    kcalValueWrap: {
+      flexDirection: 'row',
+      alignItems: 'baseline',
+      gap: s.xs,
       flexShrink: 0,
     },
-    planLinksColumn: {
-      gap: 2,
+    kcalText: {
+      ...ts.heading,
+      fontFamily: f.sansMedium,
+      color: c.textDisplay,
+      fontVariant: ['tabular-nums'],
     },
-    planLinksSeparator: {
-      ...ts.caption,
+    kcalUnit: {
+      ...ts.bodySm,
       fontFamily: f.sans,
       color: c.textSecondary,
     },
-    footer: {
-      borderTopWidth: 1,
-      borderTopColor: c.border,
-      paddingHorizontal: s.md,
-      paddingTop: s.sm,
+    badge: {
+      borderRadius: r.technical,
+      borderWidth: 1,
+      borderColor: c.borderVisible,
+      paddingHorizontal: s.sm,
+      paddingVertical: s.xs,
       backgroundColor: c.background,
-      flexShrink: 0,
     },
-    btnPrimary: {
-      paddingVertical: s.sm,
+    badgeText: {
+      ...ts.label,
+      fontFamily: f.monoBold,
+      color: c.successText,
+    },
+    macroRow: { flexDirection: 'row', gap: s.sm },
+    macroItem: { flex: 1, gap: s.xs },
+    macroLabel: {
+      ...ts.caption,
+      fontFamily: f.sansMedium,
+      color: c.textSecondary,
+    },
+    macroValue: {
+      ...ts.caption,
+      fontFamily: f.monoBold,
+      color: c.textDisplay,
+      fontVariant: ['tabular-nums'],
+    },
+    macroTrack: {
+      height: 3,
+      borderRadius: 2,
+      backgroundColor: c.borderVisible,
+      overflow: 'hidden',
+    },
+    macroFill: {
+      height: 3,
+      borderRadius: 2,
+    },
+    divider: { height: StyleSheet.hairlineWidth, backgroundColor: c.border },
+    perfilRow: { flexDirection: 'row', gap: s.sm },
+    perfilButton: {
+      flex: 1,
+      minHeight: 52,
+      borderRadius: r.sm,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.background,
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: s.xs,
+      paddingHorizontal: s.xs,
+    },
+    perfilButtonOn: {
+      borderColor: c.primary,
+      backgroundColor: c.primaryBg,
+    },
+    perfilText: {
+      ...ts.label,
+      fontFamily: f.sansBold,
+      color: c.textSecondary,
+      textAlign: 'center',
+    },
+    perfilTextOn: { color: c.primary },
+    actionRow: { flexDirection: 'row', gap: s.sm },
+    actionButton: {
+      flex: 1,
+      minHeight: 58,
+      borderRadius: r.sm,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surface,
+      padding: s.sm,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: s.sm,
+    },
+    actionTitle: {
+      ...ts.caption,
+      fontFamily: f.sansBold,
+      color: c.textDisplay,
+    },
+    actionSub: {
+      ...ts.label,
+      fontFamily: f.sans,
+      color: c.textSecondary,
+      marginTop: 2,
+    },
+    footer: {
+      paddingHorizontal: s.md,
+      paddingTop: s.xs,
+      gap: s.xs,
+      backgroundColor: c.background,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: c.border,
+    },
+    primaryButton: {
+      minHeight: 46,
       borderRadius: r.sm,
       backgroundColor: c.primary,
       alignItems: 'center',
       justifyContent: 'center',
-      borderWidth: 1,
-      borderColor: c.primary,
     },
-    btnDis: { opacity: 0.45 },
-    btnTxt: {
-      ...ts.subheading,
-      fontFamily: f.sansMedium,
+    primaryButtonDisabled: { opacity: 0.45 },
+    primaryText: {
+      ...ts.bodySm,
+      fontFamily: f.sansBold,
       color: c.textOnPrimary,
-      letterSpacing: 0.3,
     },
-    btnGhost: {
-      paddingVertical: s.sm,
-      borderRadius: r.sm,
-      alignItems: 'center',
-      justifyContent: 'center',
+    planMenuLayer: {
+      ...StyleSheet.absoluteFillObject,
+      zIndex: 40,
+    },
+    planMenuDismiss: {
+      ...StyleSheet.absoluteFillObject,
+      backgroundColor: 'transparent',
+    },
+    planMenuPopover: {
+      position: 'absolute',
+      width: 184,
       borderWidth: 1,
       borderColor: c.borderVisible,
-      backgroundColor: 'transparent',
-      marginTop: s.xs,
+      borderRadius: r.md,
+      backgroundColor: c.surfaceElevated,
+      paddingVertical: s.xs,
+      paddingHorizontal: s.sm,
+      zIndex: 30,
     },
-    btnGhostTxt: {
-      ...ts.subheading,
+    planMenuTitle: {
+      fontSize: 12,
+      lineHeight: 15,
+      fontFamily: f.sansBold,
+      color: c.textDisplay,
+      paddingHorizontal: s.xs,
+      paddingVertical: s.xs,
+    },
+    planMenuOption: {
+      minHeight: 34,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: s.xs,
+      borderRadius: r.sm,
+      paddingHorizontal: s.xs,
+    },
+    planMenuOptionText: {
+      fontSize: 12,
+      lineHeight: 15,
       fontFamily: f.sansMedium,
       color: c.textDisplay,
-      letterSpacing: 0.3,
+    },
+    planMenuDivider: {
+      height: StyleSheet.hairlineWidth,
+      backgroundColor: c.borderVisible,
+      marginVertical: 2,
     },
     modalBackdrop: {
       flex: 1,
-      backgroundColor: 'rgba(0,0,0,0.5)',
+      backgroundColor: 'rgba(0,0,0,0.6)',
       justifyContent: 'flex-end',
     },
     modalCard: {
-      backgroundColor: c.surfaceElevated,
       borderTopLeftRadius: r.lg,
       borderTopRightRadius: r.lg,
-      borderTopWidth: 1,
-      borderColor: c.borderVisible,
-      paddingBottom: s.lg,
-      maxHeight: '70%',
-    },
-    modalTitulo: {
-      ...ts.caption,
-      fontFamily: f.mono,
-      color: c.textSecondary,
-      paddingHorizontal: s.md,
-      paddingVertical: s.sm,
-    },
-    modalOpcion: {
-      paddingVertical: s.sm,
-      paddingHorizontal: s.md,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: c.border,
-    },
-    modalOpcionTxt: {
-      ...ts.bodySm,
-      fontFamily: f.sans,
-      color: c.textDisplay,
-    },
-    modalCardGramos: {
-      backgroundColor: c.surfaceElevated,
-      borderTopLeftRadius: r.lg,
-      borderTopRightRadius: r.lg,
-      borderTopWidth: 1,
-      borderColor: c.borderVisible,
-      paddingHorizontal: s.md,
-      paddingTop: s.md,
-      maxHeight: '85%',
-    },
-    modalTituloGramos: {
-      ...ts.subheading,
-      fontFamily: f.sansMedium,
-      color: c.textDisplay,
-      marginBottom: s.xs,
-    },
-    modalDesc: {
-      ...ts.bodySm,
-      fontFamily: f.sans,
-      color: c.textSecondary,
-      marginBottom: s.sm,
-    },
-    modalLabel: {
-      ...ts.caption,
-      fontFamily: f.mono,
-      color: c.textSecondary,
-      marginBottom: 4,
-      letterSpacing: 0.6,
-    },
-    input: {
-      ...ts.body,
-      fontFamily: f.sans,
-      color: c.textDisplay,
       borderWidth: 1,
       borderColor: c.borderVisible,
-      borderRadius: r.sm,
-      paddingHorizontal: s.sm,
-      paddingVertical: s.xs,
       backgroundColor: c.surface,
-    },
-    modalKcalLive: {
-      ...ts.body,
-      fontFamily: f.mono,
-      color: c.primary,
-      marginTop: s.sm,
-      marginBottom: s.sm,
-    },
-    modalActions: { gap: s.xs, marginBottom: s.sm },
-    centered: {
-      flex: 1,
-      justifyContent: 'center',
-      alignItems: 'center',
       padding: s.md,
+      gap: s.sm,
     },
-    errorPesoObj: {
+    modalCenteredBackdrop: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.68)',
+      justifyContent: 'center',
+      padding: s.lg,
+    },
+    modalCenteredCard: {
+      backgroundColor: c.surface,
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: c.borderVisible,
+      paddingHorizontal: s.md,
+      paddingTop: s.lg,
+      paddingBottom: s.md,
+      overflow: 'hidden',
+    },
+    modalAccent: {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      height: 2,
+      backgroundColor: c.primary,
+    },
+    modalTitle: {
+      ...ts.subheading,
+      fontFamily: f.sansBold,
+      color: c.textDisplay,
+      marginBottom: s.sm,
+      letterSpacing: 0,
+    },
+    modalBody: {
+      ...ts.body,
+      fontFamily: f.sans,
+      color: c.textSecondary,
+      marginBottom: s.md,
+      lineHeight: 24,
+    },
+    modalActionPrimary: {
+      minHeight: 48,
+      borderRadius: r.sm,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: s.md,
+      backgroundColor: c.primary,
+    },
+    modalActionTextPrimary: {
+      ...ts.body,
+      color: c.textOnPrimary,
+      fontFamily: f.sansBold,
+      textAlign: 'center',
+      letterSpacing: 0,
+    },
+    confirmSummary: {
+      gap: s.sm,
+      marginBottom: s.md,
+    },
+    confirmLayer: {
+      borderRadius: r.sm,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.background,
+      padding: s.md,
+      gap: s.xs,
+    },
+    confirmLayerHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: s.sm,
+    },
+    confirmLabel: {
+      ...ts.caption,
+      fontFamily: f.sansMedium,
+      color: c.textSecondary,
+    },
+    confirmValue: {
+      ...ts.body,
+      fontFamily: f.sansBold,
+      color: c.textDisplay,
+      fontVariant: ['tabular-nums'],
+    },
+    confirmHeroValue: {
+      ...ts.heading,
+      fontFamily: f.sansMedium,
+      color: c.textDisplay,
+      fontVariant: ['tabular-nums'],
+    },
+    confirmMeta: {
+      ...ts.caption,
+      fontFamily: f.sansMedium,
+      color: c.textSecondary,
+    },
+    modalActionRow: {
+      flexDirection: 'row',
+      gap: s.sm,
+    },
+    modalActionSecondary: {
+      minHeight: 48,
+      flex: 1,
+      borderRadius: r.sm,
+      borderWidth: 1,
+      borderColor: c.primary,
+      backgroundColor: c.surface,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: s.md,
+    },
+    modalActionPrimaryFlex: {
+      flex: 1,
+    },
+    modalActionText: {
+      ...ts.body,
+      fontFamily: f.sansMedium,
+      color: c.primary,
+      textAlign: 'center',
+      letterSpacing: 0,
+    },
+    modalOption: {
+      minHeight: 54,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: c.border,
+      justifyContent: 'center',
+    },
+    modalOptionTitle: {
+      ...ts.bodySm,
+      fontFamily: f.sansBold,
+      color: c.textDisplay,
+    },
+    modalOptionDesc: {
       ...ts.caption,
       fontFamily: f.sans,
-      color: c.danger,
-      marginTop: 4,
-      marginBottom: s.xs,
+      color: c.textSecondary,
+    },
+    modalInput: {
+      ...ts.body,
+      borderRadius: r.sm,
+      borderWidth: 1,
+      borderColor: c.borderVisible,
+      backgroundColor: c.surfaceElevated,
+      color: c.textDisplay,
+      fontFamily: f.sans,
+      paddingHorizontal: s.md,
+      paddingVertical: s.sm,
     },
   });
 }
 
 export default function PersonalizarPlanPantalla() {
   const insets = useSafeAreaInsets();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const { user } = useAuth();
-  const { c, f, ts, s, r } = useTheme();
+  const { c, f, ts, s, r, isDark } = useTheme();
   const styles = useMemo(() => makeStyles(c, f, ts, s, r), [c, f, ts, s, r]);
+  const Logo = isDark ? LogoDarkSb : LogoLightSb;
 
   const [cargando, setCargando] = useState(true);
   const [ctx, setCtx] = useState<ContextoPlanNutricion | null>(null);
-
   const [actividadIdx, setActividadIdx] = useState(2);
-  const [modalActividad, setModalActividad] = useState(false);
-
+  const [menuDiasOpen, setMenuDiasOpen] = useState(false);
+  const [menuDiasAnchor, setMenuDiasAnchor] = useState({ x: 0, y: 0 });
   const [objetivoUi, setObjetivoUi] = useState<ObjetivoUi>('mantener');
   const [pesoObjetivo, setPesoObjetivo] = useState('');
   const [velocidad, setVelocidad] = useState(0.5);
   const [macroPerfil, setMacroPerfil] = useState<MacroPerfil | null>('equilibrado');
   const [gramosPersonalizado, setGramosPersonalizado] = useState<{ p: number; c: number; f: number } | null>(null);
-
   const [modalPlanOpen, setModalPlanOpen] = useState(false);
+  const [menuPlanOpen, setMenuPlanOpen] = useState(false);
+  const [menuPlanAnchor, setMenuPlanAnchor] = useState({ x: 0, y: 0 });
   const [modalProt, setModalProt] = useState('');
   const [modalCarb, setModalCarb] = useState('');
   const [modalFat, setModalFat] = useState('');
+  const [modalConfirmarGuardar, setModalConfirmarGuardar] = useState(false);
   const [guardando, setGuardando] = useState(false);
+  const [sliderWidth, setSliderWidth] = useState(1);
+  const sliderStartRatio = useRef(0);
 
-  const factorSel = ACTIVIDAD_OPCIONES[actividadIdx]!.factor;
-  const actividadLabel = ACTIVIDAD_OPCIONES[actividadIdx]!.label;
+  const factorSel = ACTIVIDAD_OPCIONES[actividadIdx]?.factor ?? 1.55;
+  const actividadSel = ACTIVIDAD_OPCIONES[actividadIdx] ?? ACTIVIDAD_OPCIONES[3];
 
   const load = useCallback(async () => {
     if (!user?.id) return;
@@ -528,11 +827,7 @@ export default function PersonalizarPlanPantalla() {
 
       if (plan) {
         setObjetivoUi(uiDesdeObjetivoDb(plan.objetivo));
-        if (plan.peso_objetivo != null && Number.isFinite(plan.peso_objetivo)) {
-          setPesoObjetivo(String(plan.peso_objetivo));
-        } else {
-          setPesoObjetivo('');
-        }
+        setPesoObjetivo(plan.peso_objetivo != null ? fmtDecimal(plan.peso_objetivo) : '');
         setGramosPersonalizado({
           p: plan.proteinas_objetivo,
           c: plan.carbos_objetivo,
@@ -546,7 +841,7 @@ export default function PersonalizarPlanPantalla() {
       }
     } catch (e) {
       console.error(e);
-      Alert.alert('Error', 'No se pudieron cargar los datos.');
+      Alert.alert('Error', 'No se pudieron cargar los datos del plan.');
     } finally {
       setCargando(false);
     }
@@ -558,20 +853,7 @@ export default function PersonalizarPlanPantalla() {
 
   const tdeeReady = useMemo(() => {
     if (!ctx) return false;
-    return (
-      ctx.genero != null &&
-      ctx.edad != null &&
-      ctx.edad > 0 &&
-      ctx.alturaCm != null &&
-      ctx.alturaCm > 0 &&
-      ctx.pesoKg != null &&
-      ctx.pesoKg > 0
-    );
-  }, [ctx]);
-
-  const mostrarHintPerfil = useMemo(() => {
-    if (!ctx) return false;
-    return ctx.genero == null || ctx.edad == null || ctx.alturaCm == null;
+    return Boolean(ctx.genero && ctx.edad && ctx.edad > 0 && ctx.alturaCm && ctx.alturaCm > 0 && ctx.pesoKg && ctx.pesoKg > 0);
   }, [ctx]);
 
   const kcalTdee = useMemo(() => {
@@ -585,86 +867,120 @@ export default function PersonalizarPlanPantalla() {
       objetivoUi,
       objetivoUi === 'mantener' ? 0 : velocidad,
     );
-  }, [tdeeReady, ctx, factorSel, objetivoUi, velocidad]);
+  }, [ctx, factorSel, objetivoUi, tdeeReady, velocidad]);
 
   const kcalTdeeRedondeada = Math.max(0, Math.round(kcalTdee));
+  const pesoActual = ctx?.pesoKg != null && ctx.pesoKg > 0 ? ctx.pesoKg : null;
+  const pesoParaMacros = pesoActual ?? 0;
 
   const kcalMostrar = useMemo(() => {
-    if (macroPerfil !== null) {
-      return kcalTdeeRedondeada;
-    }
+    if (macroPerfil !== null) return kcalTdeeRedondeada;
     if (!gramosPersonalizado) return kcalTdeeRedondeada;
-    const { p, c, f: fat } = gramosPersonalizado;
-    return Math.round(p * 4 + c * 4 + fat * 9);
-  }, [macroPerfil, kcalTdeeRedondeada, gramosPersonalizado]);
-
-  const pesoParaMacros = ctx?.pesoKg != null && ctx.pesoKg > 0 ? ctx.pesoKg : 0;
+    return Math.round(gramosPersonalizado.p * 4 + gramosPersonalizado.c * 4 + gramosPersonalizado.f * 9);
+  }, [gramosPersonalizado, kcalTdeeRedondeada, macroPerfil]);
 
   const gramos = useMemo(() => {
     if (pesoParaMacros <= 0) return { p: 0, c: 0, f: 0 };
-    if (macroPerfil !== null) {
-      return macrosDesdePerfil(macroPerfil, pesoParaMacros, kcalMostrar);
-    }
+    if (macroPerfil !== null) return macrosDesdePerfil(macroPerfil, pesoParaMacros, kcalMostrar);
     return gramosPersonalizado ?? { p: 0, c: 0, f: 0 };
-  }, [macroPerfil, pesoParaMacros, kcalMostrar, gramosPersonalizado]);
+  }, [gramosPersonalizado, kcalMostrar, macroPerfil, pesoParaMacros]);
 
   const pctMacros = useMemo(() => {
-    const k = kcalMostrar;
-    if (k <= 0) return { prot: 0, carb: 0, gras: 0 };
-    const prot_pct = Math.round(((gramos.p * 4) / k) * 100);
-    const carb_pct = Math.round(((gramos.c * 4) / k) * 100);
-    const gras_pct = 100 - prot_pct - carb_pct;
-    return { prot: prot_pct, carb: carb_pct, gras: gras_pct };
+    if (kcalMostrar <= 0) return { prot: 0, carb: 0, gras: 0 };
+    const prot = Math.round(((gramos.p * 4) / kcalMostrar) * 100);
+    const carb = Math.round(((gramos.c * 4) / kcalMostrar) * 100);
+    return { prot, carb, gras: Math.max(0, 100 - prot - carb) };
   }, [gramos, kcalMostrar]);
 
-  const kcalModalPreview = useMemo(() => {
-    const p = parseFloat(modalProt.replace(',', '.'));
-    const carb = parseFloat(modalCarb.replace(',', '.'));
-    const fat = parseFloat(modalFat.replace(',', '.'));
-    if (!Number.isFinite(p) || !Number.isFinite(carb) || !Number.isFinite(fat)) return 0;
-    return Math.round(p * 4 + carb * 4 + fat * 9);
-  }, [modalProt, modalCarb, modalFat]);
-
-  const pesoActualRef = ctx?.pesoKg != null && ctx.pesoKg > 0 ? ctx.pesoKg : null;
-
-  const errorPesoObjetivo = useMemo(() => {
+  const pesoObjetivoError = useMemo(() => {
     if (objetivoUi === 'mantener') return null;
-    const po = pesoObjetivo.trim().replace(',', '.');
-    if (!po) return null;
-    const n = parseFloat(po);
-    if (!Number.isFinite(n) || n <= 0) return null;
-    const w = pesoActualRef;
-    if (w == null) return null;
-    const wTxt = fmtKgRef(w);
-    if (objetivoUi === 'perder' && n >= w) {
-      return `El peso objetivo debe ser menor que tu peso actual (${wTxt} kg)`;
+    const raw = pesoObjetivo.trim();
+    if (!raw) return null;
+    const parsed = parseDecimal(raw);
+    if (!Number.isFinite(parsed) || parsed <= 0) return 'Introduce un peso objetivo valido.';
+    if (pesoActual == null) return null;
+    if (objetivoUi === 'perder' && parsed >= pesoActual) {
+      return `Debe ser menor que tu peso actual (${fmtDecimal(pesoActual)} kg).`;
     }
-    if (objetivoUi === 'ganar' && n <= w) {
-      return `El peso objetivo debe ser mayor que tu peso actual (${wTxt} kg)`;
+    if (objetivoUi === 'ganar' && parsed <= pesoActual) {
+      return `Debe ser mayor que tu peso actual (${fmtDecimal(pesoActual)} kg).`;
     }
     return null;
-  }, [objetivoUi, pesoObjetivo, pesoActualRef]);
+  }, [objetivoUi, pesoActual, pesoObjetivo]);
 
   const formGuardarOk = useMemo(() => {
-    if (kcalMostrar <= 0) return false;
-    if (gramos.p < 0 || gramos.c < 0 || gramos.f < 0) return false;
-    if (objetivoUi !== 'mantener') {
-      const po = pesoObjetivo.trim().replace(',', '.');
-      if (!po) return false;
-      const n = parseFloat(po);
-      if (!Number.isFinite(n) || n <= 0) return false;
-      if (errorPesoObjetivo) return false;
-    }
-    return true;
-  }, [kcalMostrar, gramos, objetivoUi, pesoObjetivo, errorPesoObjetivo]);
+    if (kcalMostrar <= 0 || gramos.p < 0 || gramos.c < 0 || gramos.f < 0) return false;
+    if (objetivoUi === 'mantener') return true;
+    const parsed = parseDecimal(pesoObjetivo);
+    return Number.isFinite(parsed) && parsed > 0 && !pesoObjetivoError;
+  }, [gramos, kcalMostrar, objetivoUi, pesoObjetivo, pesoObjetivoError]);
 
-  const bumpVelocidad = (sign: number) => {
+  const balanceLabel = useMemo(() => {
+    if (objetivoUi === 'mantener') return 'Mantenimiento';
+    if (objetivoUi === 'perder') return velocidad > 0.6 ? 'Deficit agresivo' : 'Deficit moderado';
+    return velocidad > 0.6 ? 'Superavit agresivo' : 'Superavit controlado';
+  }, [objetivoUi, velocidad]);
+
+  const sliderCopy = useMemo(() => {
+    if (objetivoUi === 'ganar') {
+      const surplus = Math.round(velocidad * 500);
+      return {
+        title: 'Superavit para ganar musculo',
+        min: '+50 kcal',
+        max: '+500 kcal',
+        value: `+${surplus} kcal/dia`,
+      };
+    }
+
+    return {
+      title: 'Velocidad del objetivo',
+      min: '0,1 kg',
+      max: '1 kg',
+      value: `${velocidad.toFixed(1).replace('.', ',')} kg/semana`,
+    };
+  }, [objetivoUi, velocidad]);
+
+  const objetivoResumen = useMemo(() => {
+    if (objetivoUi === 'perder') return 'Perder grasa';
+    if (objetivoUi === 'ganar') return 'Ganar musculo';
+    return 'Mantenerse';
+  }, [objetivoUi]);
+
+  const ritmoResumen = useMemo(() => {
+    if (objetivoUi === 'mantener') return 'Mantenimiento';
+    return sliderCopy.value;
+  }, [objetivoUi, sliderCopy.value]);
+
+  const kcalModalPreview = useMemo(() => {
+    const p = parseDecimal(modalProt);
+    const carb = parseDecimal(modalCarb);
+    const fat = parseDecimal(modalFat);
+    if (!Number.isFinite(p) || !Number.isFinite(carb) || !Number.isFinite(fat)) return 0;
+    return Math.round(p * 4 + carb * 4 + fat * 9);
+  }, [modalCarb, modalFat, modalProt]);
+
+  const updateVelocidadFromRatio = useCallback((ratioRaw: number) => {
     if (objetivoUi === 'mantener') return;
-    setVelocidad((v) => {
-      const next = Math.round((v + sign * 0.1) * 10) / 10;
-      return Math.max(0.1, Math.min(1, next));
-    });
-  };
+    const ratio = Math.max(0, Math.min(1, ratioRaw));
+    const next = Math.round((0.1 + ratio * 0.9) * 100) / 100;
+    setVelocidad(next);
+  }, [objetivoUi]);
+
+  const sliderResponder = useMemo(
+    () => PanResponder.create({
+      onStartShouldSetPanResponder: () => objetivoUi !== 'mantener',
+      onMoveShouldSetPanResponder: () => objetivoUi !== 'mantener',
+      onPanResponderGrant: (event) => {
+        const ratio = event.nativeEvent.locationX / Math.max(sliderWidth, 1);
+        sliderStartRatio.current = Math.max(0, Math.min(1, ratio));
+        updateVelocidadFromRatio(sliderStartRatio.current);
+      },
+      onPanResponderMove: (_, gestureState) => {
+        updateVelocidadFromRatio(sliderStartRatio.current + gestureState.dx / Math.max(sliderWidth, 1));
+      },
+    }),
+    [objetivoUi, sliderWidth, updateVelocidadFromRatio],
+  );
 
   const abrirModalPlan = () => {
     setModalProt(String(gramos.p));
@@ -674,11 +990,11 @@ export default function PersonalizarPlanPantalla() {
   };
 
   const aplicarPlanPersonalizado = () => {
-    const p = parseFloat(modalProt.replace(',', '.'));
-    const carb = parseFloat(modalCarb.replace(',', '.'));
-    const fat = parseFloat(modalFat.replace(',', '.'));
+    const p = parseDecimal(modalProt);
+    const carb = parseDecimal(modalCarb);
+    const fat = parseDecimal(modalFat);
     if (!Number.isFinite(p) || !Number.isFinite(carb) || !Number.isFinite(fat) || p < 0 || carb < 0 || fat < 0) {
-      Alert.alert('Valores no válidos', 'Introduce gramos válidos (números ≥ 0).');
+      Alert.alert('Valores no validos', 'Introduce gramos validos para cada macro.');
       return;
     }
     setGramosPersonalizado({ p: Math.round(p), c: Math.round(carb), f: Math.round(fat) });
@@ -686,12 +1002,18 @@ export default function PersonalizarPlanPantalla() {
     setModalPlanOpen(false);
   };
 
-  const seleccionarPerfil = (id: MacroPerfil) => {
-    setMacroPerfil(id);
-    setGramosPersonalizado(null);
+  const abrirCrearConV = () => {
+    setMenuPlanOpen(false);
+    Alert.alert('Crear con V', 'Esta opcion estara disponible pronto.');
   };
 
-  const restablecerPlan = () => {
+  const abrirPersonalizarDesdeMenu = () => {
+    setMenuPlanOpen(false);
+    abrirModalPlan();
+  };
+
+  const seleccionarObjetivo = (next: ObjetivoUi) => {
+    setObjetivoUi(next);
     setMacroPerfil('equilibrado');
     setGramosPersonalizado(null);
   };
@@ -700,24 +1022,32 @@ export default function PersonalizarPlanPantalla() {
     if (!user?.id || !formGuardarOk) return;
     setGuardando(true);
     try {
-      const objetivo = objetivoDbDesdeUi(objetivoUi);
-      const { error: errGoals } = await supabase.from('user_goals').upsert(
+      const { error } = await supabase.from('user_goals').upsert(
         {
           user_id: user.id,
-          objetivo,
+          objetivo: objetivoDbDesdeUi(objetivoUi),
           calorias_objetivo: kcalMostrar,
           proteinas_objetivo: gramos.p,
           carbos_objetivo: gramos.c,
           grasas_objetivo: gramos.f,
-          peso_objetivo: objetivoUi !== 'mantener' ? parseFloat(pesoObjetivo.replace(',', '.')) : null,
+          peso_objetivo: objetivoUi !== 'mantener' ? parseDecimal(pesoObjetivo) : null,
         },
         { onConflict: 'user_id' },
       );
-      if (errGoals) {
-        Alert.alert('Error', errGoals.message ?? 'No se pudieron guardar los objetivos.');
+      if (error) {
+        Alert.alert('Error', error.message ?? 'No se pudo guardar el plan.');
         return;
       }
-      router.navigate('/(tabs)/(progreso)');
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .update({ factor_actividad: factorSel })
+        .eq('id', user.id);
+      if (profileError) {
+        Alert.alert('Error', profileError.message ?? 'No se pudieron guardar los dias de entrenamiento.');
+        return;
+      }
+      setModalConfirmarGuardar(false);
+      router.replace('/(tabs)/(perfil)');
     } finally {
       setGuardando(false);
     }
@@ -726,269 +1056,355 @@ export default function PersonalizarPlanPantalla() {
   if (!user) {
     return (
       <View style={[styles.centered, { paddingTop: insets.top }]}>
-        <Text style={{ ...ts.body, fontFamily: f.sans, color: c.textSecondary }}>Inicia sesión</Text>
+        <Text style={styles.subtitle}>Inicia sesion para ajustar tu plan.</Text>
       </View>
     );
   }
 
   if (cargando) {
     return (
-      <View style={[styles.root, { paddingTop: insets.top, justifyContent: 'center' }]}>
-        <ActivityIndicator color={c.primary} size="large" />
+      <View style={[styles.root, { paddingTop: insets.top }]}>
+        <View style={styles.centered}>
+          <ActivityIndicator color={c.primary} size="large" />
+        </View>
       </View>
     );
   }
 
+  const velocityPercent = objetivoUi === 'mantener'
+    ? 0
+    : Math.max(0, Math.min(100, ((velocidad - 0.1) / 0.9) * 100));
+
   return (
-    <View style={[styles.root, { paddingTop: insets.top }]}>
+    <KeyboardAvoidingView style={styles.root} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <View style={[styles.root, { paddingTop: insets.top }]}>
         <View style={styles.header}>
-          <View style={styles.headerSide}>
-            <Pressable
-              onPress={() => router.navigate('/(tabs)/(progreso)')}
-              hitSlop={12}
-              accessibilityRole="button"
-              accessibilityLabel="Volver"
-            >
-              <Ionicons name="chevron-back" size={26} color={c.textDisplay} />
-            </Pressable>
-          </View>
+          <Pressable style={styles.headerButton} onPress={() => router.back()} accessibilityRole="button" accessibilityLabel="Volver">
+            <Ionicons name="chevron-back" size={26} color={c.textDisplay} />
+          </Pressable>
           <Text style={styles.headerTitle} numberOfLines={1}>
-            Personalizar plan
+            Ajustar plan de kcal
           </Text>
-          <View style={styles.headerSide} />
+          <View style={styles.headerButton} />
         </View>
 
-        <View style={styles.body}>
-          {mostrarHintPerfil ? (
-            <Text style={styles.hintPerfil}>Completa tu perfil para un cálculo más preciso</Text>
-          ) : null}
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={[styles.scrollContent, { paddingBottom: s.md }]}
+        >
+          <View style={styles.card}>
+            <Text style={styles.objetivoTitle}>¿Cual es tu objetivo?</Text>
+            <View style={styles.objetivosRow}>
+              {OBJETIVOS.map((item) => {
+                const selected = objetivoUi === item.id;
+                return (
+                  <Pressable
+                    key={item.id}
+                    style={[styles.objetivoButton, selected && styles.objetivoButtonOn]}
+                    onPress={() => seleccionarObjetivo(item.id)}
+                    accessibilityRole="button"
+                  >
+                    <View style={[styles.objetivoIconRing, selected && styles.objetivoIconRingOn]}>
+                      <MaterialCommunityIcons name={item.icon} size={22} color={selected ? c.primary : c.textSecondary} />
+                    </View>
+                    <Text style={[styles.objetivoLabel, selected && styles.objetivoLabelOn]}>{item.label}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
 
-          <Text style={styles.labelFirst}>NIVEL DE ACTIVIDAD</Text>
-          <Pressable style={styles.selectorActividad} onPress={() => setModalActividad(true)}>
-            <Text style={styles.selectorActividadTxt} numberOfLines={2}>
-              {actividadLabel}
-            </Text>
-            <Text style={styles.chevronActividad}>▼</Text>
-          </Pressable>
-
-          <Text style={styles.label}>OBJETIVO</Text>
-          <View style={styles.segmentRowObj}>
-            {(
-              [
-                ['perder', 'Perder grasa'],
-                ['mantener', 'Mantener'],
-                ['ganar', 'Ganar masa'],
-              ] as const
-            ).map(([val, label]) => (
-              <Pressable
-                key={val}
-                style={[styles.segmentBtnObj, objetivoUi === val && styles.segmentBtnObjOn]}
-                onPress={() => setObjetivoUi(val)}
-              >
-                <Text style={[styles.segmentTxtObj, objetivoUi === val && styles.segmentTxtObjOn]} numberOfLines={1}>
-                  {label}
+            {objetivoUi !== 'mantener' ? (
+              <View style={styles.targetRow}>
+                <Text style={styles.targetLabel}>
+                  {objetivoUi === 'perder' ? '¿A cuantos kg quieres bajar?' : '¿A cuantos kg quieres llegar?'}
                 </Text>
-              </Pressable>
-            ))}
-          </View>
-
-          {objetivoUi !== 'mantener' ? (
-            <>
-              <Text style={styles.label}>PESO OBJETIVO</Text>
-              <TextInput
-                style={styles.input}
-                value={pesoObjetivo}
-                onChangeText={setPesoObjetivo}
-                placeholder="kg"
-                placeholderTextColor={c.textMuted}
-                keyboardType="decimal-pad"
-              />
-              {errorPesoObjetivo ? <Text style={styles.errorPesoObj}>{errorPesoObjetivo}</Text> : null}
-            </>
-          ) : null}
-
-          <View style={styles.pesoBlock}>
-            <Text style={styles.pesoLabelCenter}>PESO ACTUAL</Text>
-            <Text style={styles.pesoValorCenter}>
-              {ctx?.pesoKg != null && ctx.pesoKg > 0 ? `${fmt(ctx.pesoKg)} kg` : '—'}
-            </Text>
-          </View>
-
-          {objetivoUi !== 'mantener' ? (
-            <>
-              <Text style={styles.label}>VELOCIDAD (kg/semana)</Text>
-              <View style={styles.velocidadRow}>
-                <Pressable style={styles.stepBtn} onPress={() => bumpVelocidad(-1)}>
-                  <Text style={styles.stepBtnTxt}>−</Text>
-                </Pressable>
-                <Text style={styles.velocidadValor}>{velocidad.toFixed(1)}</Text>
-                <Pressable style={styles.stepBtn} onPress={() => bumpVelocidad(1)}>
-                  <Text style={styles.stepBtnTxt}>+</Text>
-                </Pressable>
+                <View style={styles.targetInputWrap}>
+                  <TextInput
+                    style={styles.targetInput}
+                    value={pesoObjetivo}
+                    onChangeText={(value) => setPesoObjetivo(sanitizeKgInput(value))}
+                    keyboardType="decimal-pad"
+                    placeholder={pesoActual != null ? fmtDecimal(pesoActual) : '0'}
+                    placeholderTextColor={c.textMuted}
+                  />
+                  <Text style={styles.kgText}>kg</Text>
+                </View>
               </View>
-            </>
+            ) : null}
+            {pesoObjetivoError ? <Text style={styles.errorText}>{pesoObjetivoError}</Text> : null}
+          </View>
+
+          <Pressable
+            style={styles.daysSelect}
+            onPress={(event) => {
+              setMenuDiasAnchor({
+                x: event.nativeEvent.pageX,
+                y: event.nativeEvent.pageY,
+              });
+              setMenuDiasOpen(true);
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Seleccionar dias de entrenamiento"
+          >
+            <Text style={styles.daysSelectText} numberOfLines={1}>{actividadSel.label}</Text>
+            <Ionicons name="chevron-down" size={18} color={c.textSecondary} />
+          </Pressable>
+
+          {objetivoUi !== 'mantener' ? (
+            <View style={[styles.card, styles.compactCard]}>
+              <Text style={styles.title}>{sliderCopy.title}</Text>
+              <View style={styles.sliderLine}>
+                <Text style={styles.sliderLimit}>{sliderCopy.min}</Text>
+                <View
+                  style={styles.sliderWrap}
+                  onLayout={(event) => setSliderWidth(event.nativeEvent.layout.width)}
+                  {...sliderResponder.panHandlers}
+                >
+                  <View style={styles.sliderTrack}>
+                    <View style={[styles.sliderFill, { width: `${velocityPercent}%` }]} />
+                    <View style={[styles.sliderThumb, { left: `${velocityPercent}%` }]} />
+                  </View>
+                </View>
+                <Text style={styles.sliderLimit}>{sliderCopy.max}</Text>
+              </View>
+              <Text style={styles.sliderValue}>{sliderCopy.value}</Text>
+            </View>
           ) : null}
 
-          <View style={styles.kcalBlock}>
-            <Text style={styles.label} pointerEvents="none">
-              KCAL CALCULADAS
-            </Text>
-            <Text style={styles.kcalValor}>{kcalMostrar > 0 ? kcalMostrar : '—'}</Text>
-            <Text style={styles.kcalHint}>kcal / día objetivo</Text>
-          </View>
-
-          <Text style={styles.label}>MACROS</Text>
-          <View style={styles.macroPerfilRow}>
-            {PERFILES.map(({ id, label }) => (
+          <View style={styles.card}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.title}>Tu plan diario recomendado</Text>
               <Pressable
-                key={id}
-                style={[styles.macroPerfilBtn, macroPerfil === id && styles.macroPerfilBtnOn]}
-                onPress={() => seleccionarPerfil(id)}
+                style={styles.planMenuButton}
+                onPress={(event) => {
+                  setMenuPlanAnchor({
+                    x: event.nativeEvent.pageX,
+                    y: event.nativeEvent.pageY,
+                  });
+                  setMenuPlanOpen(true);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Abrir menu del plan"
               >
-                <Text style={[styles.macroPerfilTxt, macroPerfil === id && styles.macroPerfilTxtOn]} numberOfLines={2}>
-                  {label}
-                </Text>
+                <Ionicons name="ellipsis-vertical" size={21} color={c.textDisplay} />
               </Pressable>
-            ))}
+            </View>
+            {ctx?.genero == null || ctx.edad == null || ctx.alturaCm == null || pesoActual == null ? (
+              <Text style={styles.errorText}>Completa genero, edad, altura y peso actual para un calculo mas preciso.</Text>
+            ) : null}
+            <View style={styles.kcalRow}>
+              <View style={styles.kcalValueWrap}>
+                <Text style={styles.kcalText}>{kcalMostrar > 0 ? kcalMostrar.toLocaleString('es-ES') : '--'}</Text>
+                <Text style={styles.kcalUnit}>kcal</Text>
+              </View>
+              <View style={styles.badge}>
+                <Text style={styles.badgeText}>{balanceLabel}</Text>
+              </View>
+            </View>
+
+            <View style={styles.macroRow}>
+              <MacroSummary styles={styles} c={c} label="Proteinas" grams={gramos.p} pct={pctMacros.prot} color={c.macroProtein} />
+              <MacroSummary styles={styles} c={c} label="Carbohidratos" grams={gramos.c} pct={pctMacros.carb} color={c.macroCarbs} />
+              <MacroSummary styles={styles} c={c} label="Grasas" grams={gramos.f} pct={pctMacros.gras} color={c.macroFat} />
+            </View>
+
+            <View style={styles.divider} />
+
+            <View style={styles.sectionHeader}>
+              <Text style={styles.title}>Ajuste de macros</Text>
+            </View>
+            <View style={styles.perfilRow}>
+              {PERFILES.map((perfil) => {
+                const selected = macroPerfil === perfil.id;
+                return (
+                  <Pressable
+                    key={perfil.id}
+                    style={[styles.perfilButton, selected && styles.perfilButtonOn]}
+                    onPress={() => {
+                      setMacroPerfil(perfil.id);
+                      setGramosPersonalizado(null);
+                    }}
+                  >
+                    <MaterialCommunityIcons name={perfil.icon} size={18} color={selected ? c.primary : c.textSecondary} />
+                    <Text style={[styles.perfilText, selected && styles.perfilTextOn]}>{perfil.label}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
           </View>
 
-          <View style={styles.macroCardsRow}>
-            <View style={styles.macroCard}>
-              <Text style={styles.macroCardLabel}>PROTEÍNAS</Text>
-              <Text style={styles.macroCardGrams}>{gramos.p}g</Text>
-              <Text style={styles.macroCardMeta}>{pctMacros.prot}%</Text>
-              <Text style={styles.macroCardMeta}>{gramos.p * 4} kcal</Text>
-            </View>
-            <View style={styles.macroCard}>
-              <Text style={styles.macroCardLabel}>CARBOS</Text>
-              <Text style={styles.macroCardGrams}>{gramos.c}g</Text>
-              <Text style={styles.macroCardMeta}>{pctMacros.carb}%</Text>
-              <Text style={styles.macroCardMeta}>{gramos.c * 4} kcal</Text>
-            </View>
-            <View style={styles.macroCard}>
-              <Text style={styles.macroCardLabel}>GRASAS</Text>
-              <Text style={styles.macroCardGrams}>{gramos.f}g</Text>
-              <Text style={styles.macroCardMeta}>{pctMacros.gras}%</Text>
-              <Text style={styles.macroCardMeta}>{gramos.f * 9} kcal</Text>
-            </View>
-          </View>
+        </ScrollView>
 
-          <View style={[styles.planLinksBlock, macroPerfil === null ? styles.planLinksColumn : null]}>
-            {macroPerfil !== null ? (
-              <Pressable onPress={abrirModalPlan}>
-                <Text style={styles.linkPlan}>Personalizar plan</Text>
-              </Pressable>
-            ) : (
-              <>
-                <Pressable onPress={restablecerPlan}>
-                  <Text style={styles.linkPlan}>Restablecer plan</Text>
-                </Pressable>
-                <Text style={styles.planLinksSeparator}>o</Text>
-                <Pressable onPress={abrirModalPlan}>
-                  <Text style={styles.linkPlan}>Personalizar plan</Text>
-                </Pressable>
-              </>
-            )}
-          </View>
-        </View>
-
-        <View style={[styles.footer, { paddingBottom: insets.bottom + -30 }]}>
+        <View style={[styles.footer, { paddingBottom: s.md + 10 }]}>
           <Pressable
-            style={[styles.btnPrimary, (!formGuardarOk || guardando) && styles.btnDis]}
-            onPress={() => void onGuardar()}
+            style={[styles.primaryButton, (!formGuardarOk || guardando) && styles.primaryButtonDisabled]}
+            onPress={() => setModalConfirmarGuardar(true)}
             disabled={!formGuardarOk || guardando}
+            accessibilityRole="button"
           >
-            {guardando ? (
-              <ActivityIndicator color={c.textOnPrimary} />
-            ) : (
-              <Text style={styles.btnTxt}>GUARDAR PLAN</Text>
-            )}
+            {guardando ? <ActivityIndicator color={c.textOnPrimary} /> : <Text style={styles.primaryText}>Guardar</Text>}
           </Pressable>
         </View>
 
-      <Modal visible={modalActividad} transparent animationType="slide" onRequestClose={() => setModalActividad(false)}>
-        <Pressable style={styles.modalBackdrop} onPress={() => setModalActividad(false)}>
-          <Pressable style={[styles.modalCard, { paddingBottom: insets.bottom + s.md }]} onPress={(e) => e.stopPropagation()}>
-            <Text style={styles.modalTitulo}>NIVEL DE ACTIVIDAD</Text>
-            <ScrollView>
+        {menuPlanOpen ? (
+          <View style={styles.planMenuLayer} pointerEvents="box-none">
+            <Pressable style={styles.planMenuDismiss} onPress={() => setMenuPlanOpen(false)} />
+            <View
+              style={[
+                styles.planMenuPopover,
+                {
+                  top: Math.min(menuPlanAnchor.y + 10, windowHeight - 136),
+                  left: Math.min(Math.max(menuPlanAnchor.x - 176, s.md), windowWidth - 198),
+                },
+              ]}
+            >
+              <Text style={styles.planMenuTitle} numberOfLines={1}>
+                Plan diario
+              </Text>
+              <Pressable style={styles.planMenuOption} onPress={abrirCrearConV} accessibilityRole="button">
+                <Logo width={17} height={17} />
+                <Text style={styles.planMenuOptionText}>Crear con V</Text>
+              </Pressable>
+              <View style={styles.planMenuDivider} />
+              <Pressable style={styles.planMenuOption} onPress={abrirPersonalizarDesdeMenu} accessibilityRole="button">
+                <Ionicons name="options-outline" size={17} color={c.textDisplay} />
+                <Text style={styles.planMenuOptionText}>Personalizar</Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : null}
+
+        {menuDiasOpen ? (
+          <View style={styles.planMenuLayer} pointerEvents="box-none">
+            <Pressable style={styles.planMenuDismiss} onPress={() => setMenuDiasOpen(false)} />
+            <View
+              style={[
+                styles.planMenuPopover,
+                {
+                  width: 254,
+                  top: Math.min(menuDiasAnchor.y + 10, windowHeight - 224),
+                  left: Math.min(Math.max(menuDiasAnchor.x - 127, s.md), windowWidth - 266),
+                },
+              ]}
+            >
               {ACTIVIDAD_OPCIONES.map((op, i) => (
                 <Pressable
-                  key={op.label}
-                  style={styles.modalOpcion}
+                  key={op.key}
+                  style={styles.planMenuOption}
                   onPress={() => {
                     setActividadIdx(i);
-                    setModalActividad(false);
+                    setMenuDiasOpen(false);
                   }}
+                  accessibilityRole="button"
                 >
-                  <Text style={styles.modalOpcionTxt}>{op.label}</Text>
+                  <Ionicons
+                    name={actividadIdx === i ? 'checkmark-circle' : 'ellipse-outline'}
+                    size={17}
+                    color={actividadIdx === i ? c.primary : c.textSecondary}
+                  />
+                  <Text style={styles.planMenuOptionText}>{op.label}</Text>
                 </Pressable>
               ))}
-            </ScrollView>
-          </Pressable>
-        </Pressable>
-      </Modal>
+            </View>
+          </View>
+        ) : null}
 
-      <Modal visible={modalPlanOpen} transparent animationType="slide" onRequestClose={() => setModalPlanOpen(false)}>
-        <Pressable style={styles.modalBackdrop} onPress={() => setModalPlanOpen(false)}>
-          <Pressable
-            style={[styles.modalCardGramos, { paddingBottom: insets.bottom + s.md }]}
-            onPress={(e) => e.stopPropagation()}
-          >
-            <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-              <Text style={styles.modalTituloGramos}>Personalizar plan</Text>
-              <Text style={styles.modalDesc}>
-                Introduce los gramos diarios que quieres consumir. Las calorías se calcularán automáticamente.
-              </Text>
-
-              <Text style={styles.modalLabel}>PROTEÍNAS (G)</Text>
-              <TextInput
-                style={[styles.input, { marginBottom: s.sm }]}
-                value={modalProt}
-                onChangeText={setModalProt}
-                keyboardType="decimal-pad"
-                placeholder="0"
-                placeholderTextColor={c.textMuted}
-              />
-
-              <Text style={styles.modalLabel}>CARBOS (G)</Text>
-              <TextInput
-                style={[styles.input, { marginBottom: s.sm }]}
-                value={modalCarb}
-                onChangeText={setModalCarb}
-                keyboardType="decimal-pad"
-                placeholder="0"
-                placeholderTextColor={c.textMuted}
-              />
-
-              <Text style={styles.modalLabel}>GRASAS (G)</Text>
-              <TextInput
-                style={[styles.input, { marginBottom: s.xs }]}
-                value={modalFat}
-                onChangeText={setModalFat}
-                keyboardType="decimal-pad"
-                placeholder="0"
-                placeholderTextColor={c.textMuted}
-              />
-
-              <Text style={styles.modalKcalLive}>{kcalModalPreview} kcal</Text>
-
-              <View style={styles.modalActions}>
-                <Pressable style={styles.btnPrimary} onPress={aplicarPlanPersonalizado}>
-                  <Text style={styles.btnTxt}>APLICAR</Text>
+        <Modal visible={modalPlanOpen} transparent animationType="fade" onRequestClose={() => setModalPlanOpen(false)}>
+          <Pressable style={styles.modalCenteredBackdrop} onPress={() => setModalPlanOpen(false)}>
+            <Pressable style={styles.modalCenteredCard} onPress={(event) => event.stopPropagation()}>
+              <View style={styles.modalAccent} />
+              <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ gap: s.sm }}>
+                <Text style={styles.modalTitle}>Personalizar macros</Text>
+                <Text style={styles.modalBody}>Introduce los gramos diarios. Las calorias se recalculan automaticamente.</Text>
+                <TextInput style={styles.modalInput} value={modalProt} onChangeText={setModalProt} keyboardType="decimal-pad" placeholder="Proteinas (g)" placeholderTextColor={c.textMuted} />
+                <TextInput style={styles.modalInput} value={modalCarb} onChangeText={setModalCarb} keyboardType="decimal-pad" placeholder="Carbohidratos (g)" placeholderTextColor={c.textMuted} />
+                <TextInput style={styles.modalInput} value={modalFat} onChangeText={setModalFat} keyboardType="decimal-pad" placeholder="Grasas (g)" placeholderTextColor={c.textMuted} />
+                <Text style={styles.subtitle}>{kcalModalPreview.toLocaleString('es-ES')} kcal</Text>
+                <Pressable style={styles.modalActionPrimary} onPress={aplicarPlanPersonalizado}>
+                  <Text style={styles.modalActionTextPrimary}>Aplicar</Text>
                 </Pressable>
-                <Pressable style={styles.btnGhost} onPress={() => setModalPlanOpen(false)}>
-                  <Text style={styles.btnGhostTxt}>Cancelar</Text>
+              </KeyboardAvoidingView>
+            </Pressable>
+          </Pressable>
+        </Modal>
+
+        <Modal visible={modalConfirmarGuardar} transparent animationType="fade" onRequestClose={() => setModalConfirmarGuardar(false)}>
+          <Pressable style={styles.modalCenteredBackdrop} onPress={() => setModalConfirmarGuardar(false)}>
+            <Pressable style={styles.modalCenteredCard} onPress={(event) => event.stopPropagation()}>
+              <View style={styles.modalAccent} />
+              <Text style={styles.modalTitle}>Confirmar cambios</Text>
+              <Text style={styles.modalBody}>Revisa tu nuevo plan antes de aplicarlo.</Text>
+              <View style={styles.confirmSummary}>
+                <View style={styles.confirmLayer}>
+                  <View style={styles.confirmLayerHeader}>
+                    <Ionicons name="flag-outline" size={18} color={c.primary} />
+                    <Text style={styles.confirmLabel}>Objetivo</Text>
+                  </View>
+                  <Text style={styles.confirmValue}>{objetivoResumen}</Text>
+                  <Text style={styles.confirmMeta}>{actividadSel.label}</Text>
+                  <Text style={styles.confirmMeta}>{ritmoResumen}</Text>
+                </View>
+                <View style={styles.confirmLayer}>
+                  <View style={styles.confirmLayerHeader}>
+                    <Ionicons name="flame-outline" size={18} color={c.primary} />
+                    <Text style={styles.confirmLabel}>Kcal y macros</Text>
+                  </View>
+                  <Text style={styles.confirmHeroValue}>{kcalMostrar.toLocaleString('es-ES')} kcal</Text>
+                  <Text style={styles.confirmMeta}>{gramos.p}P / {gramos.c}C / {gramos.f}G</Text>
+                </View>
+              </View>
+              <View style={styles.modalActionRow}>
+                <Pressable
+                  style={styles.modalActionSecondary}
+                  onPress={() => setModalConfirmarGuardar(false)}
+                  disabled={guardando}
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.modalActionText}>Cancelar</Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.modalActionPrimary, styles.modalActionPrimaryFlex, guardando && styles.primaryButtonDisabled]}
+                  onPress={() => void onGuardar()}
+                  disabled={guardando}
+                  accessibilityRole="button"
+                >
+                  {guardando ? (
+                    <ActivityIndicator color={c.textOnPrimary} />
+                  ) : (
+                    <Text style={styles.modalActionTextPrimary}>Aplicar</Text>
+                  )}
                 </Pressable>
               </View>
-            </KeyboardAvoidingView>
+            </Pressable>
           </Pressable>
-        </Pressable>
-      </Modal>
-    </View>
+        </Modal>
+      </View>
+    </KeyboardAvoidingView>
   );
 }
 
-function fmt(kg: number): string {
-  const t = kg.toFixed(1);
-  return t.endsWith('.0') ? String(Math.round(kg)) : t;
+function MacroSummary({
+  styles,
+  label,
+  grams,
+  pct,
+  color,
+}: {
+  styles: ReturnType<typeof makeStyles>;
+  c: Theme;
+  label: string;
+  grams: number;
+  pct: number;
+  color: string;
+}) {
+  return (
+    <View style={styles.macroItem}>
+      <Text style={styles.macroLabel} numberOfLines={1}>{label}</Text>
+      <Text style={styles.macroValue}>{grams} g ({pct}%)</Text>
+      <View style={styles.macroTrack}>
+        <View style={[styles.macroFill, { backgroundColor: color, width: `${Math.max(0, Math.min(100, pct))}%` }]} />
+      </View>
+    </View>
+  );
 }

@@ -7,6 +7,7 @@ import { ActivityIndicator, FlatList, Modal, Pressable, StyleSheet, Text, View }
 import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from '@/hooks/useTheme';
 import { entrenamientoService, type EntrenoResumen } from '@/services/entrenamiento.service';
+import { OpcionesMenuModal } from '@/components/entrenamiento/OpcionesMenuModal';
 
 const PAGE_SIZE = 15;
 
@@ -17,9 +18,14 @@ function formatFecha(fecha: string): string {
 }
 
 function formatDuracion(horaInicio: string | null, horaFin: string | null): string {
-  if (!horaInicio || !horaFin) return '—';
-  const mins = entrenamientoService.calcularDuracionMinutos(horaInicio, horaFin);
-  if (mins <= 0) return '—';
+  const placeholder = '\u2014';
+  if (!horaInicio || !horaFin) return placeholder;
+  const inicioMs = new Date(horaInicio).getTime();
+  const finMs = new Date(horaFin).getTime();
+  if (Number.isNaN(inicioMs) || Number.isNaN(finMs) || finMs <= inicioMs) return placeholder;
+  const duracionMs = finMs - inicioMs;
+  if (duracionMs < 60000) return '';
+  const mins = Math.floor(duracionMs / 60000);
   if (mins < 60) return `${mins}min`;
   const h = Math.floor(mins / 60);
   const rem = mins % 60;
@@ -33,7 +39,7 @@ function formatVolumen(volumenKg: number): string {
 
 export function EntrenosListado() {
   const { user } = useAuth();
-  const { c, f, ts, s } = useTheme();
+  const { c, f, ts, s, r } = useTheme();
   const [entrenos, setEntrenos] = useState<EntrenoResumen[]>([]);
   const [pagina, setPagina] = useState(0);
   const [cargandoInicial, setCargandoInicial] = useState(true);
@@ -49,9 +55,12 @@ export function EntrenosListado() {
       StyleSheet.create({
         root: { flex: 1, backgroundColor: c.background },
         centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+        listContent: { paddingTop: s.md, paddingBottom: s.xxl },
         card: {
           backgroundColor: c.surface,
-          borderRadius: 12,
+          borderRadius: r.md,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: c.border,
           marginHorizontal: s.md,
           marginBottom: s.md,
           overflow: 'hidden',
@@ -82,8 +91,8 @@ export function EntrenosListado() {
         statValue: { ...ts.body, fontFamily: f.sans, color: c.textDisplay, marginTop: 2 },
         previewWrap: { paddingHorizontal: s.md, paddingTop: s.sm, paddingBottom: s.sm },
         ejercicioRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: s.xs },
-        img: { width: 36, height: 36, borderRadius: 6 },
-        imgPh: { width: 36, height: 36, borderRadius: 6, backgroundColor: c.surfaceElevated, alignItems: 'center', justifyContent: 'center' },
+        img: { width: 36, height: 36, borderRadius: r.sm },
+        imgPh: { width: 36, height: 36, borderRadius: r.sm, backgroundColor: c.surfaceElevated, alignItems: 'center', justifyContent: 'center' },
         ejercicioTxt: { ...ts.bodySm, fontFamily: f.sans, color: c.textDisplay, marginLeft: s.sm, flex: 1 },
         toggleMore: { paddingVertical: s.sm, paddingHorizontal: s.md, alignSelf: 'flex-start' },
         toggleMoreTxt: { fontSize: 11, lineHeight: 14, fontFamily: f.mono, color: c.primary },
@@ -91,21 +100,16 @@ export function EntrenosListado() {
         finTxt: { fontSize: 11, lineHeight: 14, fontFamily: f.mono, color: c.textSecondary, textAlign: 'center', padding: s.md, textTransform: 'uppercase' },
         empty: { ...ts.bodySm, fontFamily: f.sans, color: c.textMuted, textAlign: 'center', padding: s.lg },
         overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', paddingHorizontal: s.lg },
-        modalCard: { backgroundColor: c.surface, borderRadius: 12, padding: s.md },
-        menuTitle: { ...ts.body, fontFamily: f.sansMedium, color: c.textDisplay, marginBottom: s.md },
-        option: { paddingVertical: s.md },
-        optionDanger: { ...ts.body, fontFamily: f.sans, color: c.danger },
-        cancel: { marginTop: s.sm, alignItems: 'center', paddingVertical: s.sm },
-        cancelTxt: { fontSize: 11, lineHeight: 14, fontFamily: f.mono, color: c.textSecondary, textTransform: 'uppercase' },
+        modalCard: { backgroundColor: c.surface, borderRadius: r.md, borderWidth: StyleSheet.hairlineWidth, borderColor: c.borderVisible, padding: s.md },
         confirmTitle: { fontSize: 11, lineHeight: 14, fontFamily: f.mono, color: c.textSecondary, letterSpacing: 0.6, textTransform: 'uppercase', marginBottom: s.xs },
         confirmBody: { ...ts.bodySm, fontFamily: f.sans, color: c.textDisplay, marginBottom: s.md },
         btnRow: { flexDirection: 'row', gap: s.sm },
-        btnGhost: { flex: 1, borderWidth: 1, borderColor: c.borderVisible, borderRadius: 999, alignItems: 'center', justifyContent: 'center', paddingVertical: s.sm },
+        btnGhost: { flex: 1, borderWidth: 1, borderColor: c.borderVisible, borderRadius: r.pill, alignItems: 'center', justifyContent: 'center', paddingVertical: s.sm },
         btnGhostTxt: { ...ts.bodySm, fontFamily: f.sansMedium, color: c.textDisplay },
-        btnDanger: { flex: 1, borderWidth: 1, borderColor: c.danger, borderRadius: 999, alignItems: 'center', justifyContent: 'center', paddingVertical: s.sm },
+        btnDanger: { flex: 1, borderWidth: 1, borderColor: c.danger, borderRadius: r.pill, alignItems: 'center', justifyContent: 'center', paddingVertical: s.sm },
         btnDangerTxt: { ...ts.bodySm, fontFamily: f.sansMedium, color: c.danger },
       }),
-    [c, f, ts, s],
+    [c, f, ts, s, r],
   );
 
   const cargarPagina = useCallback(
@@ -190,6 +194,7 @@ export function EntrenosListado() {
       <FlatList
         data={entrenos}
         keyExtractor={(item) => item.id}
+        contentContainerStyle={styles.listContent}
         onEndReached={onEndReached}
         onEndReachedThreshold={0.3}
         ListEmptyComponent={<Text style={styles.empty}>No hay entrenos todavía.</Text>}
@@ -256,31 +261,20 @@ export function EntrenosListado() {
         }}
       />
 
-      <Modal visible={menuEntreno != null} transparent animationType="fade" onRequestClose={() => setMenuEntreno(null)}>
-        <Pressable style={styles.overlay} onPress={() => setMenuEntreno(null)}>
-          <Pressable style={styles.modalCard} onPress={(e) => e.stopPropagation()}>
-            {menuEntreno ? (
-              <>
-                <Text style={styles.menuTitle} numberOfLines={2}>
-                  {menuEntreno.nombre?.trim() || menuEntreno.rutinaNombre?.trim() || 'Entreno'}
-                </Text>
-                <Pressable
-                  style={styles.option}
-                  onPress={() => {
-                    setConfirmEntreno(menuEntreno);
-                    setMenuEntreno(null);
-                  }}
-                >
-                  <Text style={styles.optionDanger}>Eliminar entreno</Text>
-                </Pressable>
-                <Pressable style={styles.cancel} onPress={() => setMenuEntreno(null)}>
-                  <Text style={styles.cancelTxt}>Cancelar</Text>
-                </Pressable>
-              </>
-            ) : null}
-          </Pressable>
-        </Pressable>
-      </Modal>
+      <OpcionesMenuModal
+        visible={menuEntreno != null}
+        onClose={() => setMenuEntreno(null)}
+        options={[
+          {
+            key: 'delete-workout',
+            label: 'Eliminar entreno',
+            destructive: true,
+            onPress: () => {
+              if (menuEntreno) setConfirmEntreno(menuEntreno);
+            },
+          },
+        ]}
+      />
 
       <Modal visible={confirmEntreno != null} transparent animationType="fade" onRequestClose={() => setConfirmEntreno(null)}>
         <Pressable style={styles.overlay} onPress={() => setConfirmEntreno(null)}>
@@ -294,7 +288,7 @@ export function EntrenosListado() {
                 <Text style={styles.btnGhostTxt}>Cancelar</Text>
               </Pressable>
               <Pressable style={styles.btnDanger} onPress={() => void onEliminar()} disabled={Boolean(eliminandoId)}>
-                {eliminandoId ? <ActivityIndicator size="small" color={c.accent} /> : <Text style={styles.btnDangerTxt}>Eliminar</Text>}
+                {eliminandoId ? <ActivityIndicator size="small" color={c.danger} /> : <Text style={styles.btnDangerTxt}>Eliminar</Text>}
               </Pressable>
             </View>
           </Pressable>

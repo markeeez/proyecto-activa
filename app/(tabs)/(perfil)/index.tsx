@@ -1,12 +1,15 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Switch,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import { Image } from 'expo-image';
@@ -15,10 +18,14 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { router, Stack, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import type { Theme } from '@/constants/theme';
+import { useTheme } from '@/hooks/useTheme';
 import { useThemeMode } from '@/context/ThemeContext';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/lib/supabase';
 import type { Objetivo, Plan } from '@/types/database.types';
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 type ProfileRow = {
   id: string;
@@ -67,43 +74,15 @@ type ModalState = {
   onConfirm?: () => Promise<void> | void;
 };
 
-const COLORS = {
-  background: '#F7F8FA',
-  surface: '#FFFFFF',
-  cardSoft: '#F2FAFF',
-  cardBlue: '#EAF8FF',
-  accent: '#16B7D7',
-  accentBlue: '#5B9BF6',
-  text: '#172234',
-  muted: '#7A8492',
-  faint: '#AAB2BD',
-  border: '#E9EEF3',
-  danger: '#F05252',
-  dangerBg: '#FFF1F1',
-  green: '#5CB85C',
-  orange: '#FF9E3D',
-  shadow: '#D8E3EE',
+type EditMetricState = {
+  visible: boolean;
+  field: 'altura_cm' | 'edad';
+  label: string;
+  unit: string;
+  current: number | null;
 };
 
-const DARK_COLORS: typeof COLORS = {
-  background: '#071018',
-  surface: '#101B25',
-  cardSoft: '#172838',
-  cardBlue: '#102D3A',
-  accent: '#26C6E3',
-  accentBlue: '#6EA8FF',
-  text: '#F4F8FB',
-  muted: '#9AA8B8',
-  faint: '#657384',
-  border: '#203140',
-  danger: '#FF6B6B',
-  dangerBg: '#2A151A',
-  green: '#78D778',
-  orange: '#FFB15F',
-  shadow: '#000000',
-};
-
-type ProfileColors = typeof COLORS;
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function getAvatarUrl(user: ReturnType<typeof useAuth>['user']): string | null {
   const meta = user?.user_metadata as { avatar_url?: string } | undefined;
@@ -209,6 +188,51 @@ async function uploadAvatar(userId: string, uri: string, mimeType: string): Prom
   return `${data.publicUrl}?v=${Date.now()}`;
 }
 
+// ─── Data hook ────────────────────────────────────────────────────────────────
+
+async function fetchProfileData(userId: string): Promise<ProfileData> {
+  const profileRes = await supabase
+    .from('profiles')
+    .select('*')
+    .eq('id', userId)
+    .maybeSingle();
+
+  if (profileRes.error) throw profileRes.error;
+  const profile = (profileRes.data as ProfileRow | null) ?? null;
+  const plan = profile?.plan ?? 'free';
+
+  const [goalsRes, metricRes, limitsRes] = await Promise.all([
+    supabase
+      .from('user_goals')
+      .select('objetivo, calorias_objetivo, proteinas_objetivo, carbos_objetivo, grasas_objetivo')
+      .eq('user_id', userId)
+      .maybeSingle(),
+    supabase
+      .from('user_body_metrics')
+      .select('peso_kg, altura_cm, fecha')
+      .eq('user_id', userId)
+      .order('fecha', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from('plan_limits')
+      .select('plan, acceso_ia, ai_mensajes_mes')
+      .eq('plan', plan)
+      .maybeSingle(),
+  ]);
+
+  if (goalsRes.error) throw goalsRes.error;
+  if (metricRes.error) throw metricRes.error;
+  if (limitsRes.error) throw limitsRes.error;
+
+  return {
+    profile,
+    goals: (goalsRes.data as GoalRow | null) ?? null,
+    latestMetric: (metricRes.data as MetricRow | null) ?? null,
+    planLimits: (limitsRes.data as PlanLimitRow | null) ?? null,
+  };
+}
+
 function useProfileData(userId: string | undefined) {
   const [data, setData] = useState<ProfileData>({
     profile: null,
@@ -218,8 +242,10 @@ function useProfileData(userId: string | undefined) {
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // true only on the very first load — subsequent refreshes are silent
+  const hasLoaded = useRef(false);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (silent = false) => {
     if (!userId) {
       setData({ profile: null, goals: null, latestMetric: null, planLimits: null });
       setError('No hay una sesion activa.');
@@ -227,74 +253,654 @@ function useProfileData(userId: string | undefined) {
       return;
     }
 
-    setLoading(true);
+    // Show spinner only on first load; after that refresh in background
+    const showSpinner = !silent || !hasLoaded.current;
+    if (showSpinner) setLoading(true);
     setError(null);
 
     try {
-      const profileRes = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .maybeSingle();
-
-      if (profileRes.error) throw profileRes.error;
-      const profile = (profileRes.data as ProfileRow | null) ?? null;
-      const plan = profile?.plan ?? 'free';
-
-      const [goalsRes, metricRes, limitsRes] = await Promise.all([
-        supabase
-          .from('user_goals')
-          .select('objetivo, calorias_objetivo, proteinas_objetivo, carbos_objetivo, grasas_objetivo')
-          .eq('user_id', userId)
-          .maybeSingle(),
-        supabase
-          .from('user_body_metrics')
-          .select('peso_kg, altura_cm, fecha')
-          .eq('user_id', userId)
-          .order('fecha', { ascending: false })
-          .limit(1)
-          .maybeSingle(),
-        supabase
-          .from('plan_limits')
-          .select('plan, acceso_ia, ai_mensajes_mes')
-          .eq('plan', plan)
-          .maybeSingle(),
-      ]);
-
-      if (goalsRes.error) throw goalsRes.error;
-      if (metricRes.error) throw metricRes.error;
-      if (limitsRes.error) throw limitsRes.error;
-
-      setData({
-        profile,
-        goals: (goalsRes.data as GoalRow | null) ?? null,
-        latestMetric: (metricRes.data as MetricRow | null) ?? null,
-        planLimits: (limitsRes.data as PlanLimitRow | null) ?? null,
-      });
+      const next = await fetchProfileData(userId);
+      setData(next);
+      hasLoaded.current = true;
     } catch (err) {
       const message = err instanceof Error ? err.message : 'No se pudo cargar el perfil.';
       setError(message);
     } finally {
-      setLoading(false);
+      if (showSpinner) setLoading(false);
     }
   }, [userId]);
 
-  return { data, loading, error, reload: load };
+  // Optimistic patch — updates local state immediately without a network round-trip.
+  // The caller is responsible for persisting to the server in the background.
+  const patch = useCallback((fields: Partial<ProfileRow>) => {
+    setData((prev) => ({
+      ...prev,
+      profile: prev.profile ? { ...prev.profile, ...fields } : prev.profile,
+    }));
+  }, []);
+
+  return { data, loading, error, reload: load, patch };
 }
+
+// ─── Styles ───────────────────────────────────────────────────────────────────
+
+function makeStyles(
+  c: Theme,
+  f: ReturnType<typeof useTheme>['f'],
+  ts: ReturnType<typeof useTheme>['ts'],
+  s: ReturnType<typeof useTheme>['s'],
+  r: ReturnType<typeof useTheme>['r'],
+) {
+  return StyleSheet.create({
+    root: { flex: 1, backgroundColor: c.background },
+    centerState: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: s.lg,
+    },
+    errorTitle: {
+      ...ts.subheading,
+      fontFamily: f.sansBold,
+      color: c.textDisplay,
+      marginBottom: s.sm,
+      textAlign: 'center',
+    },
+    errorText: {
+      ...ts.bodySm,
+      fontFamily: f.sans,
+      color: c.textSecondary,
+      textAlign: 'center',
+      marginBottom: s.lg,
+    },
+    retryButton: {
+      backgroundColor: c.primary,
+      borderRadius: r.sm,
+      paddingHorizontal: s.md,
+      paddingVertical: 11,
+    },
+    retryText: {
+      ...ts.bodySm,
+      fontFamily: f.sansBold,
+      color: c.textOnPrimary,
+    },
+    scrollContent: {
+      paddingHorizontal: s.md,
+      gap: s.md,
+    },
+    // Header
+    pageHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: s.xxs,
+    },
+    pageTitle: {
+      ...ts.displayMd,
+      fontFamily: f.sansBold,
+      color: c.textDisplay,
+    },
+    pageSubtitle: {
+      ...ts.caption,
+      fontFamily: f.sans,
+      color: c.textSecondary,
+      marginTop: 2,
+    },
+    pageSubtitleAccent: {
+      fontFamily: f.sansBold,
+      color: c.primary,
+    },
+    settingsButton: {
+      width: 44,
+      height: 44,
+      borderRadius: r.sm,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: c.surface,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: c.border,
+    },
+    // User card
+    userCard: {
+      backgroundColor: c.surface,
+      borderRadius: r.md,
+      padding: s.md,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: c.border,
+    },
+    userTop: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: s.md,
+    },
+    avatarWrap: { width: 88, height: 88 },
+    avatar: {
+      width: 88,
+      height: 88,
+      borderRadius: 44,
+      borderWidth: 2,
+      borderColor: c.surface,
+      backgroundColor: c.surfaceElevated,
+    },
+    avatarFallback: {
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    avatarInitials: {
+      ...ts.heading,
+      fontFamily: f.sansBold,
+      color: c.primary,
+    },
+    cameraButton: {
+      position: 'absolute',
+      right: -2,
+      bottom: 4,
+      width: 28,
+      height: 28,
+      borderRadius: 14,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: c.primary,
+      borderWidth: 2,
+      borderColor: c.surface,
+    },
+    identityBlock: { flex: 1, minWidth: 0 },
+    nameText: {
+      ...ts.heading,
+      fontFamily: f.sansBold,
+      color: c.textDisplay,
+    },
+    usernameText: {
+      ...ts.caption,
+      fontFamily: f.mono,
+      color: c.textSecondary,
+      marginTop: 3,
+    },
+    motivationChip: {
+      marginTop: s.md,
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      alignSelf: 'stretch',
+      gap: s.xs,
+    },
+    motivationText: {
+      ...ts.caption,
+      fontFamily: f.sans,
+      color: c.textSecondary,
+      flex: 1,
+      flexShrink: 1,
+    },
+    statsRow: {
+      flexDirection: 'row',
+      gap: s.sm,
+      marginTop: s.md,
+    },
+    statChip: {
+      flex: 1,
+      minHeight: 60,
+      borderRadius: r.sm,
+      backgroundColor: c.surfaceElevated,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: s.sm,
+      paddingHorizontal: s.sm,
+    },
+    statValue: {
+      ...ts.caption,
+      fontFamily: f.sansBold,
+      color: c.textDisplay,
+      textAlign: 'center',
+    },
+    statLabel: {
+      ...ts.label,
+      fontFamily: f.mono,
+      color: c.textMuted,
+      textAlign: 'center',
+    },
+    // Section card (plan activo)
+    sectionCard: {
+      backgroundColor: c.surface,
+      borderRadius: r.md,
+      padding: s.md,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: c.border,
+    },
+    sectionHeader: {
+      minHeight: 27,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: s.sm,
+    },
+    sectionTitleWrap: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: s.sm,
+    },
+    sectionTitle: {
+      ...ts.bodySm,
+      fontFamily: f.sansBold,
+      color: c.textDisplay,
+      textTransform: 'uppercase',
+      letterSpacing: 0.5,
+    },
+    sectionAction: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 3,
+    },
+    sectionActionText: {
+      ...ts.caption,
+      fontFamily: f.sansBold,
+      color: c.primary,
+    },
+    // Plan inner
+    planInner: {
+      overflow: 'hidden',
+      borderRadius: r.sm,
+      backgroundColor: c.primaryBg,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: c.border,
+    },
+    planMainRow: {
+      minHeight: 90,
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: s.md,
+    },
+    goalBlock: { flex: 1, paddingRight: s.sm },
+    smallLabel: {
+      ...ts.label,
+      fontFamily: f.mono,
+      color: c.textMuted,
+      marginBottom: s.sm,
+    },
+    goalText: {
+      ...ts.subheading,
+      fontFamily: f.sansBold,
+      color: c.textDisplay,
+    },
+    planDivider: {
+      width: StyleSheet.hairlineWidth,
+      alignSelf: 'stretch',
+      marginVertical: s.md,
+      backgroundColor: c.border,
+    },
+    kcalBlock: {
+      width: 120,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    kcalText: {
+      ...ts.displayMd,
+      fontFamily: f.sansBold,
+      color: c.primary,
+    },
+    kcalLabel: {
+      ...ts.label,
+      fontFamily: f.mono,
+      color: c.textMuted,
+      marginTop: 2,
+    },
+    macroRow: {
+      minHeight: 58,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: c.border,
+      flexDirection: 'row',
+    },
+    macroItem: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: s.xs,
+      paddingHorizontal: s.xs,
+    },
+    macroValue: {
+      ...ts.caption,
+      fontFamily: f.sansBold,
+      color: c.textDisplay,
+    },
+    macroLabel: {
+      ...ts.label,
+      fontFamily: f.mono,
+      color: c.textMuted,
+      marginTop: 1,
+    },
+    // List card
+    listCard: {
+      backgroundColor: c.surface,
+      borderRadius: r.md,
+      paddingHorizontal: s.md,
+      paddingTop: s.md,
+      paddingBottom: s.sm,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: c.border,
+    },
+    listRow: {
+      minHeight: 60,
+      flexDirection: 'row',
+      alignItems: 'center',
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: c.border,
+      gap: s.sm,
+    },
+    listRowLast: { borderBottomWidth: 0 },
+    listIcon: {
+      width: 32,
+      height: 32,
+      borderRadius: r.technical,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: c.surfaceElevated,
+    },
+    listTextWrap: { flex: 1, minWidth: 0 },
+    listTitle: {
+      ...ts.bodySm,
+      fontFamily: f.sansMedium,
+      color: c.text,
+    },
+    listSubtitle: {
+      ...ts.caption,
+      fontFamily: f.sans,
+      color: c.textSecondary,
+      marginTop: 2,
+    },
+    planBadge: {
+      ...ts.label,
+      fontFamily: f.monoBold,
+      color: c.primary,
+    },
+    signOutButton: {
+      marginTop: s.sm,
+      height: 46,
+      borderRadius: r.sm,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: s.sm,
+      backgroundColor: c.dangerBg,
+    },
+    signOutText: {
+      ...ts.bodySm,
+      fontFamily: f.sansBold,
+      color: c.danger,
+    },
+    // Theme toggle
+    themeToggleWrap: {
+      alignSelf: 'center',
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: s.sm,
+      marginTop: s.xs,
+      paddingVertical: s.sm,
+      paddingHorizontal: s.md,
+    },
+    // Modal
+    modalBackdrop: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.68)',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: s.lg,
+    },
+    modalCard: {
+      width: '100%',
+      borderRadius: 18,
+      backgroundColor: c.surface,
+      paddingHorizontal: s.md,
+      paddingTop: s.lg,
+      paddingBottom: s.md,
+      borderWidth: 1,
+      borderColor: c.borderVisible,
+      overflow: 'hidden',
+    },
+    modalAccent: {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      height: 2,
+      backgroundColor: c.primary,
+    },
+    modalTitle: {
+      ...ts.subheading,
+      fontFamily: f.sansBold,
+      color: c.textDisplay,
+      marginBottom: s.sm,
+      letterSpacing: 0,
+    },
+    modalText: {
+      ...ts.body,
+      fontFamily: f.sans,
+      color: c.textSecondary,
+      marginBottom: s.md,
+      lineHeight: 25,
+    },
+    modalActions: { flexDirection: 'row', gap: s.sm },
+    modalGhost: {
+      flex: 1,
+      height: 44,
+      borderRadius: r.technical,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 1,
+      borderColor: c.borderVisible,
+    },
+    modalGhostText: {
+      ...ts.bodySm,
+      fontFamily: f.sans,
+      color: c.textDisplay,
+    },
+    modalPrimary: {
+      flex: 1,
+      height: 44,
+      borderRadius: r.technical,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: c.primary,
+    },
+    modalPrimaryText: {
+      ...ts.bodySm,
+      fontFamily: f.sansMedium,
+      color: c.textOnPrimary,
+    },
+    // Edit metric modal
+    inputRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      borderWidth: 1,
+      borderRadius: r.sm,
+      paddingHorizontal: s.md,
+      paddingVertical: s.sm,
+      marginBottom: s.md,
+      gap: s.sm,
+    },
+    metricInput: {
+      flex: 1,
+      ...ts.heading,
+      fontSize: 28,
+      lineHeight: 34,
+    },
+    metricUnit: {
+      ...ts.bodySm,
+    },
+  });
+}
+
+// ─── Sub-components ───────────────────────────────────────────────────────────
+
+type Styles = ReturnType<typeof makeStyles>;
+type ThemeRef = { c: Theme; f: ReturnType<typeof useTheme>['f'] };
+
+function SectionHeader({
+  th,
+  styles,
+  icon,
+  title,
+  action,
+  onPress,
+}: {
+  th: ThemeRef;
+  styles: Styles;
+  icon: keyof typeof Ionicons.glyphMap;
+  title: string;
+  action?: string;
+  onPress?: () => void;
+}) {
+  return (
+    <View style={styles.sectionHeader}>
+      <View style={styles.sectionTitleWrap}>
+        <Ionicons name={icon} size={15} color={th.c.primary} />
+        <Text style={styles.sectionTitle}>{title}</Text>
+      </View>
+      {action ? (
+        <Pressable style={styles.sectionAction} onPress={onPress} accessibilityRole="button">
+          <Text style={styles.sectionActionText}>{action}</Text>
+          <Ionicons name="chevron-forward" size={12} color={th.c.primary} />
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
+function StatChip({
+  styles,
+  th,
+  icon,
+  value,
+  label,
+  editable,
+  onPress,
+}: {
+  styles: Styles;
+  th: ThemeRef;
+  icon: keyof typeof Ionicons.glyphMap;
+  value: string;
+  label: string;
+  editable?: boolean;
+  onPress?: () => void;
+}) {
+  const inner = (
+    <>
+      <Ionicons name={icon} size={16} color={th.c.primary} />
+      <View>
+        <Text style={styles.statValue} numberOfLines={1}>{value}</Text>
+        <Text style={styles.statLabel}>{label}</Text>
+      </View>
+    </>
+  );
+
+  if (editable && onPress) {
+    return (
+      <Pressable style={styles.statChip} onPress={onPress} accessibilityRole="button">
+        {inner}
+      </Pressable>
+    );
+  }
+
+  return <View style={styles.statChip}>{inner}</View>;
+}
+
+function MacroItem({
+  styles,
+  th,
+  type,
+  value,
+  label,
+}: {
+  styles: Styles;
+  th: ThemeRef;
+  type: 'protein' | 'carbs' | 'fat';
+  value: string;
+  label: string;
+}) {
+  const color =
+    type === 'protein' ? th.c.macroProtein :
+    type === 'carbs'   ? th.c.macroCarbs   :
+                         th.c.macroFat;
+
+  return (
+    <View style={styles.macroItem}>
+      {type === 'protein' ? (
+        <MaterialCommunityIcons name="food-drumstick-outline" size={17} color={color} />
+      ) : type === 'carbs' ? (
+        <MaterialCommunityIcons name="barley" size={17} color={color} />
+      ) : (
+        <Ionicons name="water-outline" size={17} color={color} />
+      )}
+      <View>
+        <Text style={styles.macroValue}>{value}</Text>
+        <Text style={styles.macroLabel}>{label}</Text>
+      </View>
+    </View>
+  );
+}
+
+function ListRow({
+  styles,
+  th,
+  icon,
+  title,
+  subtitle,
+  badge,
+  last,
+  onPress,
+}: {
+  styles: Styles;
+  th: ThemeRef;
+  icon: keyof typeof Ionicons.glyphMap;
+  title: string;
+  subtitle?: string;
+  badge?: string;
+  last?: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      style={[styles.listRow, last && styles.listRowLast]}
+      onPress={onPress}
+      accessibilityRole="button"
+    >
+      <View style={styles.listIcon}>
+        <Ionicons name={icon} size={16} color={th.c.textSecondary} />
+      </View>
+      <View style={styles.listTextWrap}>
+        <Text style={styles.listTitle}>{title}</Text>
+        {subtitle ? <Text style={styles.listSubtitle}>{subtitle}</Text> : null}
+      </View>
+      {badge ? <Text style={styles.planBadge}>{badge}</Text> : null}
+      <Ionicons name="chevron-forward" size={16} color={th.c.textMuted} />
+    </Pressable>
+  );
+}
+
+// ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function PerfilIndex() {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const { isDark, setMode } = useThemeMode();
-  const colors = isDark ? DARK_COLORS : COLORS;
-  const { data, loading, error, reload } = useProfileData(user?.id);
+  const { c, f, ts, s, r } = useTheme();
+  const styles = useMemo(() => makeStyles(c, f, ts, s, r), [c, f, ts, s, r]);
+  const th: ThemeRef = useMemo(() => ({ c, f }), [c, f]);
+
+  const { data, loading, error, reload, patch } = useProfileData(user?.id);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(() => getAvatarUrl(user ?? null));
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
-  const [modal, setModal] = useState<ModalState>({
+  const [modal, setModal] = useState<ModalState>({ visible: false, title: '', message: '' });
+  const [editMetric, setEditMetric] = useState<EditMetricState>({
     visible: false,
-    title: '',
-    message: '',
+    field: 'altura_cm',
+    label: 'Altura',
+    unit: 'cm',
+    current: null,
   });
+  const [editValue, setEditValue] = useState('');
+  const [savingMetric, setSavingMetric] = useState(false);
+  const inputRef = useRef<TextInput>(null);
 
   useEffect(() => {
     setAvatarUrl(getAvatarUrl(user ?? null));
@@ -302,7 +908,8 @@ export default function PerfilIndex() {
 
   useFocusEffect(
     useCallback(() => {
-      void reload();
+      // Silent refresh on focus — keeps stale data visible while fetching
+      void reload(true);
     }, [reload]),
   );
 
@@ -350,13 +957,51 @@ export default function PerfilIndex() {
     }
   };
 
-  const changeEmail = () => {
-    router.push('/(tabs)/(perfil)/ajustes');
+  const openEditMetric = (field: 'altura_cm' | 'edad', current: number | null) => {
+    const isAltura = field === 'altura_cm';
+    setEditValue(current != null ? String(Math.round(current)) : '');
+    setEditMetric({
+      visible: true,
+      field,
+      label: isAltura ? 'Altura' : 'Edad',
+      unit: isAltura ? 'cm' : 'años',
+      current,
+    });
+    setTimeout(() => inputRef.current?.focus(), 100);
+  };
+
+  const saveMetricField = async () => {
+    if (!user?.id) return;
+    const raw = editValue.trim();
+    const parsed = parseInt(raw, 10);
+    if (!raw || isNaN(parsed) || parsed <= 0) return;
+
+    const field = editMetric.field;
+    const previous = field === 'altura_cm' ? data.profile?.altura_cm : data.profile?.edad;
+
+    // Optimistic update — UI reflects the change instantly
+    patch({ [field]: parsed });
+    setEditMetric((prev) => ({ ...prev, visible: false }));
+    setSavingMetric(true);
+
+    try {
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({ [field]: parsed })
+        .eq('id', user.id);
+      if (updateError) throw updateError;
+    } catch (err) {
+      // Rollback optimistic update and surface the error
+      patch({ [field]: previous ?? null });
+      const message = err instanceof Error ? err.message : 'No se pudo guardar.';
+      showInfo('Error', message);
+    } finally {
+      setSavingMetric(false);
+    }
   };
 
   const changePassword = () => {
     if (!user?.email) return;
-
     setModal({
       visible: true,
       title: 'Cambiar contraseña',
@@ -390,18 +1035,18 @@ export default function PerfilIndex() {
   };
 
   return (
-    <View style={[styles.root, { backgroundColor: colors.background }]}>
+    <View style={styles.root}>
       <Stack.Screen options={{ headerShown: false }} />
 
       {loading ? (
         <View style={styles.centerState}>
-          <ActivityIndicator color={colors.accent} size="large" />
+          <ActivityIndicator color={c.primary} size="large" />
         </View>
       ) : error ? (
         <View style={styles.centerState}>
-          <Text style={[styles.errorTitle, { color: colors.text }]}>No se pudo cargar el perfil</Text>
-          <Text style={[styles.errorText, { color: colors.muted }]}>{error}</Text>
-          <Pressable style={[styles.retryButton, { backgroundColor: colors.accent }]} onPress={reload}>
+          <Text style={styles.errorTitle}>No se pudo cargar el perfil</Text>
+          <Text style={styles.errorText}>{error}</Text>
+          <Pressable style={styles.retryButton} onPress={reload}>
             <Text style={styles.retryText}>Reintentar</Text>
           </Pressable>
         </View>
@@ -413,80 +1058,61 @@ export default function PerfilIndex() {
             { paddingTop: insets.top + 20, paddingBottom: insets.bottom + 112 },
           ]}
         >
-          <View style={styles.header}>
+          {/* Header */}
+          <View style={styles.pageHeader}>
             <View>
-              <Text style={[styles.title, { color: colors.text }]}>Perfil</Text>
-              <Text style={[styles.subtitle, { color: colors.muted }]}>
-                Gestiona tu cuenta y <Text style={[styles.subtitleAccent, { color: colors.accent }]}>tu progreso.</Text>
+              <Text style={styles.pageTitle}>Perfil</Text>
+              <Text style={styles.pageSubtitle}>
+                Gestiona tu cuenta y{' '}
+                <Text style={styles.pageSubtitleAccent}>tu progreso.</Text>
               </Text>
             </View>
             <Pressable
-              style={[
-                styles.settingsButton,
-                {
-                  backgroundColor: colors.surface,
-                  borderColor: colors.border,
-                  shadowColor: colors.shadow,
-                },
-              ]}
+              style={styles.settingsButton}
               onPress={() => router.push('/(tabs)/(perfil)/ajustes')}
               accessibilityRole="button"
               accessibilityLabel="Ajustes"
             >
-              <Ionicons name="settings" size={19} color={colors.text} />
+              <Ionicons name="settings-outline" size={18} color={c.textSecondary} />
             </Pressable>
           </View>
 
-          <View
-            style={[
-              styles.userCard,
-              {
-                backgroundColor: colors.surface,
-                borderColor: colors.border,
-                shadowColor: colors.shadow,
-              },
-            ]}
-          >
+          {/* User card */}
+          <View style={styles.userCard}>
             <View style={styles.userTop}>
               <View style={styles.avatarWrap}>
                 {avatarUrl ? (
-                  <Image source={{ uri: avatarUrl }} style={[styles.avatar, { borderColor: colors.surface }]} contentFit="cover" />
+                  <Image
+                    source={{ uri: avatarUrl }}
+                    style={styles.avatar}
+                    contentFit="cover"
+                  />
                 ) : (
-                  <View
-                    style={[
-                      styles.avatar,
-                      styles.avatarFallback,
-                      { backgroundColor: colors.cardSoft, borderColor: colors.surface },
-                    ]}
-                  >
-                    <Text style={[styles.avatarInitials, { color: colors.accent }]}>{profileInitials}</Text>
+                  <View style={[styles.avatar, styles.avatarFallback]}>
+                    <Text style={styles.avatarInitials}>{profileInitials}</Text>
                   </View>
                 )}
                 <Pressable
-                  style={[styles.cameraButton, { backgroundColor: colors.accent, borderColor: colors.surface }]}
+                  style={styles.cameraButton}
                   onPress={changeAvatar}
                   disabled={uploadingAvatar}
                   accessibilityRole="button"
                   accessibilityLabel="Editar foto"
                 >
                   {uploadingAvatar ? (
-                    <ActivityIndicator color="#FFFFFF" size="small" />
+                    <ActivityIndicator color={c.textOnPrimary} size="small" />
                   ) : (
-                    <Ionicons name="camera" size={14} color="#FFFFFF" />
+                    <Ionicons name="camera" size={13} color={c.textOnPrimary} />
                   )}
                 </Pressable>
               </View>
 
               <View style={styles.identityBlock}>
-                <Text style={[styles.nameText, { color: colors.text }]} numberOfLines={1}>
-                  {displayName}
-                </Text>
-                <Text style={[styles.usernameText, { color: colors.muted }]} numberOfLines={1}>
-                  {displayUsername}
-                </Text>
+                <Text style={styles.nameText} numberOfLines={1}>{displayName}</Text>
+                <Text style={styles.usernameText} numberOfLines={1}>{displayUsername}</Text>
                 <View style={styles.motivationChip}>
-                  <Ionicons name="flash" size={13} color={colors.accent} />
-                  <Text style={[styles.motivationText, { color: colors.muted }]} numberOfLines={1}>
+                  <Ionicons name="flash" size={12} color={c.primary} />
+                  <Text style={styles.motivationText} numberOfLines={2}>
                     Disciplina hoy, resultados mañana.
                   </Text>
                 </View>
@@ -494,73 +1120,56 @@ export default function PerfilIndex() {
             </View>
 
             <View style={styles.statsRow}>
-              <StatChip colors={colors} icon="scale-outline" value={`${decimal(data.latestMetric?.peso_kg)} kg`} label="Peso" />
-              <StatChip colors={colors} icon="pencil-outline" value={`${decimal(altura)} cm`} label="Altura" />
-              <StatChip colors={colors} icon="calendar-outline" value={edad != null ? `${rounded(edad)} años` : '-- años'} label="Edad" />
+              <StatChip styles={styles} th={th} icon="scale-outline" value={`${decimal(data.latestMetric?.peso_kg)} kg`} label="Peso" />
+              <StatChip styles={styles} th={th} icon="body-outline" value={`${decimal(altura)} cm`} label="Altura" editable onPress={() => openEditMetric('altura_cm', altura)} />
+              <StatChip styles={styles} th={th} icon="calendar-outline" value={edad != null ? `${rounded(edad)} años` : '--'} label="Edad" editable onPress={() => openEditMetric('edad', edad)} />
             </View>
           </View>
 
-          <View style={[styles.sectionCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+          {/* Plan activo */}
+          <View style={styles.sectionCard}>
             <SectionHeader
-              colors={colors}
+              th={th}
+              styles={styles}
               icon="compass-outline"
               title="Plan activo"
               action="Personalizar"
               onPress={() => router.push('/(tabs)/(progreso)/personalizar-plan')}
             />
-
-            <View style={[styles.planInner, { backgroundColor: colors.cardBlue }]}>
+            <View style={styles.planInner}>
               <View style={styles.planMainRow}>
                 <View style={styles.goalBlock}>
-                  <Text style={[styles.smallLabel, { color: colors.muted }]}>Objetivo</Text>
-                  <Text style={[styles.goalText, { color: colors.text }]} numberOfLines={2}>
+                  <Text style={styles.smallLabel}>Objetivo</Text>
+                  <Text style={styles.goalText} numberOfLines={2}>
                     {objectiveText(data.goals?.objetivo ?? null)}
                   </Text>
                 </View>
-                <View style={[styles.planDivider, { backgroundColor: colors.border }]} />
+                <View style={styles.planDivider} />
                 <View style={styles.kcalBlock}>
-                  <Text style={[styles.kcalText, { color: colors.accent }]}>{rounded(data.goals?.calorias_objetivo) ?? '--'}</Text>
-                  <Text style={[styles.kcalLabel, { color: colors.muted }]}>kcal/día</Text>
+                  <Text style={styles.kcalText}>{rounded(data.goals?.calorias_objetivo) ?? '--'}</Text>
+                  <Text style={styles.kcalLabel}>kcal/día</Text>
                 </View>
               </View>
-
-              <View style={[styles.macroRow, { borderTopColor: colors.border }]}>
-                <MacroItem
-                  colors={colors}
-                  type="protein"
-                  color={colors.accent}
-                  value={`${rounded(data.goals?.proteinas_objetivo) ?? '--'} g`}
-                  label="Proteína"
-                />
-                <MacroItem
-                  colors={colors}
-                  type="carbs"
-                  color={colors.green}
-                  value={`${rounded(data.goals?.carbos_objetivo) ?? '--'} g`}
-                  label="Carbohidratos"
-                />
-                <MacroItem
-                  colors={colors}
-                  type="fat"
-                  color={colors.orange}
-                  value={`${rounded(data.goals?.grasas_objetivo) ?? '--'} g`}
-                  label="Grasa"
-                />
+              <View style={styles.macroRow}>
+                <MacroItem styles={styles} th={th} type="protein" value={`${rounded(data.goals?.proteinas_objetivo) ?? '--'} g`} label="Proteína" />
+                <MacroItem styles={styles} th={th} type="carbs"   value={`${rounded(data.goals?.carbos_objetivo) ?? '--'} g`} label="Carbos" />
+                <MacroItem styles={styles} th={th} type="fat"     value={`${rounded(data.goals?.grasas_objetivo) ?? '--'} g`} label="Grasa" />
               </View>
             </View>
           </View>
 
-          <View style={[styles.listCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <SectionHeader colors={colors} icon="pulse-outline" title="Mi actividad" />
+          {/* Mi actividad */}
+          <View style={styles.listCard}>
+            <SectionHeader th={th} styles={styles} icon="pulse-outline" title="Mi actividad" />
             <ListRow
-              colors={colors}
+              styles={styles} th={th}
               icon="barbell-outline"
               title="Ejercicios"
               subtitle="Consulta y gestiona tus ejercicios."
               onPress={() => router.push('/(tabs)/(perfil)/perfil-ejercicios')}
             />
             <ListRow
-              colors={colors}
+              styles={styles} th={th}
               icon="bar-chart-outline"
               title="Entrenos"
               subtitle="Historial y estadísticas de entrenos."
@@ -569,54 +1178,48 @@ export default function PerfilIndex() {
             />
           </View>
 
-          <View style={[styles.listCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <SectionHeader colors={colors} icon="person-outline" title="Cuenta" />
-            <ListRow colors={colors} icon="mail-outline" title="Cambiar email" onPress={changeEmail} />
-            <ListRow colors={colors} icon="lock-closed-outline" title="Cambiar contraseña" onPress={changePassword} />
-            <ListRow
-              colors={colors}
-              icon="shield-checkmark-outline"
-              title="Plan actual"
-              badge={planBadge}
-              last
-              onPress={() => router.push('/(tabs)/(perfil)/plan')}
-            />
+          {/* Cuenta */}
+          <View style={styles.listCard}>
+            <SectionHeader th={th} styles={styles} icon="person-outline" title="Cuenta" />
+            <ListRow styles={styles} th={th} icon="mail-outline"        title="Cambiar email"      onPress={() => router.push('/(tabs)/(perfil)/ajustes')} />
+            <ListRow styles={styles} th={th} icon="lock-closed-outline" title="Cambiar contraseña" onPress={changePassword} />
+            <ListRow styles={styles} th={th} icon="shield-checkmark-outline" title="Plan actual" badge={planBadge} last onPress={() => router.push('/(tabs)/(perfil)/plan')} />
 
-            <Pressable style={[styles.signOutButton, { backgroundColor: colors.dangerBg }]} onPress={signOut} accessibilityRole="button">
-              <Ionicons name="log-out-outline" size={17} color={colors.danger} />
-              <Text style={[styles.signOutText, { color: colors.danger }]}>Cerrar sesión</Text>
+            <Pressable style={styles.signOutButton} onPress={signOut} accessibilityRole="button">
+              <Ionicons name="log-out-outline" size={16} color={c.danger} />
+              <Text style={styles.signOutText}>Cerrar sesión</Text>
             </Pressable>
           </View>
 
+          {/* Theme toggle */}
           <View style={styles.themeToggleWrap}>
-            <Ionicons name="sunny-outline" size={18} color={colors.muted} />
+            <Ionicons name="sunny-outline" size={17} color={c.textMuted} />
             <Switch
               value={isDark}
               onValueChange={(value) => setMode(value ? 'dark' : 'light')}
-              trackColor={{ false: '#DDE5EE', true: '#145363' }}
-              thumbColor={isDark ? colors.accent : '#FFFFFF'}
+              trackColor={{ false: c.surfaceElevated, true: c.primaryBg }}
+              thumbColor={c.primary}
             />
-            <Ionicons name="moon-outline" size={18} color={colors.muted} />
+            <Ionicons name="moon-outline" size={17} color={c.textMuted} />
           </View>
         </ScrollView>
       )}
 
+      {/* Modal info/confirm */}
       <Modal visible={modal.visible} transparent animationType="fade" onRequestClose={closeModal}>
         <View style={styles.modalBackdrop}>
-          <View style={[styles.modalCard, { backgroundColor: colors.surface }]}>
-            <Text style={[styles.modalTitle, { color: colors.text }]}>{modal.title}</Text>
-            <Text style={[styles.modalText, { color: colors.muted }]}>{modal.message}</Text>
+          <View style={styles.modalCard}>
+            <View style={styles.modalAccent} />
+            <Text style={styles.modalTitle}>{modal.title}</Text>
+            <Text style={styles.modalText}>{modal.message}</Text>
             <View style={styles.modalActions}>
               {modal.confirmText ? (
-                <Pressable style={[styles.modalGhost, { borderColor: colors.border }]} onPress={closeModal}>
-                  <Text style={[styles.modalGhostText, { color: colors.text }]}>Cancelar</Text>
+                <Pressable style={styles.modalGhost} onPress={closeModal}>
+                  <Text style={styles.modalGhostText}>Cancelar</Text>
                 </Pressable>
               ) : null}
               <Pressable
-                style={[
-                  styles.modalPrimary,
-                  { backgroundColor: modal.danger ? colors.danger : colors.accent },
-                ]}
+                style={[styles.modalPrimary, modal.danger && { backgroundColor: c.danger }]}
                 onPress={async () => {
                   const action = modal.onConfirm;
                   closeModal();
@@ -629,544 +1232,63 @@ export default function PerfilIndex() {
           </View>
         </View>
       </Modal>
+
+      {/* Edit metric modal */}
+      <Modal
+        visible={editMetric.visible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setEditMetric((prev) => ({ ...prev, visible: false }))}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.modalBackdrop}
+        >
+          <View style={styles.modalCard}>
+            <View style={styles.modalAccent} />
+            <Text style={styles.modalTitle}>{editMetric.label}</Text>
+            <Text style={styles.modalText}>
+              Introduce tu {editMetric.label.toLowerCase()} en {editMetric.unit}.
+            </Text>
+            <View style={[styles.inputRow, { borderColor: c.borderVisible, backgroundColor: c.surfaceElevated }]}>
+              <TextInput
+                ref={inputRef}
+                style={[styles.metricInput, { color: c.textDisplay, fontFamily: f.sansBold }]}
+                value={editValue}
+                onChangeText={(t) => setEditValue(t.replace(/[^0-9]/g, ''))}
+                keyboardType="number-pad"
+                maxLength={3}
+                placeholder="--"
+                placeholderTextColor={c.textMuted}
+                returnKeyType="done"
+                onSubmitEditing={saveMetricField}
+              />
+              <Text style={[styles.metricUnit, { color: c.textSecondary, fontFamily: f.mono }]}>
+                {editMetric.unit}
+              </Text>
+            </View>
+            <View style={styles.modalActions}>
+              <Pressable
+                style={styles.modalGhost}
+                onPress={() => setEditMetric((prev) => ({ ...prev, visible: false }))}
+              >
+                <Text style={styles.modalGhostText}>Cancelar</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.modalPrimary, (!editValue.trim() || savingMetric) && { opacity: 0.5 }]}
+                onPress={saveMetricField}
+                disabled={!editValue.trim() || savingMetric}
+              >
+                {savingMetric ? (
+                  <ActivityIndicator color={c.textOnPrimary} size="small" />
+                ) : (
+                  <Text style={styles.modalPrimaryText}>Guardar</Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </View>
   );
 }
-
-function SectionHeader({
-  colors,
-  icon,
-  title,
-  action,
-  onPress,
-}: {
-  colors: ProfileColors;
-  icon: keyof typeof Ionicons.glyphMap;
-  title: string;
-  action?: string;
-  onPress?: () => void;
-}) {
-  return (
-    <View style={styles.sectionHeader}>
-      <View style={styles.sectionTitleWrap}>
-        <Ionicons name={icon} size={16} color={colors.accent} />
-        <Text style={[styles.sectionTitle, { color: colors.text }]}>{title}</Text>
-      </View>
-      {action ? (
-        <Pressable style={styles.sectionAction} onPress={onPress} accessibilityRole="button">
-          <Text style={[styles.sectionActionText, { color: colors.accent }]}>{action}</Text>
-          <Ionicons name="chevron-forward" size={13} color={colors.accent} />
-        </Pressable>
-      ) : null}
-    </View>
-  );
-}
-
-function StatChip({
-  colors,
-  icon,
-  value,
-  label,
-}: {
-  colors: ProfileColors;
-  icon: keyof typeof Ionicons.glyphMap;
-  value: string;
-  label: string;
-}) {
-  return (
-    <View style={[styles.statChip, { backgroundColor: colors.cardSoft }]}>
-      <Ionicons name={icon} size={17} color={colors.accent} />
-      <View>
-        <Text style={[styles.statValue, { color: colors.text }]} numberOfLines={1}>
-          {value}
-        </Text>
-        <Text style={[styles.statLabel, { color: colors.muted }]}>{label}</Text>
-      </View>
-    </View>
-  );
-}
-
-function MacroItem({
-  colors,
-  type,
-  color,
-  value,
-  label,
-}: {
-  colors: ProfileColors;
-  type: 'protein' | 'carbs' | 'fat';
-  color: string;
-  value: string;
-  label: string;
-}) {
-  return (
-    <View style={styles.macroItem}>
-      {type === 'protein' ? (
-        <MaterialCommunityIcons name="food-drumstick-outline" size={18} color={color} />
-      ) : type === 'carbs' ? (
-        <MaterialCommunityIcons name="barley" size={18} color={color} />
-      ) : (
-        <Ionicons name="water-outline" size={18} color={color} />
-      )}
-      <View>
-        <Text style={[styles.macroValue, { color: colors.text }]}>{value}</Text>
-        <Text style={[styles.macroLabel, { color: colors.muted }]}>{label}</Text>
-      </View>
-    </View>
-  );
-}
-
-function ListRow({
-  colors,
-  icon,
-  title,
-  subtitle,
-  badge,
-  last,
-  onPress,
-}: {
-  colors: ProfileColors;
-  icon: keyof typeof Ionicons.glyphMap;
-  title: string;
-  subtitle?: string;
-  badge?: string;
-  last?: boolean;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable
-      style={[styles.listRow, { borderBottomColor: colors.border }, last && styles.listRowLast]}
-      onPress={onPress}
-      accessibilityRole="button"
-    >
-      <View style={[styles.listIcon, { backgroundColor: colors.cardSoft }]}>
-        <Ionicons name={icon} size={17} color={colors.text} />
-      </View>
-      <View style={styles.listTextWrap}>
-        <Text style={[styles.listTitle, { color: colors.text }]}>{title}</Text>
-        {subtitle ? <Text style={[styles.listSubtitle, { color: colors.muted }]}>{subtitle}</Text> : null}
-      </View>
-      {badge ? <Text style={[styles.planBadge, { color: colors.accent }]}>{badge}</Text> : null}
-      <Ionicons name="chevron-forward" size={18} color={colors.faint} />
-    </Pressable>
-  );
-}
-
-const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: COLORS.background,
-  },
-  scrollContent: {
-    paddingHorizontal: 16,
-    gap: 14,
-  },
-  centerState: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 24,
-  },
-  errorTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: COLORS.text,
-    marginBottom: 8,
-    textAlign: 'center',
-  },
-  errorText: {
-    fontSize: 14,
-    color: COLORS.muted,
-    textAlign: 'center',
-    marginBottom: 18,
-  },
-  retryButton: {
-    backgroundColor: COLORS.accent,
-    borderRadius: 12,
-    paddingHorizontal: 18,
-    paddingVertical: 11,
-  },
-  retryText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 2,
-  },
-  title: {
-    fontSize: 28,
-    lineHeight: 32,
-    fontWeight: '900',
-    color: COLORS.text,
-  },
-  subtitle: {
-    marginTop: 2,
-    fontSize: 13,
-    color: COLORS.muted,
-  },
-  subtitleAccent: {
-    color: COLORS.accent,
-    fontWeight: '700',
-  },
-  settingsButton: {
-    width: 46,
-    height: 46,
-    borderRadius: 13,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: COLORS.surface,
-    shadowColor: COLORS.shadow,
-    shadowOpacity: 0.45,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 4,
-  },
-  userCard: {
-    backgroundColor: COLORS.surface,
-    borderRadius: 12,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    shadowColor: COLORS.shadow,
-    shadowOpacity: 0.35,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 3,
-  },
-  userTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 18,
-  },
-  avatarWrap: {
-    width: 96,
-    height: 96,
-  },
-  avatar: {
-    width: 96,
-    height: 96,
-    borderRadius: 48,
-    borderWidth: 3,
-    borderColor: '#FFFFFF',
-    backgroundColor: COLORS.cardSoft,
-  },
-  avatarFallback: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarInitials: {
-    fontSize: 28,
-    fontWeight: '900',
-    color: COLORS.accent,
-  },
-  cameraButton: {
-    position: 'absolute',
-    right: -1,
-    bottom: 6,
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: COLORS.accent,
-    borderWidth: 3,
-    borderColor: COLORS.surface,
-  },
-  identityBlock: {
-    flex: 1,
-    minWidth: 0,
-  },
-  nameText: {
-    fontSize: 24,
-    lineHeight: 29,
-    fontWeight: '900',
-    color: COLORS.text,
-  },
-  usernameText: {
-    marginTop: 3,
-    fontSize: 13,
-    color: COLORS.muted,
-  },
-  motivationChip: {
-    marginTop: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'flex-start',
-    gap: 7,
-    maxWidth: '100%',
-  },
-  motivationText: {
-    flexShrink: 1,
-    fontSize: 12,
-    color: COLORS.muted,
-  },
-  statsRow: {
-    flexDirection: 'row',
-    gap: 9,
-    marginTop: 18,
-  },
-  statChip: {
-    flex: 1,
-    minHeight: 62,
-    borderRadius: 8,
-    backgroundColor: COLORS.cardSoft,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingHorizontal: 8,
-  },
-  statValue: {
-    fontSize: 13,
-    fontWeight: '900',
-    color: COLORS.text,
-    textAlign: 'center',
-  },
-  statLabel: {
-    marginTop: 2,
-    fontSize: 11,
-    color: COLORS.muted,
-    textAlign: 'center',
-  },
-  sectionCard: {
-    backgroundColor: COLORS.surface,
-    borderRadius: 12,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  listCard: {
-    backgroundColor: COLORS.surface,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingTop: 14,
-    paddingBottom: 10,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  sectionHeader: {
-    minHeight: 27,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 10,
-  },
-  sectionTitleWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 9,
-  },
-  sectionTitle: {
-    fontSize: 15,
-    fontWeight: '900',
-    color: COLORS.text,
-  },
-  sectionAction: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-  },
-  sectionActionText: {
-    fontSize: 12,
-    fontWeight: '800',
-    color: COLORS.accent,
-  },
-  planInner: {
-    overflow: 'hidden',
-    borderRadius: 8,
-    backgroundColor: COLORS.cardBlue,
-  },
-  planMainRow: {
-    minHeight: 98,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-  },
-  goalBlock: {
-    flex: 1,
-    paddingRight: 12,
-  },
-  smallLabel: {
-    fontSize: 12,
-    color: COLORS.muted,
-    marginBottom: 7,
-  },
-  goalText: {
-    fontSize: 21,
-    lineHeight: 25,
-    fontWeight: '900',
-    color: COLORS.text,
-  },
-  planDivider: {
-    width: 1,
-    alignSelf: 'stretch',
-    marginVertical: 18,
-    backgroundColor: '#D8EEF9',
-  },
-  kcalBlock: {
-    width: 126,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  kcalText: {
-    fontSize: 38,
-    lineHeight: 42,
-    fontWeight: '900',
-    color: COLORS.accent,
-  },
-  kcalLabel: {
-    marginTop: 2,
-    fontSize: 12,
-    color: COLORS.muted,
-  },
-  macroRow: {
-    minHeight: 61,
-    borderTopWidth: 1,
-    borderTopColor: '#D8EEF9',
-    flexDirection: 'row',
-  },
-  macroItem: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 7,
-    paddingHorizontal: 6,
-  },
-  macroValue: {
-    fontSize: 13,
-    fontWeight: '900',
-    color: COLORS.text,
-  },
-  macroLabel: {
-    marginTop: 1,
-    fontSize: 10,
-    color: COLORS.muted,
-  },
-  listRow: {
-    minHeight: 64,
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: COLORS.border,
-    gap: 12,
-  },
-  listRowLast: {
-    borderBottomWidth: 0,
-  },
-  listIcon: {
-    width: 30,
-    height: 30,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: COLORS.cardSoft,
-  },
-  listTextWrap: {
-    flex: 1,
-    minWidth: 0,
-  },
-  listTitle: {
-    fontSize: 14,
-    fontWeight: '900',
-    color: COLORS.text,
-  },
-  listSubtitle: {
-    marginTop: 3,
-    fontSize: 11,
-    color: COLORS.muted,
-  },
-  planBadge: {
-    fontSize: 12,
-    fontWeight: '900',
-    color: COLORS.accent,
-  },
-  signOutButton: {
-    marginTop: 12,
-    height: 48,
-    borderRadius: 9,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    backgroundColor: COLORS.dangerBg,
-  },
-  signOutText: {
-    fontSize: 14,
-    fontWeight: '900',
-    color: COLORS.danger,
-  },
-  themeToggleWrap: {
-    alignSelf: 'center',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-    marginTop: 4,
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-  },
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(15, 23, 42, 0.46)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 22,
-  },
-  modalCard: {
-    width: '100%',
-    borderRadius: 16,
-    backgroundColor: COLORS.surface,
-    padding: 18,
-  },
-  modalTitle: {
-    fontSize: 19,
-    fontWeight: '900',
-    color: COLORS.text,
-    marginBottom: 8,
-  },
-  modalText: {
-    fontSize: 14,
-    lineHeight: 20,
-    color: COLORS.muted,
-    marginBottom: 18,
-  },
-  modalActions: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  modalGhost: {
-    flex: 1,
-    height: 44,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-  modalGhostText: {
-    fontSize: 14,
-    fontWeight: '800',
-    color: COLORS.text,
-  },
-  modalPrimary: {
-    flex: 1,
-    height: 44,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: COLORS.accent,
-  },
-  modalDanger: {
-    backgroundColor: COLORS.danger,
-  },
-  modalPrimaryText: {
-    fontSize: 14,
-    fontWeight: '900',
-    color: '#FFFFFF',
-  },
-});

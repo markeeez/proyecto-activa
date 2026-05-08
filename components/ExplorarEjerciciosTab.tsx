@@ -34,6 +34,9 @@ import type { Exercise } from '@/types/database.types';
 
 export type ExplorarEjerciciosTabProps = {
   userId?: string | null;
+  initialModoGeneral?: ModoListaEjercicios;
+  detailPath?: '/(tabs)/(entrenamiento)/consulta-ejercicio' | '/(tabs)/(perfil)/consulta-ejercicio';
+  emptyMessage?: string;
 };
 
 type FiltroModalTipo = 'general' | 'musculo' | 'equipamiento';
@@ -310,7 +313,12 @@ function estiloNivelEjercicio(
   return { label, color: c.textSecondary, dot: c.textMuted };
 }
 
-export function ExplorarEjerciciosTab({ userId: userIdProp }: ExplorarEjerciciosTabProps) {
+export function ExplorarEjerciciosTab({
+  userId: userIdProp,
+  initialModoGeneral = 'general',
+  detailPath = '/(tabs)/(entrenamiento)/consulta-ejercicio',
+  emptyMessage = 'Sin resultados en el catálogo local. Prueba otro término o quita filtros.',
+}: ExplorarEjerciciosTabProps) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { height: screenHeight } = useWindowDimensions();
@@ -321,7 +329,7 @@ export function ExplorarEjerciciosTab({ userId: userIdProp }: ExplorarEjercicios
 
   const [texto, setTexto] = useState('');
   const [debounced, setDebounced] = useState('');
-  const [modoGeneral, setModoGeneral] = useState<ModoListaEjercicios>('general');
+  const [modoGeneral, setModoGeneral] = useState<ModoListaEjercicios>(initialModoGeneral);
   const [musculo, setMusculo] = useState<string | null>(null);
   const [equipamiento, setEquipamiento] = useState<string | null>(null);
   const [lista, setLista] = useState<Exercise[]>([]);
@@ -536,9 +544,7 @@ export function ExplorarEjerciciosTab({ userId: userIdProp }: ExplorarEjercicios
           keyboardShouldPersistTaps="handled"
           ListEmptyComponent={
             <View style={styles.empty}>
-              <Text style={styles.emptyTxt}>
-                Sin resultados en el catálogo local. Prueba otro término o quita filtros.
-              </Text>
+              <Text style={styles.emptyTxt}>{emptyMessage}</Text>
             </View>
           }
           renderItem={({ item }) => {
@@ -567,7 +573,7 @@ export function ExplorarEjerciciosTab({ userId: userIdProp }: ExplorarEjercicios
                   style={styles.itemMain}
                   onPress={() =>
                     router.push({
-                      pathname: '/(tabs)/(entrenamiento)/consulta-ejercicio',
+                      pathname: detailPath,
                       params: { id: item.id },
                     })
                   }

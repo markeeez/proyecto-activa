@@ -4,7 +4,7 @@ import { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { PerfilEjerciciosTab } from '@/components/PerfilEjerciciosTab';
+import { ExplorarEjerciciosTab } from '@/components/ExplorarEjerciciosTab';
 import { useTheme } from '@/hooks/useTheme';
 
 export default function PerfilEjerciciosScreen() {
@@ -49,7 +49,11 @@ export default function PerfilEjerciciosScreen() {
         <Text style={styles.headerTitle}>Mis Ejercicios</Text>
         <View style={styles.headerSide} />
       </View>
-      <PerfilEjerciciosTab />
+      <ExplorarEjerciciosTab
+        initialModoGeneral="creados"
+        detailPath="/(tabs)/(perfil)/consulta-ejercicio"
+        emptyMessage="No tienes ejercicios en este filtro."
+      />
     </View>
   );
 }
