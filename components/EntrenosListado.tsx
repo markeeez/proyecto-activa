@@ -2,12 +2,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, FlatList, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, FlatList, Modal, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 
 import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from '@/hooks/useTheme';
 import { entrenamientoService, type EntrenoResumen } from '@/services/entrenamiento.service';
-import { OpcionesMenuModal } from '@/components/entrenamiento/OpcionesMenuModal';
 
 const PAGE_SIZE = 15;
 
@@ -24,9 +23,11 @@ function formatDuracion(horaInicio: string | null, horaFin: string | null): stri
   const finMs = new Date(horaFin).getTime();
   if (Number.isNaN(inicioMs) || Number.isNaN(finMs) || finMs <= inicioMs) return placeholder;
   const duracionMs = finMs - inicioMs;
-  if (duracionMs < 60000) return '';
-  const mins = Math.floor(duracionMs / 60000);
-  if (mins < 60) return `${mins}min`;
+  const totalSegundos = Math.max(1, Math.round(duracionMs / 1000));
+  if (totalSegundos < 60) return `${totalSegundos}s`;
+  const mins = Math.floor(totalSegundos / 60);
+  const segundos = totalSegundos % 60;
+  if (mins < 60) return segundos === 0 ? `${mins}min` : `${mins}min ${segundos}s`;
   const h = Math.floor(mins / 60);
   const rem = mins % 60;
   return rem === 0 ? `${h}h` : `${h}h ${rem}min`;
@@ -40,6 +41,7 @@ function formatVolumen(volumenKg: number): string {
 export function EntrenosListado() {
   const { user } = useAuth();
   const { c, f, ts, s, r } = useTheme();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const [entrenos, setEntrenos] = useState<EntrenoResumen[]>([]);
   const [pagina, setPagina] = useState(0);
   const [cargandoInicial, setCargandoInicial] = useState(true);
@@ -47,6 +49,7 @@ export function EntrenosListado() {
   const [hayMas, setHayMas] = useState(true);
   const [expandidos, setExpandidos] = useState<Record<string, boolean>>({});
   const [menuEntreno, setMenuEntreno] = useState<EntrenoResumen | null>(null);
+  const [menuAnchor, setMenuAnchor] = useState({ x: 0, y: 0 });
   const [confirmEntreno, setConfirmEntreno] = useState<EntrenoResumen | null>(null);
   const [eliminandoId, setEliminandoId] = useState<string | null>(null);
 
@@ -108,6 +111,52 @@ export function EntrenosListado() {
         btnGhostTxt: { ...ts.bodySm, fontFamily: f.sansMedium, color: c.textDisplay },
         btnDanger: { flex: 1, borderWidth: 1, borderColor: c.danger, borderRadius: r.pill, alignItems: 'center', justifyContent: 'center', paddingVertical: s.sm },
         btnDangerTxt: { ...ts.bodySm, fontFamily: f.sansMedium, color: c.danger },
+        menuLayer: {
+          ...StyleSheet.absoluteFillObject,
+          zIndex: 40,
+        },
+        menuDismiss: {
+          ...StyleSheet.absoluteFillObject,
+          backgroundColor: 'transparent',
+        },
+        menuPopover: {
+          position: 'absolute',
+          width: 190,
+          borderWidth: 1,
+          borderColor: c.borderVisible,
+          borderRadius: r.md,
+          backgroundColor: c.surfaceElevated,
+          paddingVertical: s.xs,
+          paddingHorizontal: s.sm,
+          zIndex: 41,
+        },
+        menuTitle: {
+          fontSize: 12,
+          lineHeight: 15,
+          fontFamily: f.sansBold,
+          color: c.textDisplay,
+          paddingHorizontal: s.xs,
+          paddingVertical: s.xs,
+        },
+        menuDivider: {
+          height: StyleSheet.hairlineWidth,
+          backgroundColor: c.borderVisible,
+          marginVertical: 2,
+        },
+        menuOption: {
+          minHeight: 34,
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: s.xs,
+          borderRadius: r.sm,
+          paddingHorizontal: s.xs,
+        },
+        menuOptionDanger: {
+          fontSize: 12,
+          lineHeight: 15,
+          fontFamily: f.sansMedium,
+          color: c.danger,
+        },
       }),
     [c, f, ts, s, r],
   );
@@ -221,8 +270,19 @@ export function EntrenosListado() {
                     <Text style={styles.nombre}>{title}</Text>
                   </Pressable>
                 </View>
-                <Pressable style={styles.dotsBtn} onPress={() => setMenuEntreno(item)} accessibilityRole="button">
-                  <Ionicons name="ellipsis-horizontal" size={22} color={c.textMuted} />
+                <Pressable
+                  style={styles.dotsBtn}
+                  onPress={(event) => {
+                    setMenuAnchor({
+                      x: event.nativeEvent.pageX,
+                      y: event.nativeEvent.pageY,
+                    });
+                    setMenuEntreno(item);
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Abrir menú de entreno"
+                >
+                  <Ionicons name="ellipsis-vertical" size={22} color={c.textMuted} />
                 </Pressable>
               </View>
               <View style={styles.statsRow}>
@@ -261,20 +321,36 @@ export function EntrenosListado() {
         }}
       />
 
-      <OpcionesMenuModal
-        visible={menuEntreno != null}
-        onClose={() => setMenuEntreno(null)}
-        options={[
-          {
-            key: 'delete-workout',
-            label: 'Eliminar entreno',
-            destructive: true,
-            onPress: () => {
-              if (menuEntreno) setConfirmEntreno(menuEntreno);
-            },
-          },
-        ]}
-      />
+      {menuEntreno && (
+        <View style={styles.menuLayer} pointerEvents="box-none">
+          <Pressable style={styles.menuDismiss} onPress={() => setMenuEntreno(null)} />
+          <View
+            style={[
+              styles.menuPopover,
+              {
+                top: Math.min(menuAnchor.y + 10, windowHeight - 96),
+                left: Math.min(Math.max(menuAnchor.x - 176, s.md), windowWidth - 206),
+              },
+            ]}
+          >
+            <Text style={styles.menuTitle} numberOfLines={1}>
+              {menuEntreno.nombre?.trim() || menuEntreno.rutinaNombre?.trim() || 'Entreno'}
+            </Text>
+            <View style={styles.menuDivider} />
+            <Pressable
+              style={styles.menuOption}
+              onPress={() => {
+                setConfirmEntreno(menuEntreno);
+                setMenuEntreno(null);
+              }}
+              accessibilityRole="button"
+            >
+              <Ionicons name="trash-outline" size={17} color={c.danger} />
+              <Text style={styles.menuOptionDanger}>Eliminar entreno</Text>
+            </Pressable>
+          </View>
+        </View>
+      )}
 
       <Modal visible={confirmEntreno != null} transparent animationType="fade" onRequestClose={() => setConfirmEntreno(null)}>
         <Pressable style={styles.overlay} onPress={() => setConfirmEntreno(null)}>

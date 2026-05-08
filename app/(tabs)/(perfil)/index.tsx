@@ -1000,26 +1000,6 @@ export default function PerfilIndex() {
     }
   };
 
-  const changePassword = () => {
-    if (!user?.email) return;
-    setModal({
-      visible: true,
-      title: 'Cambiar contraseña',
-      message: 'Te enviaremos un email para restablecer tu contraseña.',
-      confirmText: 'Enviar',
-      onConfirm: async () => {
-        const email = user.email?.trim().toLowerCase();
-        if (!email) return;
-        const { error: resetError } = await supabase.auth.resetPasswordForEmail(email);
-        if (resetError) {
-          showInfo('Error', resetError.message ?? 'No se pudo enviar el email.');
-        } else {
-          showInfo('Listo', 'Email de restablecimiento enviado.');
-        }
-      },
-    });
-  };
-
   const signOut = () => {
     setModal({
       visible: true,
@@ -1181,8 +1161,8 @@ export default function PerfilIndex() {
           {/* Cuenta */}
           <View style={styles.listCard}>
             <SectionHeader th={th} styles={styles} icon="person-outline" title="Cuenta" />
-            <ListRow styles={styles} th={th} icon="mail-outline"        title="Cambiar email"      onPress={() => router.push('/(tabs)/(perfil)/ajustes')} />
-            <ListRow styles={styles} th={th} icon="lock-closed-outline" title="Cambiar contraseña" onPress={changePassword} />
+            <ListRow styles={styles} th={th} icon="mail-outline"        title="Cambiar email"      onPress={() => router.push('/(tabs)/(perfil)/cambiar-email')} />
+            <ListRow styles={styles} th={th} icon="lock-closed-outline" title="Cambiar contraseña" onPress={() => router.push('/(tabs)/(perfil)/cambiar-contrasena')} />
             <ListRow styles={styles} th={th} icon="shield-checkmark-outline" title="Plan actual" badge={planBadge} last onPress={() => router.push('/(tabs)/(perfil)/plan')} />
 
             <Pressable style={styles.signOutButton} onPress={signOut} accessibilityRole="button">

@@ -23,6 +23,7 @@ export default function AuthLayout() {
         <Stack.Screen name="iniciar-sesion" />
         <Stack.Screen name="registrarse" />
         <Stack.Screen name="recuperar-contrasena" />
+        <Stack.Screen name="restablecer-contrasena" />
         <Stack.Screen name="confirmar-email" />
       </Stack>
     </>

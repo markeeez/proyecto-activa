@@ -43,6 +43,7 @@ export default function RecuperarContrasena() {
   const [email, setEmail] = useState('');
   const [cargando, setCargando] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [enviadoA, setEnviadoA] = useState<string | null>(null);
 
   const handleEnviarEnlace = async () => {
     const emailNormalizado = email.trim().toLowerCase();
@@ -54,15 +55,19 @@ export default function RecuperarContrasena() {
 
     setCargando(true);
     setError(null);
+    setEnviadoA(null);
 
     const { error: resetError } = await authService.recuperarContrasena(emailNormalizado);
 
     setCargando(false);
 
     if (resetError) {
-      setError(resetError.message);
+      const msg = resetError.message.toLowerCase();
+      setError(msg.includes('rate') || msg.includes('too many') ? 'No se pudo enviar el enlace. Inténtalo más tarde.' : 'No se pudo enviar el enlace. Revisa el email e inténtalo de nuevo.');
       return;
     }
+
+    setEnviadoA(emailNormalizado);
   };
 
   const handleContact = () => {
@@ -100,6 +105,7 @@ export default function RecuperarContrasena() {
                 onChangeText={(value) => {
                   setEmail(value);
                   if (error) setError(null);
+                  if (enviadoA) setEnviadoA(null);
                 }}
                 placeholder="tu@email.com"
                 placeholderTextColor={MUTED}
@@ -114,6 +120,18 @@ export default function RecuperarContrasena() {
             </View>
             {error != null && <Text style={st.errorTxt}>{error}</Text>}
           </View>
+
+          {enviadoA != null && (
+            <View style={st.successCard}>
+              <Ionicons name="checkmark-circle-outline" size={22} color={AUTH.successText} />
+              <View style={st.successTextBlock}>
+                <Text style={st.successTitle}>Revisa tu correo</Text>
+                <Text style={st.successText}>
+                  Si existe una cuenta asociada, recibirás un enlace para restablecer tu contraseña.
+                </Text>
+              </View>
+            </View>
+          )}
 
           <GlowButton borderRadius={12}>
             <TouchableOpacity
@@ -139,7 +157,7 @@ export default function RecuperarContrasena() {
             </View>
             <View style={st.infoTextBlock}>
               <Text style={st.infoTitle}>Enlace seguro y temporal</Text>
-              <Text style={st.infoText}>El enlace expirará en 15 minutos por tu seguridad.</Text>
+              <Text style={st.infoText}>El enlace es temporal y solo sirve para cambiar tu contraseña.</Text>
             </View>
           </View>
 
@@ -255,6 +273,33 @@ const st = StyleSheet.create({
     fontSize: 13,
     lineHeight: 17,
     color: AUTH.dangerText,
+  },
+  successCard: {
+    minHeight: 72,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: AUTH.success,
+    backgroundColor: AUTH.successBg,
+  },
+  successTextBlock: {
+    flex: 1,
+    gap: 3,
+  },
+  successTitle: {
+    fontSize: 14,
+    lineHeight: 18,
+    color: AUTH.successText,
+    fontWeight: '800',
+  },
+  successText: {
+    fontSize: 12,
+    lineHeight: 16,
+    color: AUTH.successText,
   },
   btnPrimary: {
     height: 56,

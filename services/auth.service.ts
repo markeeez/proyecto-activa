@@ -7,6 +7,8 @@
 
 import { supabase } from '@/lib/supabase';
 
+export const PASSWORD_RECOVERY_REDIRECT_TO = 'proyectoactiva://restablecer-contrasena';
+
 export const authService = {
   /**
    * Inicia sesión con email y contraseña.
@@ -45,8 +47,10 @@ export const authService = {
   /**
    * Envía el email de recuperación de contraseña.
    */
-  async recuperarContrasena(email: string) {
-    return supabase.auth.resetPasswordForEmail(email.trim().toLowerCase());
+  async recuperarContrasena(email: string, options?: { redirectTo?: string }) {
+    return supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
+      redirectTo: options?.redirectTo ?? PASSWORD_RECOVERY_REDIRECT_TO,
+    });
   },
 
   /**

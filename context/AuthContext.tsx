@@ -1,5 +1,7 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { Session, User } from '@supabase/supabase-js';
+import { router } from 'expo-router';
+import { Linking } from 'react-native';
 import { supabase } from '@/lib/supabase';
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
@@ -19,6 +21,21 @@ const AuthContext = createContext<AuthContextValue>({
   cargando: true,
   cerrarSesion: async () => {},
 });
+
+function extraerRecoveryParams(url: string): { accessToken: string | null; refreshToken: string | null; type: string | null } {
+  const params = new URLSearchParams();
+  const query = url.split('?')[1]?.split('#')[0] ?? '';
+  const hash = url.split('#')[1] ?? '';
+
+  for (const [key, value] of new URLSearchParams(query)) params.set(key, value);
+  for (const [key, value] of new URLSearchParams(hash)) params.set(key, value);
+
+  return {
+    accessToken: params.get('access_token'),
+    refreshToken: params.get('refresh_token'),
+    type: params.get('type'),
+  };
+}
 
 // ─── Provider ─────────────────────────────────────────────────────────────────
 
@@ -42,6 +59,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     );
 
     return () => subscription.unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    const handleRecoveryUrl = async (url: string | null) => {
+      if (!url || !url.includes('restablecer-contrasena')) return;
+
+      const { accessToken, refreshToken, type } = extraerRecoveryParams(url);
+      if (type !== 'recovery' || !accessToken || !refreshToken) {
+        router.replace('/(auth)/restablecer-contrasena?error=invalid');
+        return;
+      }
+
+      const { error } = await supabase.auth.setSession({
+        access_token: accessToken,
+        refresh_token: refreshToken,
+      });
+
+      router.replace(error ? '/(auth)/restablecer-contrasena?error=invalid' : '/(auth)/restablecer-contrasena');
+    };
+
+    void Linking.getInitialURL().then(handleRecoveryUrl);
+    const subscription = Linking.addEventListener('url', ({ url }) => {
+      void handleRecoveryUrl(url);
+    });
+
+    return () => subscription.remove();
   }, []);
 
   const cerrarSesion = async () => {
