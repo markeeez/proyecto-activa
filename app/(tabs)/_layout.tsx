@@ -14,10 +14,13 @@
  */
 
 import { View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import { Tabs, usePathname } from 'expo-router';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 
+import FoodNavIcon from '@/assets/images/food_nav_icon_v2.svg';
+import HomeNavIcon from '@/assets/images/home_nav_icon.svg';
+import MoreNavIcon from '@/assets/images/more_nav_icon.svg';
+import WorkoutNavIcon from '@/assets/images/workout_nav_dumbbell.svg';
 import { BarraEntrenoMinimizado } from '@/components/entrenamiento/BarraEntrenoMinimizado';
 import { useEntreno } from '@/context/EntrenoContext';
 
@@ -49,8 +52,8 @@ export default function TabsLayout() {
         options={{
           title: 'Inicio',
           tabBarLabel: 'Inicio',
-          tabBarIcon: ({ color, focused }) => (
-            <Ionicons name={focused ? 'home' : 'home-outline'} size={24} color={color} />
+          tabBarIcon: ({ color, size }) => (
+            <HomeNavIcon width={size} height={size} color={color} />
           ),
         }}
       />
@@ -62,8 +65,8 @@ export default function TabsLayout() {
         options={{
           title: 'Alimentación',
           tabBarLabel: 'Alimentación',
-          tabBarIcon: ({ color, focused }) => (
-            <Ionicons name={focused ? 'nutrition' : 'nutrition-outline'} size={24} color={color} />
+          tabBarIcon: ({ color, size }) => (
+            <FoodNavIcon width={size} height={size} color={color} />
           ),
         }}
       />
@@ -73,9 +76,7 @@ export default function TabsLayout() {
         options={{
           title: 'IA',
           tabBarLabel: 'IA',
-          tabBarIcon: ({ color, focused }) => (
-            <Ionicons name={focused ? 'sparkles' : 'sparkles-outline'} size={24} color={color} />
-          ),
+          tabBarIcon: () => null,
         }}
       />
       {/* Posición 3 — Entreno */}
@@ -84,8 +85,8 @@ export default function TabsLayout() {
         options={{
           title: 'Entreno',
           tabBarLabel: 'Entreno',
-          tabBarIcon: ({ color, focused }) => (
-            <Ionicons name={focused ? 'barbell' : 'barbell-outline'} size={24} color={color} />
+          tabBarIcon: ({ color, size }) => (
+            <WorkoutNavIcon width={size} height={size} color={color} />
           ),
         }}
       />
@@ -95,8 +96,8 @@ export default function TabsLayout() {
         options={{
           title: 'Más',
           tabBarLabel: 'Más',
-          tabBarIcon: ({ color, focused }) => (
-            <Ionicons name={focused ? 'ellipsis-horizontal-circle' : 'ellipsis-horizontal-circle-outline'} size={24} color={color} />
+          tabBarIcon: ({ color, size }) => (
+            <MoreNavIcon width={size} height={size} color={color} />
           ),
         }}
       />

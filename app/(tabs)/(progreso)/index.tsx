@@ -5,27 +5,30 @@ import { router, useFocusEffect } from 'expo-router';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Modal,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
+  useWindowDimensions,
+  type GestureResponderEvent,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Bar, CartesianChart, Line } from 'victory-native';
 
+import ProgressNavIcon from '@/assets/images/progress_nav_icon.svg';
 import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from '@/hooks/useTheme';
 import {
   agregarDiasIso,
   fechaHoyIsoLocal,
-  fechaIsoDesdeDate,
   parseFechaLocal,
 } from '@/lib/fechaNutricion';
 import { supabase } from '@/lib/supabase';
 import {
   progresoService,
+  type NutricionDia,
   type NutricionSemana,
   type PlanActual,
   type ProgresoPeso,
@@ -49,15 +52,6 @@ const MESES_CORTO = [
   'dic',
 ] as const;
 
-function inicioSemanaLunesIso(fechaIso: string): string {
-  const base = parseFechaLocal(fechaIso);
-  const day = base.getDay();
-  const mondayOffset = day === 0 ? -6 : 1 - day;
-  const monday = new Date(base);
-  monday.setDate(base.getDate() + mondayOffset);
-  return fechaIsoDesdeDate(monday);
-}
-
 function formatoEjeSemana(iso: string): string {
   const d = parseFechaLocal(iso);
   return `${MESES_CORTO[d.getMonth()]} ${d.getDate()}`;
@@ -66,6 +60,11 @@ function formatoEjeSemana(iso: string): string {
 function formatoFechaLista(iso: string): string {
   const d = parseFechaLocal(iso);
   return `${d.getDate()} ${MESES_CORTO[d.getMonth()]}`;
+}
+
+function formatoEjeDia(iso: string): string {
+  const d = parseFechaLocal(iso);
+  return `${d.getDate()}/${d.getMonth() + 1}`;
 }
 
 function inicialesDeUsuario(username: string | undefined, email: string | undefined): string {
@@ -77,16 +76,17 @@ function inicialesDeUsuario(username: string | undefined, email: string | undefi
   return 'AC';
 }
 
-type RangoFiltro = '3m' | '1y' | 'all';
+type RangoFiltro = '1w' | '3m' | '1y';
 type MetricaNut = 'kcal' | 'carbos' | 'proteinas' | 'grasas';
+type ChipNut = { key: MetricaNut; label: string; icon?: keyof typeof Ionicons.glyphMap };
 
 const FILTRO_LABELS: Record<RangoFiltro, string> = {
   '3m': 'Últimos 3 meses',
   '1y': 'Último año',
-  all: 'Todo el tiempo',
+  '1w': 'Últimos 7 días',
 };
 
-function valorMetrica(row: NutricionSemana, m: MetricaNut): number {
+function valorMetrica(row: NutricionSemana | NutricionDia, m: MetricaNut): number {
   switch (m) {
     case 'kcal':
       return row.kcal;
@@ -151,7 +151,7 @@ function textoTituloSemanaActual(metrica: MetricaNut, valor: number): string {
 }
 
 /** Barras nutrición: x = índice 0..n-1 (único), semanaInicio = lunes ISO para etiqueta. */
-type FilaNutChart = { x: number; y: number; semanaInicio: string };
+type FilaNutChart = { x: number; y: number; label: string };
 
 /**
  * PERF-06: Muestreo uniforme de series temporales.
@@ -203,12 +203,12 @@ const GraficoBarrasNutricion = memo(function GraficoBarrasNutricion({
     const idx = Math.min(n - 1, Math.max(0, Math.round(Number(raw))));
     const ultima = idx === n - 1;
     if (idx % step !== 0 && !ultima) return '';
-    return formatoEjeSemana(datos[idx]!.semanaInicio);
+    return datos[idx]!.label;
   };
 
   return (
     <View style={stylesChart.wrap}>
-      <CartesianChart<{ x: number; y: number; semanaInicio: string }, 'x', 'y'>
+      <CartesianChart<{ x: number; y: number; label: string }, 'x', 'y'>
         data={datos}
         xKey="x"
         yKeys={['y']}
@@ -309,19 +309,21 @@ export default function ProgresoIndex() {
   const { c, f, ts, s, r, isDark } = useTheme();
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
 
-  const [fechaRegistro, setFechaRegistro] = useState<string>(fechaHoyIsoLocal());
   const [perfilUsername, setPerfilUsername] = useState<string | null>(null);
   const [diasRegistrados, setDiasRegistrados] = useState(0);
   const [numEntrenos, setNumEntrenos] = useState(0);
 
-  const [rangoNutricion, setRangoNutricion] = useState<RangoFiltro>('3m');
-  const [rangoPeso, setRangoPeso] = useState<RangoFiltro>('3m');
+  const [rangoNutricion, setRangoNutricion] = useState<RangoFiltro>('1w');
+  const [rangoPeso, setRangoPeso] = useState<RangoFiltro>('1w');
   const [menuNutAbierto, setMenuNutAbierto] = useState(false);
   const [menuPesoAbierto, setMenuPesoAbierto] = useState(false);
+  const [menuAnchor, setMenuAnchor] = useState({ x: 0, y: 0 });
 
   const [metricaNut, setMetricaNut] = useState<MetricaNut>('kcal');
   const [nutricionSemanal, setNutricionSemanal] = useState<NutricionSemana[]>([]);
+  const [nutricionDiaria, setNutricionDiaria] = useState<NutricionDia[]>([]);
   const [cargandoNut, setCargandoNut] = useState(false);
 
   const [historialPeso, setHistorialPeso] = useState<RegistroPeso[]>([]);
@@ -341,27 +343,27 @@ export default function ProgresoIndex() {
 
   /** Rango nutrición: 90 días / 365 días / desde alta (no el mismo criterio que el gráfico de peso). */
   const fechaIniNut = useMemo(() => {
-    if (rangoNutricion === 'all') return fechaRegistro;
+    if (rangoNutricion === '1w') return agregarDiasIso(hoyIso, -6);
     if (rangoNutricion === '3m') return agregarDiasIso(hoyIso, -90);
     return agregarDiasIso(hoyIso, -365);
-  }, [rangoNutricion, fechaRegistro, hoyIso]);
+  }, [rangoNutricion, hoyIso]);
   const fechaIniPeso = useMemo(() => {
-    if (rangoPeso === 'all') return fechaRegistro;
+    if (rangoPeso === '1w') return agregarDiasIso(hoyIso, -6);
     if (rangoPeso === '3m') return agregarDiasIso(hoyIso, -90);
     return agregarDiasIso(hoyIso, -365);
-  }, [rangoPeso, fechaRegistro, hoyIso]);
+  }, [rangoPeso, hoyIso]);
 
   const styles = useMemo(() => makeStyles(c, f, ts, s, r, isDark), [c, f, ts, s, r, isDark]);
 
-  const displayName = perfilUsername ?? user?.email?.split('@')[0] ?? 'Usuario';
+  const displayName =
+    (perfilUsername?.trim() || null) ??
+    ((user?.user_metadata?.full_name as string | undefined)?.trim() || null) ??
+    ((user?.user_metadata?.name as string | undefined)?.trim() || null) ??
+    user?.email?.split('@')[0] ??
+    'Usuario';
   const avatarUrl =
     (user?.user_metadata?.avatar_url as string | undefined) ??
     (user?.user_metadata?.picture as string | undefined);
-
-  useEffect(() => {
-    if (!user?.id) return;
-    void progresoService.obtenerFechaRegistro(user.id).then(setFechaRegistro);
-  }, [user?.id]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -374,7 +376,8 @@ export default function ProgresoIndex() {
           progresoService.obtenerContadorEntrenos(user.id),
         ]);
         if (cancel) return;
-        setPerfilUsername((perfilRow?.username as string | undefined) ?? null);
+        const rawUsername = (perfilRow?.username as string | undefined)?.trim() ?? '';
+        setPerfilUsername(rawUsername || null);
         setDiasRegistrados(d);
         setNumEntrenos(e);
       } catch {
@@ -392,8 +395,19 @@ export default function ProgresoIndex() {
     void (async () => {
       setCargandoNut(true);
       try {
-        const data = await progresoService.obtenerNutricionSemanal(user.id, fechaIniNut, hoyIso);
-        if (!cancel) setNutricionSemanal(data);
+        if (rangoNutricion === '1w') {
+          const data = await progresoService.obtenerNutricionDiaria(user.id, fechaIniNut, hoyIso);
+          if (!cancel) {
+            setNutricionDiaria(data);
+            setNutricionSemanal([]);
+          }
+        } else {
+          const data = await progresoService.obtenerNutricionSemanal(user.id, fechaIniNut, hoyIso);
+          if (!cancel) {
+            setNutricionSemanal(data);
+            setNutricionDiaria([]);
+          }
+        }
       } finally {
         if (!cancel) setCargandoNut(false);
       }
@@ -401,7 +415,7 @@ export default function ProgresoIndex() {
     return () => {
       cancel = true;
     };
-  }, [user?.id, fechaIniNut, hoyIso]);
+  }, [user?.id, fechaIniNut, hoyIso, rangoNutricion]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -431,7 +445,7 @@ export default function ProgresoIndex() {
         .eq('user_id', user.id)
         .not('peso_kg', 'is', null)
         .order('fecha', { ascending: false })
-        .limit(4),
+        .limit(7),
     ]);
     const raw = hoyRow?.peso_kg;
     const hoyVal = raw != null && !Number.isNaN(Number(raw)) ? Number(raw) : null;
@@ -486,30 +500,35 @@ export default function ProgresoIndex() {
     return { prot: prot_pct, carb: carb_pct, gras: gras_pct };
   }, [planActual]);
 
-  const semanaActualIso = inicioSemanaLunesIso(hoyIso);
-  const filaSemanaActual = nutricionSemanal.find((n) => n.semanaInicio === semanaActualIso);
-  const valorSemanaActual = filaSemanaActual
-    ? valorMetrica(filaSemanaActual, metricaNut)
-    : 0;
-  const tituloMetricaSemana = textoTituloSemanaActual(metricaNut, valorSemanaActual);
+  const datosNutricionActuales = rangoNutricion === '1w' ? nutricionDiaria : nutricionSemanal;
+  const valorPromedioNutricion = useMemo(() => {
+    const valores = datosNutricionActuales.map((row) => valorMetrica(row, metricaNut)).filter((v) => v > 0);
+    if (valores.length === 0) return 0;
+    return valores.reduce((acc, value) => acc + value, 0) / valores.length;
+  }, [datosNutricionActuales, metricaNut]);
 
   const datosBarNut: FilaNutChart[] = useMemo(() => {
     // PERF-06: máximo 52 barras (1 año de semanas). Muestreo uniforme si hay más.
-    const filtered = nutricionSemanal
-      .filter((row) => valorMetrica(row, metricaNut) > 0);
-    const sampled = muestrear(filtered, 52);
+    const filtered =
+      rangoNutricion === '1w'
+        ? datosNutricionActuales
+        : datosNutricionActuales.filter((row) => valorMetrica(row, metricaNut) > 0);
+    const sampled = muestrear(filtered, rangoNutricion === '1w' ? 7 : 52);
     return sampled.map((row, i) => ({
       x: i,
       y: valorMetrica(row, metricaNut),
-      semanaInicio: row.semanaInicio,
+      label: 'fecha' in row ? formatoEjeDia(row.fecha) : formatoEjeSemana(row.semanaInicio),
     }));
-  }, [nutricionSemanal, metricaNut]);
+  }, [datosNutricionActuales, metricaNut, rangoNutricion]);
 
   const datosLineaPeso = useMemo(() => {
+    if (rangoPeso === '1w') {
+      return [...ultimosPesos].reverse().map((r) => ({ x: r.fecha, y: r.peso_kg }));
+    }
     // PERF-06: máximo 90 puntos. Muestreo uniforme si hay más (ej. "todo el tiempo").
     const sampled = muestrear(historialPeso, 90);
     return sampled.map((r) => ({ x: r.fecha, y: r.peso_kg }));
-  }, [historialPeso]);
+  }, [historialPeso, rangoPeso, ultimosPesos]);
 
   const numPesoIngresado = parseFloat(pesoTexto.replace(',', '.'));
   const pesoInvalido = pesoTexto.trim() === '' || Number.isNaN(numPesoIngresado);
@@ -529,11 +548,20 @@ export default function ProgresoIndex() {
     }
   };
 
-  const chipDefs: { key: MetricaNut; label: string }[] = [
-    { key: 'kcal', label: 'Kcal' },
-    { key: 'carbos', label: 'Carbohidratos' },
+  const abrirMenuFiltro = (event: GestureResponderEvent, tipo: 'nutricion' | 'peso') => {
+    setMenuAnchor({
+      x: event.nativeEvent.pageX,
+      y: event.nativeEvent.pageY,
+    });
+    setMenuNutAbierto(tipo === 'nutricion');
+    setMenuPesoAbierto(tipo === 'peso');
+  };
+
+  const chipDefs: ChipNut[] = [
+    { key: 'kcal', label: 'Kcal', icon: 'flame-outline' },
+    { key: 'carbos', label: 'Carbohidratos', icon: 'leaf-outline' },
     { key: 'proteinas', label: 'Proteína' },
-    { key: 'grasas', label: 'Grasas' },
+    { key: 'grasas', label: 'Grasas', icon: 'water-outline' },
   ];
 
   if (!user) {
@@ -546,7 +574,12 @@ export default function ProgresoIndex() {
 
   return (
     <View style={[styles.screen, { paddingTop: insets.top }]}>
-      <View style={styles.mainColumn}>
+      <ScrollView
+        style={styles.mainColumn}
+        contentContainerStyle={[styles.mainContent, { paddingBottom: insets.bottom + 20 }]}
+        showsVerticalScrollIndicator={false}
+        contentInsetAdjustmentBehavior="automatic"
+      >
         {/* —— Header perfil —— */}
         <View style={styles.headerBlock}>
           <View style={styles.headerRow}>
@@ -565,17 +598,27 @@ export default function ProgresoIndex() {
               </Text>
               <View style={styles.metricasRow}>
                 <View style={styles.metricaItem}>
+                  <Ionicons name="calendar-outline" size={12} color={c.textSecondary} />
                   <Text style={styles.metricaCaption}>
-                    <Text style={styles.metricaNum}>{diasRegistrados}</Text> Días registrados
+                    <Text style={styles.metricaNum}>{diasRegistrados}</Text> Registros
                   </Text>
                 </View>
                 <View style={styles.metricaItem}>
+                  <Ionicons name="barbell-outline" size={12} color={c.textSecondary} />
                   <Text style={styles.metricaCaption}>
                     <Text style={styles.metricaNum}>{numEntrenos}</Text> Entrenos
                   </Text>
                 </View>
               </View>
             </View>
+            <Pressable
+              onPress={() => router.push('/(tabs)/(progreso)/estadisticas-ejercicio')}
+              style={styles.headerAction}
+              accessibilityRole="button"
+              accessibilityLabel="Estadísticas de ejercicios"
+            >
+              <ProgressNavIcon width={22} height={22} color={c.primary} />
+            </Pressable>
           </View>
         </View>
 
@@ -603,13 +646,14 @@ export default function ProgresoIndex() {
         {tabPrincipal === 'datos' ? (
           <>
         {/* —— Nutrición semanal —— */}
-        <View style={[styles.section, styles.blockNutricion]}>
+        <View
+          style={[styles.section, styles.blockNutricion]}
+          accessibilityLabel={textoTituloSemanaActual(metricaNut, valorPromedioNutricion)}
+        >
           <View style={styles.rowTitleFiltro}>
-            <Text style={styles.tituloDestacadoNut} numberOfLines={2}>
-              {tituloMetricaSemana}
-            </Text>
+            <Text style={styles.tituloDestacadoNut} numberOfLines={1}>Consumo calórico</Text>
             <Pressable
-              onPress={() => setMenuNutAbierto(true)}
+              onPress={(event) => abrirMenuFiltro(event, 'nutricion')}
               style={styles.filtroPill}
               accessibilityRole="button"
               accessibilityLabel="Rango de tiempo nutrición"
@@ -617,6 +661,17 @@ export default function ProgresoIndex() {
               <Text style={styles.filtroPillText}>{FILTRO_LABELS[rangoNutricion]}</Text>
               <Ionicons name="chevron-down" size={16} color={c.textSecondary} />
             </Pressable>
+          </View>
+
+          <View style={styles.kcalSummaryRow}>
+            <View>
+              <Text style={styles.rangeEyebrow}>Últimos 7 días</Text>
+              <Text style={styles.kcalValue}>
+                {Math.round(valorPromedioNutricion).toLocaleString('es-ES')}{' '}
+                <Text style={styles.kcalUnit}>{metricaNut === 'kcal' ? 'kcal' : 'g'}</Text>
+              </Text>
+              <Text style={styles.kcalSub}>promedio diario</Text>
+            </View>
           </View>
 
           {cargandoNut ? (
@@ -635,7 +690,7 @@ export default function ProgresoIndex() {
           )}
 
           <View style={styles.chipsRow}>
-            {chipDefs.map(({ key, label }) => {
+            {chipDefs.map(({ key, label, icon }) => {
               const activo = metricaNut === key;
               return (
                 <Pressable
@@ -643,6 +698,11 @@ export default function ProgresoIndex() {
                   onPress={() => setMetricaNut(key)}
                   style={[styles.chip, activo ? styles.chipActivo : styles.chipOutline]}
                 >
+                  <Ionicons
+                    name={iconoMetricaNut(key, icon)}
+                    size={13}
+                    color={activo ? c.textOnPrimary : c.textSecondary}
+                  />
                   <Text style={[styles.chipText, activo ? styles.chipTextActivo : styles.chipTextOutline]}>
                     {label}
                   </Text>
@@ -664,18 +724,34 @@ export default function ProgresoIndex() {
 
         {/* —— Peso —— */}
         <View style={[styles.section, styles.blockPeso]}>
+          <View style={styles.rowTitleFiltro}>
+            <Text style={styles.tituloDestacadoNut} numberOfLines={1}>Peso corporal</Text>
+            <Pressable
+              onPress={(event) => abrirMenuFiltro(event, 'peso')}
+              style={styles.filtroPillPeso}
+              accessibilityRole="button"
+            >
+              <Text style={styles.filtroPillTextPeso}>Filtrar</Text>
+              <Ionicons name="chevron-down" size={14} color={c.textSecondary} />
+            </Pressable>
+          </View>
           <View style={styles.dosColumnas}>
             <View style={styles.colIzq}>
               <Text style={styles.labelHoy}>HOY</Text>
-              <TextInput
-                style={styles.inputPeso}
-                value={pesoTexto}
-                onChangeText={setPesoTexto}
-                placeholder="kg"
-                placeholderTextColor={c.textMuted}
-                keyboardType="decimal-pad"
-                editable={!guardandoPeso}
-              />
+              <View style={styles.pesoInputRow}>
+                <TextInput
+                  style={styles.inputPeso}
+                  value={pesoTexto}
+                  onChangeText={(value) => setPesoTexto(limpiarDecimalUnico(value))}
+                  placeholder="--"
+                  placeholderTextColor={c.textMuted}
+                  keyboardType="decimal-pad"
+                  editable={!guardandoPeso}
+                  selectTextOnFocus
+                />
+                <Text style={styles.pesoUnidad}>kg</Text>
+                <Ionicons name="create-outline" size={15} color={c.primary} />
+              </View>
               <Pressable
                 onPress={onGuardarPeso}
                 disabled={guardarPesoDeshabilitado}
@@ -687,18 +763,6 @@ export default function ProgresoIndex() {
                   <Text style={styles.btnGuardarText}>GUARDAR</Text>
                 )}
               </Pressable>
-              <View style={styles.listaPeso}>
-                {ultimosPesos.map((row, i) => (
-                  <Pressable
-                    key={`${row.fecha}-${i}`}
-                    onPress={() => router.push('./historial-peso')}
-                    style={styles.filaPeso}
-                  >
-                    <Text style={styles.filaPesoIzq}>{row.peso_kg} kg</Text>
-                    <Text style={styles.filaPesoDer}>{formatoFechaLista(row.fecha)}</Text>
-                  </Pressable>
-                ))}
-              </View>
             </View>
 
             <View style={styles.colDer}>
@@ -707,7 +771,7 @@ export default function ProgresoIndex() {
                   Evolución
                 </Text>
                 <Pressable
-                  onPress={() => setMenuPesoAbierto(true)}
+                  onPress={(event) => abrirMenuFiltro(event, 'peso')}
                   style={styles.filtroPillPeso}
                   accessibilityRole="button"
                 >
@@ -738,6 +802,19 @@ export default function ProgresoIndex() {
                 />
               )}
             </View>
+          </View>
+          <View style={styles.listaPeso}>
+            {ultimosPesos.map((row, i) => (
+              <View
+                key={`${row.fecha}-${i}`}
+                style={styles.filaPeso}
+              >
+                <Text style={styles.filaPesoIzq}>{row.peso_kg} kg</Text>
+                <View style={styles.filaPesoRight}>
+                  <Text style={styles.filaPesoDer}>{formatoFechaLista(row.fecha)}</Text>
+                </View>
+              </View>
+            ))}
           </View>
         </View>
           </>
@@ -864,51 +941,77 @@ export default function ProgresoIndex() {
             )}
           </View>
         )}
-      </View>
+      </ScrollView>
 
-      <Modal transparent visible={menuNutAbierto} animationType="fade" onRequestClose={() => setMenuNutAbierto(false)}>
-        <View style={styles.modalRoot}>
-          <Pressable style={styles.modalBackdropFill} onPress={() => setMenuNutAbierto(false)} />
-          <View style={styles.modalCenter} pointerEvents="box-none">
-            <View style={styles.modalSheet}>
-              {(['3m', '1y', 'all'] as RangoFiltro[]).map((k) => (
+      {menuNutAbierto ? (
+        <View style={styles.filterMenuLayer} pointerEvents="box-none">
+          <Pressable style={styles.filterMenuDismiss} onPress={() => setMenuNutAbierto(false)} />
+          <View
+            style={[
+              styles.filterMenuPopover,
+              {
+                top: Math.min(menuAnchor.y + 10, windowHeight - 176),
+                left: Math.min(Math.max(menuAnchor.x - 166, s.md), windowWidth - 198),
+              },
+            ]}
+          >
+            <Text style={styles.filterMenuTitle}>Consumo calórico</Text>
+            {(['1w', '3m', '1y'] as RangoFiltro[]).map((k) => {
+              const activo = rangoNutricion === k;
+              return (
                 <Pressable
                   key={k}
-                  style={styles.modalOpcion}
+                  style={styles.filterMenuOption}
                   onPress={() => {
                     setRangoNutricion(k);
                     setMenuNutAbierto(false);
                   }}
                 >
-                  <Text style={styles.modalOpcionText}>{FILTRO_LABELS[k]}</Text>
+                  <Ionicons name={activo ? 'checkmark-circle' : 'ellipse-outline'} size={17} color={activo ? c.primary : c.textSecondary} />
+                  <Text style={[styles.filterMenuOptionText, activo && styles.filterMenuOptionTextActive]}>
+                    {FILTRO_LABELS[k]}
+                  </Text>
                 </Pressable>
-              ))}
-            </View>
+              );
+            })}
           </View>
         </View>
-      </Modal>
+      ) : null}
 
-      <Modal transparent visible={menuPesoAbierto} animationType="fade" onRequestClose={() => setMenuPesoAbierto(false)}>
-        <View style={styles.modalRoot}>
-          <Pressable style={styles.modalBackdropFill} onPress={() => setMenuPesoAbierto(false)} />
-          <View style={styles.modalCenter} pointerEvents="box-none">
-            <View style={styles.modalSheet}>
-              {(['3m', '1y', 'all'] as RangoFiltro[]).map((k) => (
+      {menuPesoAbierto ? (
+        <View style={styles.filterMenuLayer} pointerEvents="box-none">
+          <Pressable style={styles.filterMenuDismiss} onPress={() => setMenuPesoAbierto(false)} />
+          <View
+            style={[
+              styles.filterMenuPopover,
+              {
+                top: Math.min(menuAnchor.y + 10, windowHeight - 176),
+                left: Math.min(Math.max(menuAnchor.x - 166, s.md), windowWidth - 198),
+              },
+            ]}
+          >
+            <Text style={styles.filterMenuTitle}>Peso corporal</Text>
+            {(['1w', '3m', '1y'] as RangoFiltro[]).map((k) => {
+              const activo = rangoPeso === k;
+              return (
                 <Pressable
                   key={k}
-                  style={styles.modalOpcion}
+                  style={styles.filterMenuOption}
                   onPress={() => {
                     setRangoPeso(k);
                     setMenuPesoAbierto(false);
                   }}
                 >
-                  <Text style={styles.modalOpcionText}>{FILTRO_LABELS[k]}</Text>
+                  <Ionicons name={activo ? 'checkmark-circle' : 'ellipse-outline'} size={17} color={activo ? c.primary : c.textSecondary} />
+                  <Text style={[styles.filterMenuOptionText, activo && styles.filterMenuOptionTextActive]}>
+                    {FILTRO_LABELS[k]}
+                  </Text>
                 </Pressable>
-              ))}
-            </View>
+              );
+            })}
           </View>
         </View>
-      </Modal>
+      ) : null}
     </View>
   );
 }
@@ -929,16 +1032,17 @@ function makeStyles(
     },
     mainColumn: {
       flex: 1,
-      flexDirection: 'column',
+    },
+    mainContent: {
       paddingHorizontal: s.md,
-      paddingBottom: s.md,
-      justifyContent: 'space-between',
+      gap: s.md,
     },
     headerBlock: {
       flexShrink: 0,
       paddingTop: s.sm,
     },
     tabsWrap: {
+      display: 'none',
       alignSelf: 'center',
       maxWidth: 240,
       width: '100%',
@@ -1145,6 +1249,11 @@ function makeStyles(
     },
     blockNutricion: {
       flexShrink: 0,
+      backgroundColor: c.surface,
+      borderWidth: 1,
+      borderColor: c.border,
+      borderRadius: r.lg,
+      padding: s.md,
     },
     flexSpacer: {
       flex: 1,
@@ -1153,6 +1262,11 @@ function makeStyles(
     },
     blockPeso: {
       flexShrink: 0,
+      backgroundColor: c.surface,
+      borderWidth: 1,
+      borderColor: c.border,
+      borderRadius: r.lg,
+      padding: s.md,
     },
     centered: {
       flex: 1,
@@ -1172,6 +1286,16 @@ function makeStyles(
       flexDirection: 'row',
       alignItems: 'center',
       gap: s.md,
+    },
+    headerAction: {
+      width: 42,
+      height: 42,
+      borderRadius: 21,
+      borderWidth: 1,
+      borderColor: c.borderVisible,
+      backgroundColor: c.surface,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     avatarWrap: {
       width: 64,
@@ -1199,19 +1323,28 @@ function makeStyles(
       minWidth: 0,
     },
     username: {
-      ...ts.displayMd,
-      fontFamily: f.sansMedium,
+      fontSize: 26,
+      lineHeight: 31,
+      letterSpacing: 0,
+      fontFamily: f.sansBold,
       color: c.textDisplay,
-      marginBottom: s.xs,
+      marginBottom: 4,
     },
     metricasRow: {
       flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: s.md,
+      flexWrap: 'nowrap',
+      alignItems: 'center',
+      gap: 12,
     },
-    metricaItem: { flexShrink: 1 },
+    metricaItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      flexShrink: 1,
+    },
     metricaCaption: {
-      ...ts.caption,
+      fontSize: 11,
+      lineHeight: 14,
       fontFamily: f.mono,
       color: c.textSecondary,
       textTransform: 'none',
@@ -1234,22 +1367,24 @@ function makeStyles(
       flex: 1,
       minWidth: 0,
       ...ts.subheading,
-      fontFamily: f.sansMedium,
+      fontFamily: f.sansBold,
       color: c.textDisplay,
     },
     filtroPill: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 4,
-      paddingVertical: 6,
+      paddingVertical: 4,
       paddingHorizontal: 10,
       borderRadius: r.pill,
       borderWidth: 1,
       borderColor: c.borderVisible,
-      maxWidth: '46%',
+      flexShrink: 0,
+      maxWidth: 118,
     },
     filtroPillText: {
-      ...ts.caption,
+      fontSize: 10,
+      lineHeight: 13,
       fontFamily: f.mono,
       color: c.textSecondary,
       flexShrink: 1,
@@ -1259,18 +1394,63 @@ function makeStyles(
       justifyContent: 'center',
       alignItems: 'center',
     },
+    kcalSummaryRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: s.md,
+      marginBottom: s.xs,
+    },
+    rangeEyebrow: {
+      ...ts.caption,
+      fontFamily: f.sansMedium,
+      color: c.textSecondary,
+      marginBottom: 2,
+    },
+    kcalValue: {
+      fontSize: 30,
+      lineHeight: 36,
+      fontFamily: f.sansBold,
+      color: c.textDisplay,
+      letterSpacing: 0,
+      fontVariant: ['tabular-nums'],
+    },
+    kcalUnit: {
+      fontSize: 15,
+      lineHeight: 20,
+      fontFamily: f.sans,
+      color: c.textSecondary,
+    },
+    kcalSub: {
+      ...ts.caption,
+      fontFamily: f.sans,
+      color: c.textSecondary,
+    },
+    chartModePill: {
+      width: 46,
+      height: 30,
+      borderRadius: r.pill,
+      backgroundColor: c.primary,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
 
     chipsRow: {
       flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: s.xs,
+      flexWrap: 'nowrap',
+      gap: 5,
       marginTop: s.xs,
     },
     chip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 3,
       paddingVertical: 8,
-      paddingHorizontal: 12,
+      paddingHorizontal: 8,
       borderRadius: r.pill,
       borderWidth: 1,
+      minHeight: 34,
     },
     chipActivo: {
       backgroundColor: c.primary,
@@ -1281,8 +1461,11 @@ function makeStyles(
       backgroundColor: 'transparent',
     },
     chipText: {
-      ...ts.caption,
-      fontFamily: f.mono,
+      fontSize: 10,
+      lineHeight: 13,
+      letterSpacing: 0,
+      fontFamily: f.sansMedium,
+      flexShrink: 1,
     },
     chipTextActivo: {
       color: c.textOnPrimary,
@@ -1297,7 +1480,7 @@ function makeStyles(
       alignItems: 'flex-start',
     },
     colIzq: {
-      flex: 1,
+      width: '34%',
       minWidth: 0,
     },
     colDer: {
@@ -1306,25 +1489,42 @@ function makeStyles(
     },
     labelHoy: {
       ...ts.label,
-      fontFamily: f.mono,
+      fontFamily: f.sans,
       color: c.textSecondary,
       marginBottom: s.xs,
+      textTransform: 'none',
     },
-    inputPeso: {
-      borderWidth: 1,
-      borderColor: c.borderVisible,
-      borderRadius: r.sm,
-      paddingVertical: 10,
-      paddingHorizontal: 12,
-      ...ts.body,
-      fontFamily: f.mono,
-      color: c.textDisplay,
+    pesoInputRow: {
+      minHeight: 30,
+      flexDirection: 'row',
+      alignItems: 'baseline',
+      gap: 5,
       marginBottom: s.sm,
     },
+    inputPeso: {
+      borderWidth: 0,
+      paddingVertical: 0,
+      paddingHorizontal: 0,
+      minWidth: 44,
+      fontSize: 24,
+      lineHeight: 30,
+      fontFamily: f.sansBold,
+      color: c.textDisplay,
+      fontVariant: ['tabular-nums'],
+    },
+    pesoUnidad: {
+      fontSize: 13,
+      lineHeight: 18,
+      fontFamily: f.sans,
+      color: c.textSecondary,
+    },
     btnGuardar: {
-      backgroundColor: c.primary,
+      backgroundColor: 'transparent',
       borderRadius: r.pill,
-      paddingVertical: 12,
+      borderWidth: 1,
+      borderColor: c.borderVisible,
+      paddingVertical: 7,
+      paddingHorizontal: 9,
       alignItems: 'center',
       justifyContent: 'center',
       marginBottom: s.md,
@@ -1333,14 +1533,15 @@ function makeStyles(
       opacity: 0.4,
     },
     btnGuardarText: {
-      ...ts.label,
-      fontFamily: f.mono,
-      color: c.textOnPrimary,
-      letterSpacing: 1.2,
+      ...ts.caption,
+      fontFamily: f.sansMedium,
+      color: c.primary,
+      letterSpacing: 0,
     },
     listaPeso: {
       borderTopWidth: 1,
       borderTopColor: c.border,
+      marginTop: s.sm,
     },
     filaPeso: {
       flexDirection: 'row',
@@ -1360,9 +1561,15 @@ function makeStyles(
       fontFamily: f.mono,
       color: c.textSecondary,
     },
+    filaPesoRight: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+    },
 
     /** Fila título + filtro del gráfico de peso (una línea, sin partir palabras). */
     rowFiltroPesoGraf: {
+      display: 'none',
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
@@ -1397,7 +1604,7 @@ function makeStyles(
       minWidth: 0,
     },
     sinDatosGraf: {
-      height: 150,
+      height: 118,
       justifyContent: 'center',
       alignItems: 'center',
       borderWidth: 1,
@@ -1412,6 +1619,7 @@ function makeStyles(
     },
 
     cardStat: {
+      display: 'none',
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
@@ -1459,5 +1667,71 @@ function makeStyles(
       fontFamily: f.sans,
       color: c.text,
     },
+    filterMenuLayer: {
+      ...StyleSheet.absoluteFillObject,
+      zIndex: 40,
+    },
+    filterMenuDismiss: {
+      ...StyleSheet.absoluteFillObject,
+      backgroundColor: 'transparent',
+    },
+    filterMenuPopover: {
+      position: 'absolute',
+      width: 182,
+      borderWidth: 1,
+      borderColor: c.borderVisible,
+      borderRadius: r.md,
+      backgroundColor: c.surfaceElevated,
+      paddingVertical: s.xs,
+      paddingHorizontal: s.sm,
+      zIndex: 50,
+    },
+    filterMenuTitle: {
+      fontSize: 12,
+      lineHeight: 15,
+      fontFamily: f.sansBold,
+      color: c.textDisplay,
+      paddingHorizontal: s.xs,
+      paddingVertical: s.xs,
+    },
+    filterMenuOption: {
+      minHeight: 34,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: s.xs,
+      borderRadius: r.sm,
+      paddingHorizontal: s.xs,
+    },
+    filterMenuOptionText: {
+      fontSize: 12,
+      lineHeight: 15,
+      fontFamily: f.sansMedium,
+      color: c.textDisplay,
+    },
+    filterMenuOptionTextActive: {
+      color: c.primary,
+    },
   });
+}
+
+function limpiarDecimalUnico(value: string): string {
+  let out = '';
+  let hasSeparator = false;
+  for (const ch of value) {
+    if (ch >= '0' && ch <= '9') {
+      out += ch;
+      continue;
+    }
+    if ((ch === ',' || ch === '.') && !hasSeparator) {
+      out += ch;
+      hasSeparator = true;
+    }
+  }
+  return out;
+}
+
+function iconoMetricaNut(key: MetricaNut, icon?: keyof typeof Ionicons.glyphMap): keyof typeof Ionicons.glyphMap {
+  if (icon) return icon;
+  if (key === 'proteinas') return 'barbell-outline';
+  return 'ellipse-outline';
 }

@@ -20,6 +20,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Path, Svg } from 'react-native-svg';
 
 import LogoSbBlack from '@/assets/images/logo_sb_black.svg';
+import ProfileNavIcon from '@/assets/images/profile_nav_icon.svg';
+import ProgressNavIcon from '@/assets/images/progress_nav_icon.svg';
 import { useTheme } from '@/hooks/useTheme';
 
 /* ── Colores ──────────────────────────────────────────────────────── */
@@ -78,23 +80,39 @@ export function TabBarActivia({
   const totalH    = TAB_ROW_H + bottomInset;
 
   const [barW, setBarW] = useState(0);
+  const [moreExpanded, setMoreExpanded] = useState(false);
   const onLayout = useCallback((e: LayoutChangeEvent) => {
     const { width } = e.nativeEvent.layout;
     if (width > 0) setBarW(prev => Math.abs(prev - width) > 0.5 ? width : prev);
   }, []);
 
-  const onFabPress = useCallback(() => {
-    const iaRoute = state.routes.find(r => r.name === '(ia)');
-    if (!iaRoute) return;
+  const navigateToRoute = useCallback((routeName: string) => {
+    const targetRoute = state.routes.find(r => r.name === routeName);
+    if (!targetRoute) return;
+
     const event = navigation.emit({
       type: 'tabPress',
-      target: iaRoute.key,
+      target: targetRoute.key,
       canPreventDefault: true,
     });
     if (!event.defaultPrevented) {
-      navigation.navigate(iaRoute.name, iaRoute.params);
+      navigation.navigate(targetRoute.name, targetRoute.params);
     }
   }, [state.routes, navigation]);
+
+  const onFabPress = useCallback(() => {
+    setMoreExpanded(false);
+    navigateToRoute('(ia)');
+  }, [navigateToRoute]);
+
+  const toggleMoreExpanded = useCallback(() => {
+    setMoreExpanded(prev => !prev);
+  }, []);
+
+  const onMoreOptionPress = useCallback((routeName: string) => {
+    setMoreExpanded(false);
+    navigateToRoute(routeName);
+  }, [navigateToRoute]);
 
   // El FAB sobresale por encima del borde superior de la barra.
   const fabBottom = bottomInset + TAB_ROW_H - FAB_RADIUS - 12;
@@ -135,6 +153,7 @@ export function TabBarActivia({
           const { options } = descriptors[route.key];
           const focused     = state.index === index;
           const color       = focused ? c.primary : INACTIVE_GRAY;
+          const tabColor    = route.name === '(perfil)' && moreExpanded ? c.primary : color;
 
           // Espacio vacío bajo el FAB: la ruta (ia) no se renderiza como botón
           if (route.name === '(ia)') {
@@ -142,6 +161,12 @@ export function TabBarActivia({
           }
 
           const onPress = () => {
+            if (route.name === '(perfil)') {
+              toggleMoreExpanded();
+              return;
+            }
+
+            setMoreExpanded(false);
             const event = navigation.emit({
               type: 'tabPress',
               target: route.key,
@@ -171,9 +196,9 @@ export function TabBarActivia({
             >
               <View style={styles.tabInner}>
                 {options.tabBarIcon != null
-                  ? options.tabBarIcon({ focused, color, size: ICON_SIZE })
-                  : <Ionicons name="ellipse-outline" size={ICON_SIZE} color={color} />}
-                <Text numberOfLines={1} style={[styles.label, { color, marginTop: 2 }]}>
+                  ? options.tabBarIcon({ focused: route.name === '(perfil)' ? moreExpanded : focused, color: tabColor, size: ICON_SIZE })
+                  : <Ionicons name="ellipse-outline" size={ICON_SIZE} color={tabColor} />}
+                <Text numberOfLines={1} style={[styles.label, { color: tabColor, marginTop: 2 }]}>
                   {label}
                 </Text>
               </View>
@@ -181,6 +206,47 @@ export function TabBarActivia({
           );
         })}
       </View>
+
+      {moreExpanded ? (
+        <View
+          pointerEvents="box-none"
+          style={[styles.moreExpandedWrap, { bottom: totalH + 8 }]}
+        >
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Ir a progreso"
+            onPress={() => onMoreOptionPress('(progreso)')}
+            style={({ pressed }) => [
+              styles.moreExpandedAction,
+              {
+                backgroundColor: c.surface,
+                borderColor: c.borderVisible,
+              },
+              pressed && styles.moreExpandedActionPressed,
+            ]}
+          >
+            <ProgressNavIcon width={18} height={18} color={c.primary} />
+            <Text style={[styles.moreExpandedLabel, { color: c.textDisplay }]}>Progreso</Text>
+          </Pressable>
+
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Ir a perfil"
+            onPress={() => onMoreOptionPress('(perfil)')}
+            style={({ pressed }) => [
+              styles.moreExpandedAction,
+              {
+                backgroundColor: c.surface,
+                borderColor: c.borderVisible,
+              },
+              pressed && styles.moreExpandedActionPressed,
+            ]}
+          >
+            <ProfileNavIcon width={18} height={18} color={c.primary} />
+            <Text style={[styles.moreExpandedLabel, { color: c.textDisplay }]}>Perfil</Text>
+          </Pressable>
+        </View>
+      ) : null}
 
       {/* ── Capa 3: FAB IA ────────────────────────────────────────── */}
       {/*
@@ -205,6 +271,7 @@ export function TabBarActivia({
           </View>
         </Pressable>
       </View>
+
     </View>
   );
 }
@@ -276,5 +343,43 @@ const styles = StyleSheet.create({
       },
       default: {},
     }),
+  },
+
+  moreExpandedWrap: {
+    position: 'absolute',
+    right: 8,
+    gap: 8,
+    alignItems: 'flex-end',
+  },
+  moreExpandedAction: {
+    minWidth: 126,
+    height: 42,
+    borderRadius: 21,
+    borderWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    gap: 8,
+    paddingHorizontal: 14,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.18,
+        shadowRadius: 14,
+      },
+      android: {
+        elevation: 8,
+      },
+      default: {},
+    }),
+  },
+  moreExpandedActionPressed: {
+    opacity: 0.72,
+  },
+  moreExpandedLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    letterSpacing: 0,
   },
 });

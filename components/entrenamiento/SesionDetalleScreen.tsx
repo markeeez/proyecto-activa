@@ -50,11 +50,20 @@ function formatHora(iso: string | null): string {
 
 function formatDuracionSesion(hora_inicio: string | null, hora_fin: string | null): string {
   if (hora_fin == null) return 'En curso';
-  const m = entrenamientoService.calcularDuracionMinutos(hora_inicio, hora_fin);
-  if (m <= 0) return '< 1 min';
-  if (m < 60) return `${m} min`;
-  const h = Math.floor(m / 60);
-  const r = m % 60;
+  if (!hora_inicio) return '< 1 min';
+  const inicioMs = new Date(hora_inicio).getTime();
+  const finMs = new Date(hora_fin).getTime();
+  if (Number.isNaN(inicioMs) || Number.isNaN(finMs) || finMs <= inicioMs) return '< 1 min';
+
+  const totalSegundos = Math.max(1, Math.round((finMs - inicioMs) / 1000));
+  if (totalSegundos < 60) return `${totalSegundos} s`;
+
+  const minutos = Math.floor(totalSegundos / 60);
+  const segundos = totalSegundos % 60;
+  if (minutos < 60) return segundos === 0 ? `${minutos} min` : `${minutos} min ${segundos} s`;
+
+  const h = Math.floor(minutos / 60);
+  const r = minutos % 60;
   if (r === 0) return `${h}h`;
   return `${h}h ${r}min`;
 }

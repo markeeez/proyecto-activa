@@ -18,6 +18,8 @@ import {
   View,
 } from 'react-native';
 
+import FoodNavIcon from '@/assets/images/food_nav_icon_v2.svg';
+import WorkoutNavIcon from '@/assets/images/workout_nav_dumbbell.svg';
 import { FontFamily } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
 import { useNutricion } from '@/hooks/useNutricion';
@@ -119,6 +121,27 @@ function MiniBarChart({
    Pantalla principal
 ──────────────────────────────────────────────────────────────────────*/
 
+function calcularDuracionSegundos(horaInicio: string | null, horaFin: string | null): number {
+  if (!horaInicio || !horaFin) return 0;
+  const inicioMs = new Date(horaInicio).getTime();
+  const finMs = new Date(horaFin).getTime();
+  if (Number.isNaN(inicioMs) || Number.isNaN(finMs) || finMs <= inicioMs) return 0;
+  return Math.max(1, Math.round((finMs - inicioMs) / 1000));
+}
+
+function formatearDuracionSegundos(totalSegundos: number): string {
+  if (totalSegundos <= 0) return '< 1 min';
+  if (totalSegundos < 60) return `${totalSegundos} s`;
+
+  const minutos = Math.floor(totalSegundos / 60);
+  const segundos = totalSegundos % 60;
+  if (minutos < 60) return segundos === 0 ? `${minutos} min` : `${minutos} min ${segundos} s`;
+
+  const horas = Math.floor(minutos / 60);
+  const minutosRestantes = minutos % 60;
+  return minutosRestantes === 0 ? `${horas} h` : `${horas} h ${minutosRestantes} min`;
+}
+
 export default function HomeScreen() {
   const { c, s } = useTheme();
   const insets   = useSafeAreaInsets();
@@ -157,7 +180,7 @@ export default function HomeScreen() {
     id: string;
     nombre: string;
     musculos: string;
-    duracionMin: number;
+    duracionSegundos: number;
     numEjercicios: number;
   } | null | undefined>(undefined); // undefined = cargando, null = sin datos
 
@@ -190,16 +213,13 @@ export default function HomeScreen() {
           ),
         ].slice(0, 3).join(', ');
 
-        const duracionMin = (() => {
-          if (!data.hora_inicio || !data.hora_fin) return 0;
-          return Math.round((new Date(data.hora_fin).getTime() - new Date(data.hora_inicio).getTime()) / 60000);
-        })();
+        const duracionSegundos = calcularDuracionSegundos(data.hora_inicio, data.hora_fin);
 
         setUltimoEntreno({
           id: data.id,
           nombre: data.nombre ?? 'Entrenamiento',
           musculos,
-          duracionMin,
+          duracionSegundos,
           numEjercicios: wse.length,
         });
       });
@@ -493,17 +513,17 @@ export default function HomeScreen() {
         {[
           {
             label: 'Registrar\ncomida',
-            icon: 'restaurant-outline' as const,
+            Icon: FoodNavIcon,
             ruta: '/(tabs)/(nutricion)' as const,
             onPlus: () => setModalComidaVisible(true),
           },
           {
             label: 'Registrar\nentreno',
-            icon: 'barbell-outline' as const,
+            Icon: WorkoutNavIcon,
             ruta: '/(tabs)/(entrenamiento)' as const,
             onPlus: () => setModalEntrenoVisible(true),
           },
-        ].map(a => (
+        ].map(({ Icon, ...a }) => (
           <TouchableOpacity
             key={a.label}
             style={[st.quickCard, { flex: 1, backgroundColor: c.surface, borderColor: c.border }]}
@@ -511,7 +531,7 @@ export default function HomeScreen() {
             onPress={() => router.push(a.ruta)}
           >
             <View style={[row, { alignItems: 'center', gap: 10 }]}>
-              <Ionicons name={a.icon} size={22} color={c.textDisplay} />
+              <Icon width={22} height={22} color={c.textDisplay} />
               <Text style={[st.quickLabel, { color: c.text, flex: 1 }]}>{a.label}</Text>
               <TouchableOpacity
                 style={[st.fabSmall, { backgroundColor: c.primary }]}
@@ -538,7 +558,7 @@ export default function HomeScreen() {
         {ultimoEntreno === null && (
           <View style={[row, { gap: 12, alignItems: 'center' }]}>
             <View style={[st.workoutIcon, { backgroundColor: c.primaryBg }]}>
-              <Ionicons name="barbell-outline" size={26} color={c.primary} />
+              <WorkoutNavIcon width={28} height={28} color={c.primary} />
             </View>
             <Text style={[st.workoutMuscles, { color: c.textSecondary, flex: 1 }]}>
               {mensajeMotivacion}
@@ -551,7 +571,7 @@ export default function HomeScreen() {
           <View style={[row, { alignItems: 'center', gap: 14 }]}>
             {/* Icono */}
             <View style={[st.workoutIcon, { backgroundColor: c.primaryBg }]}>
-              <Ionicons name="barbell-outline" size={26} color={c.primary} />
+              <WorkoutNavIcon width={28} height={28} color={c.primary} />
             </View>
 
             {/* Info */}
@@ -575,7 +595,7 @@ export default function HomeScreen() {
               <View style={[row, { gap: 4, marginTop: 4 }]}>
                 <Ionicons name="time-outline" size={12} color={c.textMuted} />
                 <Text style={[st.workoutMeta, { color: c.textMuted }]}>
-                  {ultimoEntreno.duracionMin > 0 ? `${ultimoEntreno.duracionMin} min` : '< 1 min'}
+                  {formatearDuracionSegundos(ultimoEntreno.duracionSegundos)}
                 </Text>
               </View>
             </View>

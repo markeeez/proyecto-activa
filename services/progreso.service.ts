@@ -44,6 +44,14 @@ export interface NutricionSemana {
   grasas: number;
 }
 
+export interface NutricionDia {
+  fecha: string;
+  kcal: number;
+  proteinas: number;
+  carbos: number;
+  grasas: number;
+}
+
 export interface RegistroPeso {
   fecha: string;
   peso_kg: number;
@@ -57,6 +65,8 @@ export interface EjercicioResumen {
   /** Para filtros de chip (misma tabla `exercises`). */
   equipamiento: string | null;
   musculos_secundarios: string[];
+  foto_url: string | null;
+  dificultad: string | null;
 }
 
 export interface SesionEjercicioStats {
@@ -184,6 +194,32 @@ function chunkIds<T>(arr: T[], size: number): T[][] {
   for (let i = 0; i < arr.length; i += size) {
     out.push(arr.slice(i, i + size));
   }
+  return out;
+}
+
+const SUPABASE_PAGE_SIZE = 1000;
+
+async function obtenerTodasLasFilas<T>(
+  buildQuery: () => any,
+  contextoError: string,
+): Promise<T[]> {
+  const out: T[] = [];
+  let from = 0;
+
+  while (true) {
+    const to = from + SUPABASE_PAGE_SIZE - 1;
+    const { data, error } = await buildQuery().range(from, to);
+    if (error) {
+      console.error(contextoError, error.message);
+      throw error;
+    }
+
+    const page = (data ?? []) as T[];
+    out.push(...page);
+    if (page.length < SUPABASE_PAGE_SIZE) break;
+    from += SUPABASE_PAGE_SIZE;
+  }
+
   return out;
 }
 
@@ -464,6 +500,53 @@ export const progresoService = {
     });
   },
 
+  async obtenerNutricionDiaria(
+    userId: string,
+    fechaInicio: string,
+    fechaFin: string,
+  ): Promise<NutricionDia[]> {
+    const { data, error } = await supabase
+      .from('nutrition_log_items')
+      .select(
+        `
+        calorias_calculadas,
+        proteinas_calculadas,
+        carbos_calculados,
+        grasas_calculadas,
+        nutrition_log_meals!inner (
+          nutrition_logs!inner (user_id, fecha)
+        )
+      `,
+      )
+      .eq('nutrition_log_meals.nutrition_logs.user_id', userId)
+      .gte('nutrition_log_meals.nutrition_logs.fecha', fechaInicio)
+      .lte('nutrition_log_meals.nutrition_logs.fecha', fechaFin);
+
+    if (error) throw error;
+
+    const sumsByDay = new Map<string, Omit<NutricionDia, 'fecha'>>();
+    for (const row of data ?? []) {
+      const fecha = (row as any).nutrition_log_meals?.nutrition_logs?.fecha as string | undefined;
+      if (!fecha) continue;
+      const prev = sumsByDay.get(fecha) ?? { kcal: 0, proteinas: 0, carbos: 0, grasas: 0 };
+      sumsByDay.set(fecha, {
+        kcal: prev.kcal + (Number(row.calorias_calculadas) || 0),
+        proteinas: prev.proteinas + (Number(row.proteinas_calculadas) || 0),
+        carbos: prev.carbos + (Number(row.carbos_calculados) || 0),
+        grasas: prev.grasas + (Number(row.grasas_calculadas) || 0),
+      });
+    }
+
+    const out: NutricionDia[] = [];
+    let cur = fechaInicio;
+    while (cur <= fechaFin) {
+      const sum = sumsByDay.get(cur) ?? { kcal: 0, proteinas: 0, carbos: 0, grasas: 0 };
+      out.push({ fecha: cur, ...sum });
+      cur = agregarDiasIso(cur, 1);
+    }
+    return out;
+  },
+
   async obtenerContadorDiasRegistrados(userId: string): Promise<number> {
     const { data, error } = await supabase
       .from('nutrition_log_items')
@@ -546,45 +629,53 @@ export const progresoService = {
 
   /**
    * Ejercicios presentes en al menos una sesión del usuario (nombre y músculo para lista).
+   * Una sola query con JOIN: workout_session_exercises → workout_sessions (filtro user_id)
+   * + exercises embebido. Sin round-trip extra ni chunking.
    */
   async obtenerEjerciciosRealizados(userId: string): Promise<EjercicioResumen[]> {
-    const { data: wseRows, error } = await supabase
+    const { data, error } = await supabase
       .from('workout_session_exercises')
-      .select('exercise_id, workout_sessions!inner(user_id)')
+      .select(
+        'exercise_id, exercises!inner(id, nombre, musculo_primario, equipamiento, musculos_secundarios, foto_url, dificultad), workout_sessions!inner(user_id)',
+      )
       .eq('workout_sessions.user_id', userId);
-    if (error) throw error;
-    const ids = [...new Set((wseRows ?? []).map((r) => r.exercise_id as string))];
-    if (ids.length === 0) return [];
 
-    const chunks = chunkIds(ids, 120);
-    const exercises: {
-      id: string;
-      nombre: string;
-      musculo_primario: string;
-      equipamiento: string | null;
-      musculos_secundarios: string[] | null;
-    }[] = [];
-    for (const part of chunks) {
-      const { data: ex, error: e2 } = await supabase
-        .from('exercises')
-        .select('id, nombre, musculo_primario, equipamiento, musculos_secundarios')
-        .in('id', part)
-        .order('nombre');
-      if (e2) throw e2;
-      exercises.push(...((ex ?? []) as any[]));
+    if (error) {
+      console.error('[progresoService.obtenerEjerciciosRealizados]', error.message);
+      return [];
     }
-    exercises.sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
-    return exercises.map((e) => ({
-      id: e.id,
-      nombre: e.nombre,
-      musculo_primario: e.musculo_primario,
-      equipamiento: e.equipamiento ?? null,
-      musculos_secundarios: Array.isArray(e.musculos_secundarios) ? e.musculos_secundarios : [],
-    }));
+
+    const seen = new Set<string>();
+    const out: EjercicioResumen[] = [];
+    for (const row of data ?? []) {
+      const ex = (row as any).exercises as {
+        id: string;
+        nombre: string;
+        musculo_primario: string;
+        equipamiento: string | null;
+        musculos_secundarios: string[] | null;
+        foto_url: string | null;
+        dificultad: string | null;
+      } | null;
+      if (!ex || seen.has(ex.id)) continue;
+      seen.add(ex.id);
+      out.push({
+        id: ex.id,
+        nombre: ex.nombre,
+        musculo_primario: ex.musculo_primario,
+        equipamiento: ex.equipamiento ?? null,
+        musculos_secundarios: Array.isArray(ex.musculos_secundarios) ? ex.musculos_secundarios : [],
+        foto_url: ex.foto_url ?? null,
+        dificultad: ex.dificultad ?? null,
+      });
+    }
+    out.sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
+    return out;
   },
 
   /**
    * Rutinas del usuario (creadas por él) que incluyen el ejercicio; sesiones y series en el rango de fechas.
+   * 2 queries en paralelo en lugar de 3 secuenciales: routine_exercises + workout_sets con JOIN completo.
    */
   async obtenerEstadisticasEjercicio(
     userId: string,
@@ -592,86 +683,71 @@ export const progresoService = {
     fechaInicio: string,
     fechaFin: string,
   ): Promise<EstadisticasEjercicio> {
-    const [{ data: reRows, error: eRe }, { data: wseRows, error: eWse }] = await Promise.all([
+    const [{ data: reRows, error: eRe }, { data: setsData, error: eS }] = await Promise.all([
       supabase
         .from('routine_exercises')
         .select('routine_id, routines!inner(created_by)')
         .eq('exercise_id', exerciseId)
         .eq('routines.created_by', userId),
       supabase
-        .from('workout_session_exercises')
-        .select('id, session_id, workout_sessions!inner(fecha, user_id)')
-        .eq('exercise_id', exerciseId)
-        .eq('workout_sessions.user_id', userId)
-        .gte('workout_sessions.fecha', fechaInicio)
-        .lte('workout_sessions.fecha', fechaFin),
+        .from('workout_sets')
+        .select(
+          'peso_kg, repeticiones, workout_session_exercises!inner(id, session_id, exercise_id, workout_sessions!inner(user_id, fecha))',
+        )
+        .eq('completada', true)
+        .eq('workout_session_exercises.exercise_id', exerciseId)
+        .eq('workout_session_exercises.workout_sessions.user_id', userId)
+        .gte('workout_session_exercises.workout_sessions.fecha', fechaInicio)
+        .lte('workout_session_exercises.workout_sessions.fecha', fechaFin),
     ]);
     if (eRe) throw eRe;
-    if (eWse) throw eWse;
+    if (eS) throw eS;
 
     const rutinas = new Set((reRows ?? []).map((r) => r.routine_id as string)).size;
-    const sesionesList = wseRows ?? [];
-    const veces = new Set(sesionesList.map((r) => r.session_id as string)).size;
-    const wseIds = sesionesList.map((r) => r.id as string);
 
-    const wseIdToSessionId = new Map<string, string>();
     const bySession = new Map<
       string,
       { fecha: string; pesos: number[]; reps: number[]; volumen: number; series: number }
     >();
-    for (const row of sesionesList) {
-      const wseId = row.id as string;
-      const sessionId = row.session_id as string;
-      const fecha = ((row as any).workout_sessions?.fecha as string) ?? '';
-      wseIdToSessionId.set(wseId, sessionId);
+
+    let mejorPeso: number | null = null;
+    let mejorReps: number | null = null;
+
+    for (const row of setsData ?? []) {
+      const wse = (row as any).workout_session_exercises as {
+        session_id?: string;
+        workout_sessions?: { fecha?: string };
+      } | null;
+      if (!wse) continue;
+      const sessionId = wse.session_id as string | undefined;
+      const fecha = wse.workout_sessions?.fecha as string | undefined;
+      if (!sessionId || !fecha) continue;
+
+      const p = row.peso_kg != null ? Number(row.peso_kg) : null;
+      const r = row.repeticiones != null ? Number(row.repeticiones) : null;
+      const pOk = p != null && !Number.isNaN(p);
+      const rOk = r != null && !Number.isNaN(r);
+
       if (!bySession.has(sessionId)) {
         bySession.set(sessionId, { fecha, pesos: [], reps: [], volumen: 0, series: 0 });
       }
-    }
-
-    const setsRows: {
-      session_exercise_id: string;
-      peso_kg: number | null;
-      repeticiones: number | null;
-    }[] = [];
-
-    for (const part of chunkIds(wseIds, 150)) {
-      if (part.length === 0) continue;
-      const { data: sets, error: eS } = await supabase
-        .from('workout_sets')
-        .select('session_exercise_id, peso_kg, repeticiones, completada')
-        .in('session_exercise_id', part)
-        .eq('completada', true);
-      if (eS) throw eS;
-      for (const s of sets ?? []) {
-        setsRows.push({
-          session_exercise_id: s.session_exercise_id as string,
-          peso_kg: s.peso_kg != null ? Number(s.peso_kg) : null,
-          repeticiones: s.repeticiones != null ? Number(s.repeticiones) : null,
-        });
-      }
-    }
-
-    for (const st of setsRows) {
-      const sessionId = wseIdToSessionId.get(st.session_exercise_id);
-      if (!sessionId) continue;
-      const agg = bySession.get(sessionId);
-      if (!agg) continue;
+      const agg = bySession.get(sessionId)!;
       agg.series += 1;
-      const p = st.peso_kg;
-      const r = st.repeticiones;
-      if (p != null && !Number.isNaN(p)) {
-        agg.pesos.push(p);
-        const reps = r != null && !Number.isNaN(r) ? r : 0;
-        agg.volumen += p * reps;
+      if (pOk) {
+        agg.pesos.push(p!);
+        agg.volumen += p! * (rOk ? r! : 0);
+        mejorPeso = mejorPeso == null ? p! : Math.max(mejorPeso, p!);
       }
-      if (r != null && !Number.isNaN(r)) {
-        agg.reps.push(r);
+      if (rOk) {
+        agg.reps.push(r!);
+        mejorReps = mejorReps == null ? r! : Math.max(mejorReps, r!);
       }
     }
 
-    const porSesion: SesionEjercicioStats[] = [...bySession.entries()]
-      .map(([, v]) => ({
+    const veces = bySession.size;
+
+    const porSesion: SesionEjercicioStats[] = [...bySession.values()]
+      .map((v) => ({
         fecha: v.fecha,
         mejorPeso: v.pesos.length ? Math.max(...v.pesos) : null,
         volumen: v.volumen,
@@ -680,17 +756,6 @@ export const progresoService = {
       }))
       .filter((row) => row.fecha && row.series > 0)
       .sort((a, b) => a.fecha.localeCompare(b.fecha));
-
-    let mejorPeso: number | null = null;
-    let mejorReps: number | null = null;
-    for (const st of setsRows) {
-      if (st.peso_kg != null && !Number.isNaN(st.peso_kg)) {
-        mejorPeso = mejorPeso == null ? st.peso_kg : Math.max(mejorPeso, st.peso_kg);
-      }
-      if (st.repeticiones != null && !Number.isNaN(st.repeticiones)) {
-        mejorReps = mejorReps == null ? st.repeticiones : Math.max(mejorReps, st.repeticiones);
-      }
-    }
 
     return {
       rutinas,
@@ -712,7 +777,7 @@ export const progresoService = {
     const { data, error } = await supabase
       .from('workout_sets')
       .select(
-        'id, workout_session_exercises!inner ( exercises!inner ( musculo_primario ), workout_sessions!inner ( user_id, fecha ) )',
+        'workout_session_exercises!inner ( exercises!inner ( musculo_primario ), workout_sessions!inner ( user_id, fecha ) )',
       )
       .eq('completada', true)
       .eq('workout_session_exercises.workout_sessions.user_id', userId)
@@ -1020,7 +1085,7 @@ function fechaMinimaPeriodoEjercicioDetalle(periodo: 'trimestre' | 'anio' | 'tod
 }
 
 export function fechaInicioRangoProgreso(
-  tipo: '3m' | '1y' | 'all',
+  tipo: '7d' | '3m' | '1y' | 'all',
   fechaRegistroIso: string,
 ): string {
   const hoy = new Date();
@@ -1028,7 +1093,9 @@ export function fechaInicioRangoProgreso(
     return fechaRegistroIso;
   }
   const d = new Date(hoy);
-  if (tipo === '3m') {
+  if (tipo === '7d') {
+    d.setDate(d.getDate() - 7);
+  } else if (tipo === '3m') {
     d.setMonth(d.getMonth() - 3);
   } else {
     d.setFullYear(d.getFullYear() - 1);

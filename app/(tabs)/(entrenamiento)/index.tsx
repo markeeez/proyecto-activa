@@ -44,6 +44,7 @@ type SesionVista = SesionResumen & {
   series: number;
   volumenKg: number;
   duracionMin: number;
+  duracionSegundos: number;
 };
 
 const ACCENT = '#00B4D8';
@@ -119,6 +120,39 @@ function formatearTiempo(totalMin: number, mostrarMenorQueUno = false): string {
   return m > 0 ? `${h} h ${m} min` : `${h} h`;
 }
 
+function calcularDuracionSegundos(horaInicio: string | null, horaFin: string | null): number {
+  if (!horaInicio || !horaFin) return 0;
+  const inicioMs = new Date(horaInicio).getTime();
+  const finMs = new Date(horaFin).getTime();
+  if (Number.isNaN(inicioMs) || Number.isNaN(finMs) || finMs <= inicioMs) return 0;
+  return Math.max(1, Math.round((finMs - inicioMs) / 1000));
+}
+
+function formatearTiempoSegundos(totalSegundos: number, mostrarMenorQueUno = false): string {
+  if (totalSegundos <= 0) return mostrarMenorQueUno ? '< 1 min' : '0 min';
+  if (totalSegundos < 60) return `${totalSegundos} s`;
+
+  const minutos = Math.floor(totalSegundos / 60);
+  const segundos = totalSegundos % 60;
+  if (minutos < 60) return segundos === 0 ? `${minutos} min` : `${minutos} min ${segundos} s`;
+
+  const horas = Math.floor(minutos / 60);
+  const minutosRestantes = minutos % 60;
+  return minutosRestantes === 0 ? `${horas} h` : `${horas} h ${minutosRestantes} min`;
+}
+
+function formatearDuracionSesion(sesion: SesionVista): string {
+  if (sesion.duracionSegundos > 0) return formatearTiempoSegundos(sesion.duracionSegundos, true);
+  if (!sesion.hora_inicio || !sesion.hora_fin) return formatearTiempo(sesion.duracionMin, true);
+  const inicioMs = new Date(sesion.hora_inicio).getTime();
+  const finMs = new Date(sesion.hora_fin).getTime();
+  if (Number.isNaN(inicioMs) || Number.isNaN(finMs) || finMs <= inicioMs) {
+    return formatearTiempo(sesion.duracionMin, true);
+  }
+
+  return formatearTiempoSegundos(Math.max(1, Math.round((finMs - inicioMs) / 1000)), true);
+}
+
 function formatearVolumen(kg: number): string {
   const rounded = Math.round(kg);
   return `${rounded.toLocaleString('es-ES')} kg`;
@@ -126,6 +160,7 @@ function formatearVolumen(kg: number): string {
 
 function contarDetalle(detalle: DetalleSesion | null, sesion: SesionResumen): SesionVista {
   const duracionMin = entrenamientoService.calcularDuracionMinutos(sesion.hora_inicio, sesion.hora_fin);
+  const duracionSegundos = calcularDuracionSegundos(sesion.hora_inicio, sesion.hora_fin);
   let series = 0;
   let volumenKg = 0;
 
@@ -145,6 +180,7 @@ function contarDetalle(detalle: DetalleSesion | null, sesion: SesionResumen): Se
     series,
     volumenKg,
     duracionMin,
+    duracionSegundos,
   };
 }
 
@@ -297,15 +333,15 @@ export default function EntrenamientoIndex() {
   }, [sesionesSemana]);
 
   const resumenSemanal = useMemo(() => {
-    let minutos = 0;
+    let segundos = 0;
     let volumenKg = 0;
     for (const sesion of sesionesSemana) {
-      minutos += sesion.duracionMin;
+      segundos += sesion.duracionSegundos;
       volumenKg += sesion.volumenKg;
     }
     return {
       sesiones: sesionesSemana.length,
-      minutos,
+      segundos,
       volumenKg,
     };
   }, [sesionesSemana]);
@@ -598,7 +634,7 @@ function DayRow({
               ) : null}
             </View>
             <Text style={styles.workoutMeta} numberOfLines={1}>
-              {ultimoEntreno.ejercicios} ejercicios • {ultimoEntreno.duracionMin || '< 1'} min • {ultimoEntreno.series}{' '}
+              {ultimoEntreno.ejercicios} ejercicios • {formatearDuracionSesion(ultimoEntreno)} • {ultimoEntreno.series}{' '}
               series
             </Text>
           </>
@@ -626,7 +662,7 @@ function DayRow({
                 <Text style={styles.accordionTitle} numberOfLines={1}>
                   {(sesion.nombre ?? 'Entreno').trim() || 'Entreno'}
                 </Text>
-                <Text style={styles.accordionMeta}>{formatearTiempo(sesion.duracionMin, true)}</Text>
+                <Text style={styles.accordionMeta}>{formatearDuracionSesion(sesion)}</Text>
               </Pressable>
             ))}
           </ScrollView>
@@ -645,7 +681,7 @@ function WeeklySummary({
   palette,
   styles,
 }: {
-  resumen: { sesiones: number; minutos: number; volumenKg: number };
+  resumen: { sesiones: number; segundos: number; volumenKg: number };
   palette: WorkoutPalette;
   styles: ReturnType<typeof makeStyles>;
 }) {
@@ -666,7 +702,7 @@ function WeeklySummary({
         />
         <Metric
           icon="time-outline"
-          value={formatearTiempo(resumen.minutos, resumen.sesiones > 0)}
+          value={formatearTiempoSegundos(resumen.segundos, resumen.sesiones > 0)}
           label="Tiempo"
           palette={palette}
           styles={styles}

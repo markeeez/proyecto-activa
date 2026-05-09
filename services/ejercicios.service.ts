@@ -28,9 +28,39 @@ export type BuscarEjerciciosParams = {
   idsFavoritos?: string[];
 };
 
+const SUPABASE_PAGE_SIZE = 1000;
+
 function norm(s: string | null | undefined): string | null {
   const t = s?.trim();
   return t ? t : null;
+}
+
+async function obtenerPorPaginas<T>(
+  buildQuery: () => any,
+  maxRows: number,
+  contextoError: string,
+): Promise<T[]> {
+  const out: T[] = [];
+  let from = 0;
+
+  while (out.length < maxRows) {
+    const remaining = maxRows - out.length;
+    const pageSize = Math.min(SUPABASE_PAGE_SIZE, remaining);
+    const to = from + pageSize - 1;
+    const { data, error } = await buildQuery().range(from, to);
+
+    if (error) {
+      console.error(contextoError, error.message);
+      return out;
+    }
+
+    const page = (data ?? []) as T[];
+    out.push(...page);
+    if (page.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return out;
 }
 
 /** Palabras de búsqueda normalizadas (sin comodines) para AND en cliente. */
@@ -100,7 +130,7 @@ export const ejerciciosService = {
     let q = supabase.from('exercises').select('*');
 
     if (modoLista === 'general') {
-      q = q.is('created_by', null);
+      q = q.eq('is_custom', false);
     }
 
     if (modoLista === 'favoritos') {
@@ -117,27 +147,29 @@ export const ejerciciosService = {
       q = q.eq('musculo_primario', musculo);
     }
 
+    if (equip) {
+      q = q.eq('equipamiento', equip);
+    }
+
     let rows: Exercise[];
 
     if (!texto) {
-      const { data, error } = await q.order('nombre').limit(limite);
-      if (error) {
-        console.error('[ejerciciosService.buscarEjercicios]', error.message);
-        return [];
-      }
-      rows = (data ?? []) as Exercise[];
+      rows = await obtenerPorPaginas<Exercise>(
+        () => q.order('nombre'),
+        limite,
+        '[ejerciciosService.buscarEjercicios]',
+      );
     } else {
       const palabrasNorm = tokensNormBusqueda(texto);
       const palabrasSplit = palabrasBusqueda(texto);
       const palabrasRaw = palabrasSplit.map(sanitizarFragmentoIlike).filter((w) => w.length > 0);
 
       if (palabrasNorm.length === 0) {
-        const { data, error } = await q.order('nombre').limit(limite);
-        if (error) {
-          console.error('[ejerciciosService.buscarEjercicios]', error.message);
-          return [];
-        }
-        rows = (data ?? []) as Exercise[];
+        rows = await obtenerPorPaginas<Exercise>(
+          () => q.order('nombre'),
+          limite,
+          '[ejerciciosService.buscarEjercicios]',
+        );
       } else {
         const busquedaRawEquivNorm =
           palabrasRaw.length === palabrasNorm.length &&
@@ -147,12 +179,12 @@ export const ejerciciosService = {
 
         const ancla = elegirAnclajeBusqueda(palabrasNorm);
         const anclaSafe = ancla ? sanitizarFragmentoIlike(ancla) : '';
-        const limiteAncla = Math.min(Math.max(limite * 8, 120), 800);
+        const limiteAncla = Math.min(Math.max(limite * 12, 120), 2000);
 
         const ejecutar = async (words: string[], maxRows: number) => {
           let qq = supabase.from('exercises').select('*');
           if (modoLista === 'general') {
-            qq = qq.is('created_by', null);
+            qq = qq.eq('is_custom', false);
           }
           if (modoLista === 'favoritos') {
             if (!userId) return [];
@@ -162,13 +194,13 @@ export const ejerciciosService = {
             qq = qq.in('id', ids);
           }
           if (musculo) qq = qq.eq('musculo_primario', musculo);
+          if (equip) qq = qq.eq('equipamiento', equip);
           qq = aplicarIlikeNombreAnd(qq, words);
-          const { data, error } = await qq.order('nombre').limit(maxRows);
-          if (error) {
-            console.error('[ejerciciosService.buscarEjercicios]', error.message);
-            return [];
-          }
-          return (data ?? []) as Exercise[];
+          return obtenerPorPaginas<Exercise>(
+            () => qq.order('nombre'),
+            maxRows,
+            '[ejerciciosService.buscarEjercicios]',
+          );
         };
 
         const [rNorm, rRaw, rAncla] = await Promise.all([
@@ -186,10 +218,6 @@ export const ejerciciosService = {
         rows.sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
         rows = rows.slice(0, limite);
       }
-    }
-
-    if (equip) {
-      rows = rows.filter((r) => (r.equipamiento ?? '').trim() === equip);
     }
 
     return rows;
@@ -234,16 +262,16 @@ export const ejerciciosService = {
   },
 
   async obtenerMusculosDisponibles(): Promise<string[]> {
-    const { data, error } = await supabase
-      .from('exercises')
-      .select('musculo_primario')
-      .not('musculo_primario', 'is', null)
-      .order('musculo_primario');
-
-    if (error) {
-      console.error('[ejerciciosService.obtenerMusculosDisponibles]', error.message);
-      return [];
-    }
+    const data = await obtenerPorPaginas<{ musculo_primario?: string }>(
+      () =>
+        supabase
+          .from('exercises')
+          .select('musculo_primario')
+          .not('musculo_primario', 'is', null)
+          .order('musculo_primario'),
+      5000,
+      '[ejerciciosService.obtenerMusculosDisponibles]',
+    );
 
     const set = new Set<string>();
     for (const row of data ?? []) {
@@ -254,16 +282,16 @@ export const ejerciciosService = {
   },
 
   async obtenerEquipamientoDisponible(): Promise<string[]> {
-    const { data, error } = await supabase
-      .from('exercises')
-      .select('equipamiento')
-      .not('equipamiento', 'is', null)
-      .order('equipamiento');
-
-    if (error) {
-      console.error('[ejerciciosService.obtenerEquipamientoDisponible]', error.message);
-      return [];
-    }
+    const data = await obtenerPorPaginas<{ equipamiento?: string | null }>(
+      () =>
+        supabase
+          .from('exercises')
+          .select('equipamiento')
+          .not('equipamiento', 'is', null)
+          .order('equipamiento'),
+      5000,
+      '[ejerciciosService.obtenerEquipamientoDisponible]',
+    );
 
     const set = new Set<string>();
     for (const row of data ?? []) {
@@ -277,15 +305,11 @@ export const ejerciciosService = {
    * Valores distintos para chips de filtro (muestra acotada; suficiente para catálogo local).
    */
   async obtenerOpcionesFiltros(): Promise<{ musculos: string[]; equipamientos: string[] }> {
-    const { data, error } = await supabase
-      .from('exercises')
-      .select('musculo_primario, equipamiento')
-      .limit(4000);
-
-    if (error) {
-      console.error('[ejerciciosService.obtenerOpcionesFiltros]', error.message);
-      return { musculos: [], equipamientos: [] };
-    }
+    const data = await obtenerPorPaginas<{ musculo_primario?: string; equipamiento?: string | null }>(
+      () => supabase.from('exercises').select('musculo_primario, equipamiento').order('nombre'),
+      5000,
+      '[ejerciciosService.obtenerOpcionesFiltros]',
+    );
 
     const musculos = new Set<string>();
     const equipamientos = new Set<string>();
