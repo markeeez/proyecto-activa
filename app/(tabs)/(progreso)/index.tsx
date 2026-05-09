@@ -658,14 +658,13 @@ export default function ProgresoIndex() {
               accessibilityRole="button"
               accessibilityLabel="Rango de tiempo nutrición"
             >
-              <Text style={styles.filtroPillText}>{FILTRO_LABELS[rangoNutricion]}</Text>
+              <Text style={styles.filtroPillText} numberOfLines={1}>{FILTRO_LABELS[rangoNutricion]}</Text>
               <Ionicons name="chevron-down" size={16} color={c.textSecondary} />
             </Pressable>
           </View>
 
           <View style={styles.kcalSummaryRow}>
             <View>
-              <Text style={styles.rangeEyebrow}>Últimos 7 días</Text>
               <Text style={styles.kcalValue}>
                 {Math.round(valorPromedioNutricion).toLocaleString('es-ES')}{' '}
                 <Text style={styles.kcalUnit}>{metricaNut === 'kcal' ? 'kcal' : 'g'}</Text>
@@ -1380,7 +1379,6 @@ function makeStyles(
       borderWidth: 1,
       borderColor: c.borderVisible,
       flexShrink: 0,
-      maxWidth: 118,
     },
     filtroPillText: {
       fontSize: 10,

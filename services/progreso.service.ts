@@ -67,6 +67,7 @@ export interface EjercicioResumen {
   musculos_secundarios: string[];
   foto_url: string | null;
   dificultad: string | null;
+  tracking_mode: 'strength' | 'cardio_time' | 'cardio_time_distance' | null;
 }
 
 export interface SesionEjercicioStats {
@@ -83,6 +84,21 @@ export interface EstadisticasEjercicio {
   mejorPeso: number | null;
   mejorReps: number | null;
   porSesion: SesionEjercicioStats[];
+}
+
+export interface SesionCardioStats {
+  fecha: string;
+  totalTiempoSeg: number;
+  mejorTiempoSeg: number | null;
+  mayorDistanciaKm: number | null;
+  series: number;
+}
+
+export interface EstadisticasCardio {
+  veces: number;
+  mejorTiempoSeg: number | null;
+  mayorDistanciaKm: number | null;
+  porSesion: SesionCardioStats[];
 }
 
 export interface DistribucionMuscular {
@@ -120,7 +136,23 @@ export type SesionEjercicioHistorial = {
     pesoKg: number | null;
     repeticiones: number | null;
     tipoPeso: string;
+    duracionSeg: number | null;
+    distanciaKm: number | null;
   }[];
+};
+
+/** Día agregado para gráficos de cardio (consulta-ejercicio). */
+export type EstadisticaCardioEjercicioDia = {
+  fecha: string;
+  mejorTiempoSeg: number;
+  mayorDistanciaKm: number;
+  totalTiempoSeg: number;
+};
+
+/** Records históricos de cardio de un ejercicio (consulta-ejercicio). */
+export type RecordsCardioEjercicio = {
+  mejorTiempoSeg: number;
+  mayorDistanciaKm: number;
 };
 
 /** Claves canónicas de grupo (orden fijo para UI). */
@@ -627,6 +659,23 @@ export const progresoService = {
     if (error) throw error;
   },
 
+  async obtenerPesoUsuario(userId: string): Promise<number | null> {
+    const { data, error } = await supabase
+      .from('user_body_metrics')
+      .select('peso_kg')
+      .eq('user_id', userId)
+      .order('fecha', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) {
+      console.error('[obtenerPesoUsuario]', error.message);
+      return null;
+    }
+    const raw = data?.peso_kg;
+    const n = raw != null ? Number(raw) : NaN;
+    return Number.isFinite(n) && n > 0 ? n : null;
+  },
+
   /**
    * Ejercicios presentes en al menos una sesión del usuario (nombre y músculo para lista).
    * Una sola query con JOIN: workout_session_exercises → workout_sessions (filtro user_id)
@@ -636,7 +685,7 @@ export const progresoService = {
     const { data, error } = await supabase
       .from('workout_session_exercises')
       .select(
-        'exercise_id, exercises!inner(id, nombre, musculo_primario, equipamiento, musculos_secundarios, foto_url, dificultad), workout_sessions!inner(user_id)',
+        'exercise_id, exercises!inner(id, nombre, musculo_primario, equipamiento, musculos_secundarios, foto_url, dificultad, tracking_mode), workout_sessions!inner(user_id)',
       )
       .eq('workout_sessions.user_id', userId);
 
@@ -656,9 +705,11 @@ export const progresoService = {
         musculos_secundarios: string[] | null;
         foto_url: string | null;
         dificultad: string | null;
+        tracking_mode: string | null;
       } | null;
       if (!ex || seen.has(ex.id)) continue;
       seen.add(ex.id);
+      const tm = ex.tracking_mode;
       out.push({
         id: ex.id,
         nombre: ex.nombre,
@@ -667,6 +718,8 @@ export const progresoService = {
         musculos_secundarios: Array.isArray(ex.musculos_secundarios) ? ex.musculos_secundarios : [],
         foto_url: ex.foto_url ?? null,
         dificultad: ex.dificultad ?? null,
+        tracking_mode:
+          tm === 'cardio_time' || tm === 'cardio_time_distance' || tm === 'strength' ? tm : null,
       });
     }
     out.sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
@@ -764,6 +817,80 @@ export const progresoService = {
       mejorReps,
       porSesion,
     };
+  },
+
+  async obtenerEstadisticasCardio(
+    userId: string,
+    exerciseId: string,
+    fechaInicio: string,
+    fechaFin: string,
+    conDistancia: boolean,
+  ): Promise<EstadisticasCardio> {
+    const { data: setsData, error } = await supabase
+      .from('workout_sets')
+      .select(
+        'duracion_seg, distancia_km, workout_session_exercises!inner(id, session_id, exercise_id, workout_sessions!inner(user_id, fecha))',
+      )
+      .eq('completada', true)
+      .eq('workout_session_exercises.exercise_id', exerciseId)
+      .eq('workout_session_exercises.workout_sessions.user_id', userId)
+      .gte('workout_session_exercises.workout_sessions.fecha', fechaInicio)
+      .lte('workout_session_exercises.workout_sessions.fecha', fechaFin);
+    if (error) throw error;
+
+    const bySession = new Map<
+      string,
+      { fecha: string; tiempos: number[]; distancias: number[]; series: number }
+    >();
+
+    let mejorTiempoSeg: number | null = null;
+    let mayorDistanciaKm: number | null = null;
+
+    for (const row of setsData ?? []) {
+      const wse = (row as any).workout_session_exercises as {
+        session_id?: string;
+        workout_sessions?: { fecha?: string };
+      } | null;
+      if (!wse) continue;
+      const sessionId = wse.session_id as string | undefined;
+      const fecha = wse.workout_sessions?.fecha as string | undefined;
+      if (!sessionId || !fecha) continue;
+
+      const durRaw = (row as any).duracion_seg;
+      const distRaw = (row as any).distancia_km;
+      const dur = durRaw != null && durRaw !== '' ? Number(durRaw) : null;
+      const dist = distRaw != null && distRaw !== '' ? Number(distRaw) : null;
+      const durOk = dur != null && !Number.isNaN(dur) && dur > 0;
+      const distOk = dist != null && !Number.isNaN(dist) && dist > 0;
+
+      if (!bySession.has(sessionId)) {
+        bySession.set(sessionId, { fecha, tiempos: [], distancias: [], series: 0 });
+      }
+      const agg = bySession.get(sessionId)!;
+      agg.series += 1;
+      if (durOk) {
+        agg.tiempos.push(dur!);
+        mejorTiempoSeg = mejorTiempoSeg == null ? dur! : Math.max(mejorTiempoSeg, dur!);
+      }
+      if (distOk) {
+        agg.distancias.push(dist!);
+        mayorDistanciaKm = mayorDistanciaKm == null ? dist! : Math.max(mayorDistanciaKm, dist!);
+      }
+    }
+
+    const veces = bySession.size;
+    const porSesion: SesionCardioStats[] = [...bySession.values()]
+      .map((v) => ({
+        fecha: v.fecha,
+        totalTiempoSeg: v.tiempos.reduce((a, b) => a + b, 0),
+        mejorTiempoSeg: v.tiempos.length ? Math.max(...v.tiempos) : null,
+        mayorDistanciaKm: conDistancia && v.distancias.length ? Math.max(...v.distancias) : null,
+        series: v.series,
+      }))
+      .filter((r) => r.fecha && r.series > 0)
+      .sort((a, b) => a.fecha.localeCompare(b.fecha));
+
+    return { veces, mejorTiempoSeg, mayorDistanciaKm: conDistancia ? mayorDistanciaKm : null, porSesion };
   },
 
   /**
@@ -994,6 +1121,106 @@ export const progresoService = {
     };
   },
 
+  async obtenerEstadisticasCardioDetalle(
+    exerciseId: string,
+    userId: string,
+    periodo: 'trimestre' | 'anio' | 'todo',
+  ): Promise<EstadisticaCardioEjercicioDia[]> {
+    const fechaMin = fechaMinimaPeriodoEjercicioDetalle(periodo);
+    let q = supabase
+      .from('workout_sets')
+      .select(
+        'duracion_seg, distancia_km, workout_session_exercises!inner ( exercise_id, session_id, workout_sessions!inner ( user_id, fecha ) )',
+      )
+      .eq('completada', true)
+      .eq('workout_session_exercises.exercise_id', exerciseId)
+      .eq('workout_session_exercises.workout_sessions.user_id', userId);
+    if (fechaMin != null) {
+      q = q.gte('workout_session_exercises.workout_sessions.fecha', fechaMin);
+    }
+    const { data, error } = await q;
+    if (error) throw error;
+
+    type AggSession = { tiemposSeg: number[]; distanciasKm: number[] };
+    const bySession = new Map<string, AggSession>();
+    const sessionFecha = new Map<string, string>();
+
+    for (const row of data ?? []) {
+      const wse = (row as { workout_session_exercises?: { session_id?: string; workout_sessions?: { fecha?: string } } }).workout_session_exercises;
+      const fecha = wse?.workout_sessions?.fecha;
+      const sessionId = wse?.session_id;
+      if (!fecha || !sessionId) continue;
+
+      const dur = (row as { duracion_seg?: unknown }).duracion_seg;
+      const dist = (row as { distancia_km?: unknown }).distancia_km;
+      const durSeg = dur != null && dur !== '' ? Number(dur) : null;
+      const distKm = dist != null && dist !== '' ? Number(dist) : null;
+
+      const key = `${fecha}__${sessionId}`;
+      let agg = bySession.get(key);
+      if (!agg) {
+        agg = { tiemposSeg: [], distanciasKm: [] };
+        bySession.set(key, agg);
+        sessionFecha.set(key, fecha);
+      }
+
+      if (durSeg != null && !Number.isNaN(durSeg)) agg.tiemposSeg.push(durSeg);
+      if (distKm != null && !Number.isNaN(distKm)) agg.distanciasKm.push(distKm);
+    }
+
+    type AggDay = { mejorTiempoSeg: number; mayorDistanciaKm: number; totalTiempoSeg: number };
+    const byDay = new Map<string, AggDay>();
+
+    for (const [key, agg] of bySession.entries()) {
+      const fecha = sessionFecha.get(key)!;
+      const mejorTiempoSesion = agg.tiemposSeg.length ? Math.max(...agg.tiemposSeg) : 0;
+      const mayorDistSesion = agg.distanciasKm.length ? Math.max(...agg.distanciasKm) : 0;
+      const totalTiempoSesion = agg.tiemposSeg.reduce((a, b) => a + b, 0);
+
+      const prev = byDay.get(fecha);
+      if (!prev) {
+        byDay.set(fecha, { mejorTiempoSeg: mejorTiempoSesion, mayorDistanciaKm: mayorDistSesion, totalTiempoSeg: totalTiempoSesion });
+      } else {
+        byDay.set(fecha, {
+          mejorTiempoSeg: Math.max(prev.mejorTiempoSeg, mejorTiempoSesion),
+          mayorDistanciaKm: Math.max(prev.mayorDistanciaKm, mayorDistSesion),
+          totalTiempoSeg: Math.max(prev.totalTiempoSeg, totalTiempoSesion),
+        });
+      }
+    }
+
+    return [...byDay.entries()]
+      .map(([fecha, agg]) => ({ fecha, ...agg }))
+      .filter((r) => r.mejorTiempoSeg > 0 || r.mayorDistanciaKm > 0)
+      .sort((a, b) => a.fecha.localeCompare(b.fecha));
+  },
+
+  async obtenerRecordsCardioEjercicio(exerciseId: string, userId: string): Promise<RecordsCardioEjercicio> {
+    const { data, error } = await supabase
+      .from('workout_sets')
+      .select(
+        'duracion_seg, distancia_km, workout_session_exercises!inner ( exercise_id, workout_sessions!inner ( user_id ) )',
+      )
+      .eq('completada', true)
+      .eq('workout_session_exercises.exercise_id', exerciseId)
+      .eq('workout_session_exercises.workout_sessions.user_id', userId);
+    if (error) throw error;
+
+    let mejorTiempoSeg = 0;
+    let mayorDistanciaKm = 0;
+
+    for (const row of data ?? []) {
+      const dur = (row as { duracion_seg?: unknown }).duracion_seg;
+      const dist = (row as { distancia_km?: unknown }).distancia_km;
+      const durSeg = dur != null && dur !== '' ? Number(dur) : null;
+      const distKm = dist != null && dist !== '' ? Number(dist) : null;
+      if (durSeg != null && !Number.isNaN(durSeg)) mejorTiempoSeg = Math.max(mejorTiempoSeg, durSeg);
+      if (distKm != null && !Number.isNaN(distKm)) mayorDistanciaKm = Math.max(mayorDistanciaKm, distKm);
+    }
+
+    return { mejorTiempoSeg, mayorDistanciaKm };
+  },
+
   async obtenerHistorialEjercicio(
     exerciseId: string,
     userId: string,
@@ -1001,7 +1228,7 @@ export const progresoService = {
     const { data, error } = await supabase
       .from('workout_sessions')
       .select(
-        'id, nombre, fecha, hora_inicio, workout_session_exercises!inner ( exercise_id, workout_sets ( numero_serie, tipo_serie, peso_kg, repeticiones, tipo_peso, completada ) )',
+        'id, nombre, fecha, hora_inicio, workout_session_exercises!inner ( exercise_id, workout_sets ( numero_serie, tipo_serie, peso_kg, repeticiones, tipo_peso, duracion_seg, distancia_km, completada ) )',
       )
       .eq('user_id', userId)
       .eq('workout_session_exercises.exercise_id', exerciseId);
@@ -1015,6 +1242,8 @@ export const progresoService = {
         peso_kg?: unknown;
         repeticiones?: unknown;
         tipo_peso?: string;
+        duracion_seg?: unknown;
+        distancia_km?: unknown;
         completada?: boolean;
       }[];
     };
@@ -1040,6 +1269,8 @@ export const progresoService = {
             pesoKg: st.peso_kg != null && st.peso_kg !== '' ? Number(st.peso_kg) : null,
             repeticiones: st.repeticiones != null && st.repeticiones !== '' ? Number(st.repeticiones) : null,
             tipoPeso: String(st.tipo_peso ?? 'kg'),
+            duracionSeg: st.duracion_seg != null && st.duracion_seg !== '' ? Number(st.duracion_seg) : null,
+            distanciaKm: st.distancia_km != null && st.distancia_km !== '' ? Number(st.distancia_km) : null,
           });
         }
       }

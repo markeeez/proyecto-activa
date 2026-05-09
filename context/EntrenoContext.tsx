@@ -13,15 +13,17 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { router } from 'expo-router';
 
 import { useAuth } from '@/context/AuthContext';
+import { useThemeMode } from '@/context/ThemeContext';
 import { supabase } from '@/lib/supabase';
 import { tipoSerieDbAUi } from '@/lib/entrenamientoSerie';
-import { lid, seriePorDefecto } from '@/lib/entrenamientoUtils';
+import { lid, registroCardioPorDefecto, seriePorDefecto } from '@/lib/entrenamientoUtils';
 import type { BorradorEjercicioLinea, BorradorSerieLinea } from '@/types/entrenamientoBorrador.types';
-import type { TipoSerie } from '@/types/database.types';
+import type { TipoSerie, TrackingMode } from '@/types/database.types';
 import {
   entrenamientoService,
   type EjercicioBorrador,
@@ -39,6 +41,8 @@ export type SnapshotRutina = {
       reps: number | null;
       peso_kg: number | null;
       tipo_peso: string;
+      duracion_seg?: number | null;
+      distancia_km?: number | null;
     }[];
   }[];
 };
@@ -54,13 +58,41 @@ function snapshotRutinaDesdeCargados(cargados: EjercicioBorrador[]): SnapshotRut
         reps: s.repeticiones,
         peso_kg: s.peso_kg,
         tipo_peso: s.tipo_peso,
+        duracion_seg: s.duracion_seg ?? null,
+        distancia_km: s.distancia_km ?? null,
       })),
     })),
   };
 }
 
+function esCardio(trackingMode: TrackingMode | null | undefined): boolean {
+  return trackingMode === 'cardio_time' || trackingMode === 'cardio_time_distance';
+}
+
+function formatearDuracionInput(seg: number | null | undefined): string {
+  if (seg == null || !Number.isFinite(Number(seg)) || Number(seg) <= 0) return '';
+  return String(Math.round(Number(seg) / 60));
+}
 
 function mapCargadoALineaDesdeUltima(ej: EjercicioBorrador, ultima: UltimaSesionRutina | null): BorradorEjercicioLinea {
+  if (esCardio(ej.tracking_mode)) {
+    return {
+      lineId: lid(),
+      exerciseId: ej.exercise_id,
+      orden: ej.orden,
+      nombre: ej.nombre,
+      musculo_primario: ej.musculo_primario,
+      tracking_mode: ej.tracking_mode,
+      sets: [
+        {
+          ...registroCardioPorDefecto(),
+          duracionSeg: formatearDuracionInput(ej.sets[0]?.duracion_seg),
+          distanciaKm: ej.sets[0]?.distancia_km != null ? String(ej.sets[0]!.distancia_km) : '',
+        },
+      ],
+    };
+  }
+
   const sets: BorradorSerieLinea[] =
     ej.sets.length > 0
       ? ej.sets.map((s) => {
@@ -96,6 +128,7 @@ function mapCargadoALineaDesdeUltima(ej: EjercicioBorrador, ultima: UltimaSesion
     orden: ej.orden,
     nombre: ej.nombre,
     musculo_primario: ej.musculo_primario,
+    tracking_mode: ej.tracking_mode,
     sets,
   };
 }
@@ -103,7 +136,10 @@ function mapCargadoALineaDesdeUltima(ej: EjercicioBorrador, ultima: UltimaSesion
 type WseRecuperacionRow = {
   orden: number;
   exercise_id: string;
-  exercises: { nombre: string; musculo_primario: string } | { nombre: string; musculo_primario: string }[] | null;
+  exercises:
+    | { nombre: string; musculo_primario: string; tracking_mode: TrackingMode | null }
+    | { nombre: string; musculo_primario: string; tracking_mode: TrackingMode | null }[]
+    | null;
   workout_sets:
     | {
         numero_serie: number;
@@ -112,6 +148,8 @@ type WseRecuperacionRow = {
         repeticiones: number | null;
         rir: number | null;
         tipo_peso: string;
+        duracion_seg: number | null;
+        distancia_km: number | null;
         completada: boolean;
       }[]
     | null;
@@ -131,9 +169,22 @@ function mapWseRecuperadoALinea(wse: WseRecuperacionRow): BorradorEjercicioLinea
   const exOne = Array.isArray(exRaw) ? exRaw[0] : exRaw;
   const nombre = exOne?.nombre?.trim() ?? 'Ejercicio';
   const musculo = exOne?.musculo_primario?.trim() ?? '';
+  const tracking_mode =
+    exOne?.tracking_mode === 'cardio_time' || exOne?.tracking_mode === 'cardio_time_distance'
+      ? exOne.tracking_mode
+      : 'strength';
   const sorted = (wse.workout_sets ?? []).slice().sort((a, b) => a.numero_serie - b.numero_serie);
   const sets: BorradorSerieLinea[] =
-    sorted.length > 0
+    esCardio(tracking_mode)
+      ? [
+          {
+            ...registroCardioPorDefecto(),
+            duracionSeg: formatearDuracionInput(sorted[0]?.duracion_seg),
+            distanciaKm: sorted[0]?.distancia_km != null ? String(sorted[0].distancia_km) : '',
+            completada: Boolean(sorted[0]?.completada),
+          },
+        ]
+      : sorted.length > 0
       ? sorted.map((st) => ({
           setId: lid(),
           tipoUi: tipoSerieDbAUi(st.tipo_serie),
@@ -149,6 +200,7 @@ function mapWseRecuperadoALinea(wse: WseRecuperacionRow): BorradorEjercicioLinea
     orden: wse.orden,
     nombre,
     musculo_primario: musculo,
+    tracking_mode,
     sets,
   };
 }
@@ -194,16 +246,34 @@ function formatearDuracion(totalSeg: number): string {
 
 export function EntrenoProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
+  const { isDark } = useThemeMode();
   const [entreno, setEntreno] = useState<EntrenoActivo | null>(null);
   const [tick, setTick] = useState(0);
   const entrenoRef = useRef(entreno);
   entrenoRef.current = entreno;
+  const [sesionHuerfana, setSesionHuerfana] = useState<{ id: string; nombre: string } | null>(null);
+  const [accionando, setAccionando] = useState(false);
 
   useEffect(() => {
     if (!entreno) return;
     const id = setInterval(() => setTick((t) => t + 1), 1000);
     return () => clearInterval(id);
   }, [entreno?.sessionId]);
+
+  useEffect(() => {
+    if (!user?.id || entreno) return;
+    (async () => {
+      const { data } = await supabase
+        .from('workout_sessions')
+        .select('id, nombre')
+        .eq('user_id', user.id)
+        .is('hora_fin', null)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (data) setSesionHuerfana({ id: data.id, nombre: (data.nombre ?? 'Entreno').trim() || 'Entreno' });
+    })();
+  }, [user?.id]);
 
   const segundosTranscurridos = useMemo(() => {
     if (!entreno) return 0;
@@ -287,8 +357,8 @@ export function EntrenoProvider({ children }: { children: ReactNode }) {
         `id, nombre, routine_id, hora_inicio, hora_fin,
         workout_session_exercises (
           orden, exercise_id,
-          exercises ( nombre, musculo_primario ),
-          workout_sets ( numero_serie, tipo_serie, peso_kg, repeticiones, rir, tipo_peso, completada )
+          exercises ( nombre, musculo_primario, tracking_mode ),
+          workout_sets ( numero_serie, tipo_serie, peso_kg, repeticiones, rir, tipo_peso, duracion_seg, distancia_km, completada )
         )`,
       )
       .eq('id', sessionId)
@@ -365,7 +435,62 @@ export function EntrenoProvider({ children }: { children: ReactNode }) {
     ],
   );
 
-  return <EntrenoContext.Provider value={value}>{children}</EntrenoContext.Provider>;
+  return (
+    <EntrenoContext.Provider value={value}>
+      {children}
+      <Modal
+        visible={sesionHuerfana != null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {}}
+      >
+        <View style={[em.backdrop, { backgroundColor: isDark ? 'rgba(0,0,0,0.68)' : 'rgba(0,0,0,0.32)' }]}>
+          <View style={[em.card, { backgroundColor: isDark ? '#1A1A1A' : '#FFFFFF', borderColor: isDark ? '#2A2A2A' : '#D8D8D8' }]}>
+            <View style={em.accentBar} />
+            <Text style={[em.titulo, { color: isDark ? '#FFFFFF' : '#0F0F0F' }]}>Entreno sin terminar</Text>
+            <Text style={[em.cuerpo, { color: isDark ? '#888888' : '#666666' }]}>
+              Tienes un entreno sin finalizar:{'\n'}
+              <Text style={[em.nombre, { color: isDark ? '#FFFFFF' : '#0F0F0F' }]}>{sesionHuerfana?.nombre}</Text>
+            </Text>
+            <View style={em.acciones}>
+              <Pressable
+                style={[em.btnPrimario, accionando && em.btnDesactivado]}
+                disabled={accionando}
+                onPress={async () => {
+                  if (!sesionHuerfana) return;
+                  setAccionando(true);
+                  try {
+                    await recuperarEntreno(sesionHuerfana.id);
+                    setSesionHuerfana(null);
+                  } finally {
+                    setAccionando(false);
+                  }
+                }}
+              >
+                <Text style={em.btnPrimarioTxt}>CONTINUAR ENTRENO</Text>
+              </Pressable>
+              <Pressable
+                style={[em.btnPeligro, accionando && em.btnDesactivado, { borderColor: isDark ? '#D71921' : '#D71921' }]}
+                disabled={accionando}
+                onPress={async () => {
+                  if (!sesionHuerfana) return;
+                  setAccionando(true);
+                  try {
+                    await entrenamientoService.descartarSesionHuerfana(sesionHuerfana.id);
+                    setSesionHuerfana(null);
+                  } finally {
+                    setAccionando(false);
+                  }
+                }}
+              >
+                <Text style={[em.btnPeligroTxt, { color: isDark ? '#F08080' : '#B00020' }]}>DESCARTAR</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </EntrenoContext.Provider>
+  );
 }
 
 export function useEntreno(): EntrenoContextValue {
@@ -382,3 +507,77 @@ export function useEntrenoDuracionTexto(): string {
   if (!entrenoActivo) return '0:00';
   return formatearDuracion(segundosTranscurridos);
 }
+
+const em = StyleSheet.create({
+  backdrop: {
+    flex: 1,
+    justifyContent: 'center',
+    padding: 16,
+  },
+  card: {
+    width: '100%',
+    maxWidth: 400,
+    alignSelf: 'center',
+    borderRadius: 12,
+    borderWidth: 1,
+    overflow: 'hidden',
+    padding: 16,
+  },
+  accentBar: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 2,
+    backgroundColor: '#00D4FF',
+  },
+  titulo: {
+    fontFamily: 'SpaceGrotesk_700Bold',
+    fontSize: 18,
+    lineHeight: 23,
+    marginTop: 8,
+    marginBottom: 8,
+  },
+  cuerpo: {
+    fontFamily: 'SpaceGrotesk_400Regular',
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 16,
+  },
+  nombre: {
+    fontFamily: 'SpaceGrotesk_500Medium',
+  },
+  acciones: {
+    gap: 8,
+  },
+  btnPrimario: {
+    minHeight: 42,
+    borderRadius: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#00D4FF',
+  },
+  btnPrimarioTxt: {
+    fontFamily: 'SpaceMono_700Bold',
+    color: '#001015',
+    fontSize: 11,
+    lineHeight: 14,
+    letterSpacing: 0,
+  },
+  btnPeligro: {
+    minHeight: 42,
+    borderRadius: 6,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  btnPeligroTxt: {
+    fontFamily: 'SpaceMono_700Bold',
+    fontSize: 11,
+    lineHeight: 14,
+    letterSpacing: 0,
+  },
+  btnDesactivado: {
+    opacity: 0.5,
+  },
+});

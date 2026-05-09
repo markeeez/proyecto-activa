@@ -29,7 +29,9 @@ import {
   progresoService,
   type DistribucionMuscular,
   type EjercicioResumen,
+  type EstadisticasCardio,
   type EstadisticasEjercicio,
+  type SesionCardioStats,
   type SesionEjercicioStats,
 } from '@/services/progreso.service';
 
@@ -68,6 +70,34 @@ const INFO_GRAFICOS: Record<'peso' | 'volumen' | 'reps' | 'series', InfoGrafico>
     descripcion: 'Número total de series completadas del ejercicio en cada sesión.',
   },
 };
+
+const INFO_GRAFICOS_CARDIO: Record<'tiempo' | 'distancia' | 'tiempoTotal' | 'series', InfoGrafico> = {
+  tiempo: {
+    titulo: 'Mejor tiempo',
+    descripcion: 'La serie de mayor duración completada en cada sesión. Refleja tu mejor esfuerzo continuo.',
+  },
+  tiempoTotal: {
+    titulo: 'Tiempo total',
+    descripcion: 'Suma de la duración de todas las series completadas en cada sesión.',
+  },
+  distancia: {
+    titulo: 'Mejor distancia',
+    descripcion: 'La distancia más alta registrada en una sola serie durante cada sesión.',
+  },
+  series: {
+    titulo: 'Series',
+    descripcion: 'Número total de series completadas del ejercicio en cada sesión.',
+  },
+};
+
+function formatearTiempo(seg: number): string {
+  const h = Math.floor(seg / 3600);
+  const m = Math.floor((seg % 3600) / 60);
+  const s = Math.floor(seg % 60);
+  if (h > 0) return `${h}h${String(m).padStart(2, '0')}m`;
+  if (m > 0) return `${m}m${String(s).padStart(2, '0')}s`;
+  return `${s}s`;
+}
 
 function estiloNivelEjercicio(
   nivelRaw: string | null,
@@ -133,6 +163,50 @@ function filasGraficoReps(rows: SesionEjercicioStats[]) {
 
 function filasGraficoSeries(rows: SesionEjercicioStats[]) {
   return fusionarPorFecha(rows).map((r) => ({ x: r.fecha, y: r.series }));
+}
+
+function fusionarCardioporFecha(rows: SesionCardioStats[]): SesionCardioStats[] {
+  const m = new Map<string, { totalTiempoSeg: number; mejorTiempoSeg: number | null; mayorDistanciaKm: number | null; series: number }>();
+  const maxN = (a: number | null, b: number | null): number | null => {
+    const xs = [a, b].filter((x): x is number => x != null && !Number.isNaN(x));
+    return xs.length ? Math.max(...xs) : null;
+  };
+  for (const r of rows) {
+    const cur = m.get(r.fecha);
+    if (!cur) {
+      m.set(r.fecha, { totalTiempoSeg: r.totalTiempoSeg, mejorTiempoSeg: r.mejorTiempoSeg, mayorDistanciaKm: r.mayorDistanciaKm, series: r.series });
+      continue;
+    }
+    m.set(r.fecha, {
+      totalTiempoSeg: cur.totalTiempoSeg + r.totalTiempoSeg,
+      mejorTiempoSeg: maxN(cur.mejorTiempoSeg, r.mejorTiempoSeg),
+      mayorDistanciaKm: maxN(cur.mayorDistanciaKm, r.mayorDistanciaKm),
+      series: cur.series + r.series,
+    });
+  }
+  return [...m.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([fecha, v]) => ({ fecha, ...v }));
+}
+
+function filasCardioTiempo(rows: SesionCardioStats[]) {
+  return fusionarCardioporFecha(rows)
+    .filter((r) => r.mejorTiempoSeg != null)
+    .map((r) => ({ x: r.fecha, y: r.mejorTiempoSeg! }));
+}
+
+function filasCardioTiempoTotal(rows: SesionCardioStats[]) {
+  return fusionarCardioporFecha(rows).map((r) => ({ x: r.fecha, y: r.totalTiempoSeg }));
+}
+
+function filasCardioDistancia(rows: SesionCardioStats[]) {
+  return fusionarCardioporFecha(rows)
+    .filter((r) => r.mayorDistanciaKm != null)
+    .map((r) => ({ x: r.fecha, y: r.mayorDistanciaKm! }));
+}
+
+function filasCardioSeries(rows: SesionCardioStats[]) {
+  return fusionarCardioporFecha(rows).map((r) => ({ x: r.fecha, y: r.series }));
 }
 
 function formatoEjeFecha(iso: string) {
@@ -252,7 +326,9 @@ function GraficoLineaMini({
   if (datos.length < 2) {
     return (
       <View style={wrapStyle}>
-        <Text style={{ fontFamily: fontMono, fontSize: 11, color: colorEtiqueta }}>Sin datos suficientes</Text>
+        <Text style={{ fontFamily: fontMono, fontSize: 11, color: colorEtiqueta, textAlign: 'center' }}>
+          {datos.length === 0 ? 'Sin registros' : 'Entrena más días para\nver la evolución'}
+        </Text>
       </View>
     );
   }
@@ -317,7 +393,9 @@ function GraficoBarrasMini({
   if (datos.length < 2) {
     return (
       <View style={wrapStyle}>
-        <Text style={{ fontFamily: fontMono, fontSize: 11, color: colorEtiqueta }}>Sin datos suficientes</Text>
+        <Text style={{ fontFamily: fontMono, fontSize: 11, color: colorEtiqueta, textAlign: 'center' }}>
+          {datos.length === 0 ? 'Sin registros' : 'Entrena más días para\nver la evolución'}
+        </Text>
       </View>
     );
   }
@@ -838,6 +916,7 @@ export default function EstadisticasEjercicioScreen() {
   const [fechaRegistro, setFechaRegistro] = useState<string>(fechaHoyIsoLocal());
   const [periodo, setPeriodo] = useState<PeriodoStats>('3m');
   const [stats, setStats] = useState<EstadisticasEjercicio | null>(null);
+  const [statsCardio, setStatsCardio] = useState<EstadisticasCardio | null>(null);
   const [distribMuscular, setDistribMuscular] = useState<DistribucionMuscular[]>([]);
   const [cargandoDistrib, setCargandoDistrib] = useState(false);
   const [cargandoStats, setCargandoStats] = useState(false);
@@ -933,28 +1012,45 @@ export default function EstadisticasEjercicioScreen() {
 
   const seleccionIdRef = useRef<string | null>(null);
 
+  const esCardio =
+    seleccion?.tracking_mode === 'cardio_time' || seleccion?.tracking_mode === 'cardio_time_distance';
+  const cardioConDistancia = seleccion?.tracking_mode === 'cardio_time_distance';
+
   useEffect(() => {
     if (vista !== 'detalle' || !user?.id || !seleccion) {
       setStats(null);
+      setStatsCardio(null);
       seleccionIdRef.current = null;
       return;
     }
     const ejercicioChanged = seleccionIdRef.current !== seleccion.id;
     if (ejercicioChanged) {
       setStats(null);
+      setStatsCardio(null);
       seleccionIdRef.current = seleccion.id;
     }
     let cancel = false;
     void (async () => {
       setCargandoStats(true);
       try {
-        const data = await progresoService.obtenerEstadisticasEjercicio(
-          user.id,
-          seleccion.id,
-          fechaIniStats,
-          fechaFinStats,
-        );
-        if (!cancel) setStats(data);
+        if (esCardio) {
+          const data = await progresoService.obtenerEstadisticasCardio(
+            user.id,
+            seleccion.id,
+            fechaIniStats,
+            fechaFinStats,
+            cardioConDistancia,
+          );
+          if (!cancel) setStatsCardio(data);
+        } else {
+          const data = await progresoService.obtenerEstadisticasEjercicio(
+            user.id,
+            seleccion.id,
+            fechaIniStats,
+            fechaFinStats,
+          );
+          if (!cancel) setStats(data);
+        }
       } finally {
         if (!cancel) setCargandoStats(false);
       }
@@ -962,7 +1058,7 @@ export default function EstadisticasEjercicioScreen() {
     return () => {
       cancel = true;
     };
-  }, [vista, user?.id, seleccion, fechaIniStats, fechaFinStats]);
+  }, [vista, user?.id, seleccion, fechaIniStats, fechaFinStats, esCardio, cardioConDistancia]);
 
   const renderChip = (
     labelBase: string,
@@ -1009,6 +1105,11 @@ export default function EstadisticasEjercicioScreen() {
   const datosVol = stats ? filasGraficoVolumen(stats.porSesion) : [];
   const datosReps = stats ? filasGraficoReps(stats.porSesion) : [];
   const datosSeries = stats ? filasGraficoSeries(stats.porSesion) : [];
+
+  const datosCardioTiempo = statsCardio ? filasCardioTiempo(statsCardio.porSesion) : [];
+  const datosCardioTiempoTotal = statsCardio ? filasCardioTiempoTotal(statsCardio.porSesion) : [];
+  const datosCardioDistancia = statsCardio ? filasCardioDistancia(statsCardio.porSesion) : [];
+  const datosCardioSeries = statsCardio ? filasCardioSeries(statsCardio.porSesion) : [];
 
   const datosDistribMuscular = useMemo(() => {
     const map = new Map(distribMuscular.map((d) => [d.grupo, d.porcentaje]));
@@ -1199,10 +1300,10 @@ export default function EstadisticasEjercicioScreen() {
               </View>
 
               {/* Primera carga: sin datos previos todavía */}
-              {cargandoStats && !stats ? (
+              {cargandoStats && !stats && !statsCardio ? (
                 <>
                   <View style={styles.gridMetricasSkeleton}>
-                    {Array.from({ length: 4 }).map((_, i) => (
+                    {Array.from({ length: esCardio ? 3 : 4 }).map((_, i) => (
                       <View key={i} style={styles.metricaCelda}>
                         <SkeletonPulse color={c.surfaceElevated} style={{ height: 12, width: 28, marginBottom: 4 }} />
                         <SkeletonPulse color={c.surfaceElevated} style={{ height: 8, width: 42, marginBottom: 6 }} />
@@ -1226,158 +1327,311 @@ export default function EstadisticasEjercicioScreen() {
                   </View>
                   <SkeletonGraficos c={c} r={r} />
                 </>
-              ) : !stats ? null : stats.veces < 2 ? (
-                <View style={styles.insufficientWrap}>
-                  <Ionicons name="analytics-outline" size={32} color={c.primary} />
-                  <Text style={styles.insufficientTitle}>Sin datos suficientes</Text>
-                  <Text style={styles.insufficientText}>
-                    Realiza este ejercicio al menos 2 veces para ver sus estadísticas.
-                  </Text>
-                </View>
-              ) : (
-                <>
-                  <View style={styles.gridMetricas}>
-                    <View style={styles.metricaCelda}>
-                      <Ionicons style={styles.metricaIcon} name="calendar-outline" size={15} color={c.primary} />
-                      <Text style={styles.metricaLabel}>RUTINAS</Text>
-                      <Text style={styles.metricaValor}>{stats.rutinas}</Text>
-                    </View>
-                    <View style={styles.metricaCelda}>
-                      <Ionicons style={styles.metricaIcon} name="refresh" size={15} color={c.primary} />
-                      <Text style={styles.metricaLabel}>VECES</Text>
-                      <Text style={styles.metricaValor}>{stats.veces}</Text>
-                    </View>
-                    <View style={styles.metricaCelda}>
-                      <Ionicons style={styles.metricaIcon} name="trophy-outline" size={15} color={c.primary} />
-                      <Text style={styles.metricaLabel}>MEJOR PESO</Text>
-                      <Text style={styles.metricaValor}>
-                        {stats.mejorPeso != null ? `${stats.mejorPeso} kg` : '—'}
-                      </Text>
-                    </View>
-                    <View style={styles.metricaCelda}>
-                      <Ionicons style={styles.metricaIcon} name="star-outline" size={15} color={c.primary} />
-                      <Text style={styles.metricaLabel}>MEJOR REPS</Text>
-                      <Text style={styles.metricaValor}>
-                        {stats.mejorReps != null ? String(stats.mejorReps) : '—'}
-                      </Text>
-                    </View>
+              ) : esCardio ? (
+                /* ── RAMA CARDIO ── */
+                !statsCardio ? null : statsCardio.veces < 1 ? (
+                  <View style={styles.insufficientWrap}>
+                    <Ionicons name="analytics-outline" size={32} color={c.primary} />
+                    <Text style={styles.insufficientTitle}>Sin datos suficientes</Text>
+                    <Text style={styles.insufficientText}>
+                      Realiza este ejercicio al menos una vez para ver sus estadísticas.
+                    </Text>
                   </View>
-
-                  <View style={styles.segmentWrap}>
-                    {(['7d', '3m', '1y'] as PeriodoStats[]).map((k) => (
-                      <Pressable
-                        key={k}
-                        onPress={() => setPeriodo(k)}
-                        style={[styles.segmentBtn, periodo === k && styles.segmentBtnOn]}
-                        accessibilityRole="button"
-                      >
-                        <Text style={[styles.segmentTxt, periodo === k && styles.segmentTxtOn]}>
-                          {PERIODO_LABELS[k]}
+                ) : (
+                  <>
+                    <View style={styles.gridMetricas}>
+                      <View style={styles.metricaCelda}>
+                        <Ionicons style={styles.metricaIcon} name="refresh" size={15} color={c.primary} />
+                        <Text style={styles.metricaLabel}>VECES</Text>
+                        <Text style={styles.metricaValor}>{statsCardio.veces}</Text>
+                      </View>
+                      <View style={styles.metricaCelda}>
+                        <Ionicons style={styles.metricaIcon} name="timer-outline" size={15} color={c.primary} />
+                        <Text style={styles.metricaLabel}>MEJOR TIEMPO</Text>
+                        <Text style={[styles.metricaValor, { fontSize: 14, lineHeight: 17 }]}>
+                          {statsCardio.mejorTiempoSeg != null ? formatearTiempo(statsCardio.mejorTiempoSeg) : '—'}
                         </Text>
-                      </Pressable>
-                    ))}
-                  </View>
-
-                  {/* Al cambiar periodo: skeleton en el área de gráficos, todo lo demás estático */}
-                  {cargandoStats ? (
-                    <SkeletonGraficos c={c} r={r} />
-                  ) : (
-                    <View style={styles.chartsGrid}>
-                      <View style={styles.chartsRow}>
-                        <View style={styles.chartCell}>
-                          <View style={styles.chartTitleRow}>
-                            <Text style={styles.chartTitle}>Mejor peso</Text>
-                            <Pressable
-                              onPress={() => setInfoGrafico(INFO_GRAFICOS.peso)}
-                              hitSlop={8}
-                              accessibilityRole="button"
-                              accessibilityLabel="Información sobre mejor peso"
-                            >
-                              <Ionicons name="information-circle-outline" size={15} color={c.textSecondary} />
-                            </Pressable>
-                          </View>
-                          <GraficoLineaMini
-                            datos={datosPeso}
-                            colorPrimario={c.primary}
-                            colorEtiqueta={c.textSecondary}
-                            colorGrid={c.border}
-                            formatY={(n) => n.toFixed(0)}
-                            fontMono={f.mono}
-                            flex
-                          />
+                      </View>
+                      {cardioConDistancia ? (
+                        <View style={styles.metricaCelda}>
+                          <Ionicons style={styles.metricaIcon} name="navigate-outline" size={15} color={c.primary} />
+                          <Text style={styles.metricaLabel}>MEJOR DIST.</Text>
+                          <Text style={[styles.metricaValor, { fontSize: 14, lineHeight: 17 }]}>
+                            {statsCardio.mayorDistanciaKm != null
+                              ? `${statsCardio.mayorDistanciaKm.toFixed(2)} km`
+                              : '—'}
+                          </Text>
                         </View>
-                        <View style={styles.chartCell}>
-                          <View style={styles.chartTitleRow}>
-                            <Text style={styles.chartTitle}>Volumen</Text>
-                            <Pressable
-                              onPress={() => setInfoGrafico(INFO_GRAFICOS.volumen)}
-                              hitSlop={8}
-                              accessibilityRole="button"
-                              accessibilityLabel="Información sobre volumen"
-                            >
-                              <Ionicons name="information-circle-outline" size={15} color={c.textSecondary} />
-                            </Pressable>
+                      ) : null}
+                    </View>
+
+                    <View style={styles.segmentWrap}>
+                      {(['7d', '3m', '1y'] as PeriodoStats[]).map((k) => (
+                        <Pressable
+                          key={k}
+                          onPress={() => setPeriodo(k)}
+                          style={[styles.segmentBtn, periodo === k && styles.segmentBtnOn]}
+                          accessibilityRole="button"
+                        >
+                          <Text style={[styles.segmentTxt, periodo === k && styles.segmentTxtOn]}>
+                            {PERIODO_LABELS[k]}
+                          </Text>
+                        </Pressable>
+                      ))}
+                    </View>
+
+                    {cargandoStats ? (
+                      <SkeletonGraficos c={c} r={r} />
+                    ) : (
+                      <View style={styles.chartsGrid}>
+                        <View style={styles.chartsRow}>
+                          <View style={styles.chartCell}>
+                            <View style={styles.chartTitleRow}>
+                              <Text style={styles.chartTitle}>Mejor tiempo</Text>
+                              <Pressable
+                                onPress={() => setInfoGrafico(INFO_GRAFICOS_CARDIO.tiempo)}
+                                hitSlop={8}
+                                accessibilityRole="button"
+                              >
+                                <Ionicons name="information-circle-outline" size={15} color={c.textSecondary} />
+                              </Pressable>
+                            </View>
+                            <GraficoLineaMini
+                              datos={datosCardioTiempo}
+                              colorPrimario={c.primary}
+                              colorEtiqueta={c.textSecondary}
+                              colorGrid={c.border}
+                              formatY={(n) => formatearTiempo(n)}
+                              fontMono={f.mono}
+                              flex
+                            />
                           </View>
-                          <GraficoLineaMini
-                            datos={datosVol}
-                            colorPrimario={c.primary}
-                            colorEtiqueta={c.textSecondary}
-                            colorGrid={c.border}
-                            formatY={(n) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : n.toFixed(0))}
-                            fontMono={f.mono}
-                            flex
-                          />
+                          <View style={styles.chartCell}>
+                            <View style={styles.chartTitleRow}>
+                              <Text style={styles.chartTitle}>Tiempo total</Text>
+                              <Pressable
+                                onPress={() => setInfoGrafico(INFO_GRAFICOS_CARDIO.tiempoTotal)}
+                                hitSlop={8}
+                                accessibilityRole="button"
+                              >
+                                <Ionicons name="information-circle-outline" size={15} color={c.textSecondary} />
+                              </Pressable>
+                            </View>
+                            <GraficoLineaMini
+                              datos={datosCardioTiempoTotal}
+                              colorPrimario={c.primary}
+                              colorEtiqueta={c.textSecondary}
+                              colorGrid={c.border}
+                              formatY={(n) => formatearTiempo(n)}
+                              fontMono={f.mono}
+                              flex
+                            />
+                          </View>
+                        </View>
+                        <View style={styles.chartsRow}>
+                          {cardioConDistancia ? (
+                            <View style={styles.chartCell}>
+                              <View style={styles.chartTitleRow}>
+                                <Text style={styles.chartTitle}>Mejor distancia</Text>
+                                <Pressable
+                                  onPress={() => setInfoGrafico(INFO_GRAFICOS_CARDIO.distancia)}
+                                  hitSlop={8}
+                                  accessibilityRole="button"
+                                >
+                                  <Ionicons name="information-circle-outline" size={15} color={c.textSecondary} />
+                                </Pressable>
+                              </View>
+                              <GraficoLineaMini
+                                datos={datosCardioDistancia}
+                                colorPrimario={c.primary}
+                                colorEtiqueta={c.textSecondary}
+                                colorGrid={c.border}
+                                formatY={(n) => `${n.toFixed(1)}km`}
+                                fontMono={f.mono}
+                                flex
+                              />
+                            </View>
+                          ) : null}
+                          <View style={styles.chartCell}>
+                            <View style={styles.chartTitleRow}>
+                              <Text style={styles.chartTitle}>Series</Text>
+                              <Pressable
+                                onPress={() => setInfoGrafico(INFO_GRAFICOS_CARDIO.series)}
+                                hitSlop={8}
+                                accessibilityRole="button"
+                              >
+                                <Ionicons name="information-circle-outline" size={15} color={c.textSecondary} />
+                              </Pressable>
+                            </View>
+                            <GraficoBarrasMini
+                              datos={datosCardioSeries}
+                              colorPrimario={c.primary}
+                              colorEtiqueta={c.textSecondary}
+                              colorGrid={c.border}
+                              formatY={(n) => String(Math.round(n))}
+                              fontMono={f.mono}
+                              flex
+                            />
+                          </View>
                         </View>
                       </View>
-                      <View style={styles.chartsRow}>
-                        <View style={styles.chartCell}>
-                          <View style={styles.chartTitleRow}>
-                            <Text style={styles.chartTitle}>Mejor reps</Text>
-                            <Pressable
-                              onPress={() => setInfoGrafico(INFO_GRAFICOS.reps)}
-                              hitSlop={8}
-                              accessibilityRole="button"
-                              accessibilityLabel="Información sobre mejor reps"
-                            >
-                              <Ionicons name="information-circle-outline" size={15} color={c.textSecondary} />
-                            </Pressable>
-                          </View>
-                          <GraficoLineaMini
-                            datos={datosReps}
-                            colorPrimario={c.primary}
-                            colorEtiqueta={c.textSecondary}
-                            colorGrid={c.border}
-                            formatY={(n) => String(Math.round(n))}
-                            fontMono={f.mono}
-                            flex
-                          />
-                        </View>
-                        <View style={styles.chartCell}>
-                          <View style={styles.chartTitleRow}>
-                            <Text style={styles.chartTitle}>Series</Text>
-                            <Pressable
-                              onPress={() => setInfoGrafico(INFO_GRAFICOS.series)}
-                              hitSlop={8}
-                              accessibilityRole="button"
-                              accessibilityLabel="Información sobre series"
-                            >
-                              <Ionicons name="information-circle-outline" size={15} color={c.textSecondary} />
-                            </Pressable>
-                          </View>
-                          <GraficoBarrasMini
-                            datos={datosSeries}
-                            colorPrimario={c.primary}
-                            colorEtiqueta={c.textSecondary}
-                            colorGrid={c.border}
-                            formatY={(n) => String(Math.round(n))}
-                            fontMono={f.mono}
-                            flex
-                          />
-                        </View>
+                    )}
+                  </>
+                )
+              ) : (
+                /* ── RAMA FUERZA ── */
+                !stats ? null : stats.veces < 1 ? (
+                  <View style={styles.insufficientWrap}>
+                    <Ionicons name="analytics-outline" size={32} color={c.primary} />
+                    <Text style={styles.insufficientTitle}>Sin datos suficientes</Text>
+                    <Text style={styles.insufficientText}>
+                      Realiza este ejercicio al menos una vez para ver sus estadísticas.
+                    </Text>
+                  </View>
+                ) : (
+                  <>
+                    <View style={styles.gridMetricas}>
+                      <View style={styles.metricaCelda}>
+                        <Ionicons style={styles.metricaIcon} name="calendar-outline" size={15} color={c.primary} />
+                        <Text style={styles.metricaLabel}>RUTINAS</Text>
+                        <Text style={styles.metricaValor}>{stats.rutinas}</Text>
+                      </View>
+                      <View style={styles.metricaCelda}>
+                        <Ionicons style={styles.metricaIcon} name="refresh" size={15} color={c.primary} />
+                        <Text style={styles.metricaLabel}>VECES</Text>
+                        <Text style={styles.metricaValor}>{stats.veces}</Text>
+                      </View>
+                      <View style={styles.metricaCelda}>
+                        <Ionicons style={styles.metricaIcon} name="trophy-outline" size={15} color={c.primary} />
+                        <Text style={styles.metricaLabel}>MEJOR PESO</Text>
+                        <Text style={styles.metricaValor}>
+                          {stats.mejorPeso != null ? `${stats.mejorPeso} kg` : '—'}
+                        </Text>
+                      </View>
+                      <View style={styles.metricaCelda}>
+                        <Ionicons style={styles.metricaIcon} name="star-outline" size={15} color={c.primary} />
+                        <Text style={styles.metricaLabel}>MEJOR REPS</Text>
+                        <Text style={styles.metricaValor}>
+                          {stats.mejorReps != null ? String(stats.mejorReps) : '—'}
+                        </Text>
                       </View>
                     </View>
-                  )}
-                </>
+
+                    <View style={styles.segmentWrap}>
+                      {(['7d', '3m', '1y'] as PeriodoStats[]).map((k) => (
+                        <Pressable
+                          key={k}
+                          onPress={() => setPeriodo(k)}
+                          style={[styles.segmentBtn, periodo === k && styles.segmentBtnOn]}
+                          accessibilityRole="button"
+                        >
+                          <Text style={[styles.segmentTxt, periodo === k && styles.segmentTxtOn]}>
+                            {PERIODO_LABELS[k]}
+                          </Text>
+                        </Pressable>
+                      ))}
+                    </View>
+
+                    {cargandoStats ? (
+                      <SkeletonGraficos c={c} r={r} />
+                    ) : (
+                      <View style={styles.chartsGrid}>
+                        <View style={styles.chartsRow}>
+                          <View style={styles.chartCell}>
+                            <View style={styles.chartTitleRow}>
+                              <Text style={styles.chartTitle}>Mejor peso</Text>
+                              <Pressable
+                                onPress={() => setInfoGrafico(INFO_GRAFICOS.peso)}
+                                hitSlop={8}
+                                accessibilityRole="button"
+                                accessibilityLabel="Información sobre mejor peso"
+                              >
+                                <Ionicons name="information-circle-outline" size={15} color={c.textSecondary} />
+                              </Pressable>
+                            </View>
+                            <GraficoLineaMini
+                              datos={datosPeso}
+                              colorPrimario={c.primary}
+                              colorEtiqueta={c.textSecondary}
+                              colorGrid={c.border}
+                              formatY={(n) => n.toFixed(0)}
+                              fontMono={f.mono}
+                              flex
+                            />
+                          </View>
+                          <View style={styles.chartCell}>
+                            <View style={styles.chartTitleRow}>
+                              <Text style={styles.chartTitle}>Volumen</Text>
+                              <Pressable
+                                onPress={() => setInfoGrafico(INFO_GRAFICOS.volumen)}
+                                hitSlop={8}
+                                accessibilityRole="button"
+                                accessibilityLabel="Información sobre volumen"
+                              >
+                                <Ionicons name="information-circle-outline" size={15} color={c.textSecondary} />
+                              </Pressable>
+                            </View>
+                            <GraficoLineaMini
+                              datos={datosVol}
+                              colorPrimario={c.primary}
+                              colorEtiqueta={c.textSecondary}
+                              colorGrid={c.border}
+                              formatY={(n) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : n.toFixed(0))}
+                              fontMono={f.mono}
+                              flex
+                            />
+                          </View>
+                        </View>
+                        <View style={styles.chartsRow}>
+                          <View style={styles.chartCell}>
+                            <View style={styles.chartTitleRow}>
+                              <Text style={styles.chartTitle}>Mejor reps</Text>
+                              <Pressable
+                                onPress={() => setInfoGrafico(INFO_GRAFICOS.reps)}
+                                hitSlop={8}
+                                accessibilityRole="button"
+                                accessibilityLabel="Información sobre mejor reps"
+                              >
+                                <Ionicons name="information-circle-outline" size={15} color={c.textSecondary} />
+                              </Pressable>
+                            </View>
+                            <GraficoLineaMini
+                              datos={datosReps}
+                              colorPrimario={c.primary}
+                              colorEtiqueta={c.textSecondary}
+                              colorGrid={c.border}
+                              formatY={(n) => String(Math.round(n))}
+                              fontMono={f.mono}
+                              flex
+                            />
+                          </View>
+                          <View style={styles.chartCell}>
+                            <View style={styles.chartTitleRow}>
+                              <Text style={styles.chartTitle}>Series</Text>
+                              <Pressable
+                                onPress={() => setInfoGrafico(INFO_GRAFICOS.series)}
+                                hitSlop={8}
+                                accessibilityRole="button"
+                                accessibilityLabel="Información sobre series"
+                              >
+                                <Ionicons name="information-circle-outline" size={15} color={c.textSecondary} />
+                              </Pressable>
+                            </View>
+                            <GraficoBarrasMini
+                              datos={datosSeries}
+                              colorPrimario={c.primary}
+                              colorEtiqueta={c.textSecondary}
+                              colorGrid={c.border}
+                              formatY={(n) => String(Math.round(n))}
+                              fontMono={f.mono}
+                              flex
+                            />
+                          </View>
+                        </View>
+                      </View>
+                    )}
+                  </>
+                )
               )}
             </>
           ) : null}

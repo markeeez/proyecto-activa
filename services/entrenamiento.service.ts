@@ -6,6 +6,7 @@
 
 import { supabase } from '@/lib/supabase';
 import type {
+  TrackingMode,
   TipoPeso,
   TipoSerie,
   WorkoutSession,
@@ -29,6 +30,8 @@ export type DetalleRutinaSet = {
   rir: number | null;
   peso_kg: number | null;
   tipo_peso: TipoPeso;
+  duracion_seg?: number | null;
+  distancia_km?: number | null;
 };
 
 export type DetalleRutinaEjercicio = {
@@ -36,7 +39,7 @@ export type DetalleRutinaEjercicio = {
   exercise_id: string;
   orden: number;
   notas: string | null;
-  exercises: { nombre: string; musculo_primario: string; foto_url: string | null };
+  exercises: { nombre: string; musculo_primario: string; foto_url: string | null; tracking_mode: TrackingMode };
   routine_sets: DetalleRutinaSet[];
 };
 
@@ -76,6 +79,8 @@ export type BorradorSerieRutina = {
   repeticiones: number | null;
   peso_kg: number | null;
   tipo_peso: TipoPeso;
+  duracion_seg?: number | null;
+  distancia_km?: number | null;
 };
 
 export type BorradorEjercicioRutina = {
@@ -90,12 +95,15 @@ export type EjercicioBorrador = {
   orden: number;
   nombre: string;
   musculo_primario: string;
+  tracking_mode: TrackingMode;
   sets: {
     numero_serie: number;
     tipo_serie: TipoSeriePlantillaDb;
     repeticiones: number | null;
     peso_kg: number | null;
     tipo_peso: TipoPeso;
+    duracion_seg?: number | null;
+    distancia_km?: number | null;
   }[];
 };
 
@@ -111,6 +119,9 @@ export type EntrenoEjercicioPersistido = {
     rir?: number | null;
     peso_kg: number | null;
     tipo_peso: TipoPeso;
+    duracion_seg?: number | null;
+    distancia_km?: number | null;
+    descanso_seg?: number | null;
   }[];
 };
 
@@ -147,7 +158,10 @@ export type DetalleSesionSet = {
   repeticiones: number | null;
   rir: number | null;
   tipo_peso: TipoPeso;
+  duracion_seg: number | null;
+  distancia_km: number | null;
   completada: boolean;
+  descanso_seg: number | null;
 };
 
 export type DetalleSesionEjercicio = {
@@ -156,6 +170,7 @@ export type DetalleSesionEjercicio = {
   nombre: string;
   musculo_primario: string;
   foto_url: string | null;
+  tracking_mode: TrackingMode;
   notas: string | null;
   sets: DetalleSesionSet[];
 };
@@ -180,6 +195,8 @@ export type UltimaSesionRutina = {
       peso_kg: number | null;
       repeticiones: number | null;
       tipo_peso: string;
+      duracion_seg: number | null;
+      distancia_km: number | null;
     }[];
   }[];
 };
@@ -222,8 +239,8 @@ type DetalleSesionRow = {
     exercise_id: string;
     notas: string | null;
     exercises:
-      | { nombre: string; musculo_primario: string; foto_url: string | null }
-      | { nombre: string; musculo_primario: string; foto_url: string | null }[]
+      | { nombre: string; musculo_primario: string; foto_url: string | null; tracking_mode: TrackingMode | null }
+      | { nombre: string; musculo_primario: string; foto_url: string | null; tracking_mode: TrackingMode | null }[]
       | null;
     workout_sets: {
       numero_serie: number;
@@ -232,7 +249,10 @@ type DetalleSesionRow = {
       repeticiones: number | null;
       rir: number | null;
       tipo_peso: TipoPeso;
+      duracion_seg: number | null;
+      distancia_km: number | null;
       completada: boolean;
+      descanso_seg: number | null;
     }[] | null;
   }[] | null;
 };
@@ -245,10 +265,33 @@ function formatearAnteriorSet(peso_kg: number | null, repeticiones: number | nul
   return `${p} × ${r}`;
 }
 
+function trackingModeSeguro(value: TrackingMode | string | null | undefined): TrackingMode {
+  return value === 'cardio_time' || value === 'cardio_time_distance' ? value : 'strength';
+}
+
+function formatearDuracionCardio(seg: number | null | undefined): string {
+  if (seg == null || !Number.isFinite(Number(seg)) || Number(seg) <= 0) return '—';
+  const total = Math.round(Number(seg));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+function formatearAnteriorCardio(duracionSeg: number | null, distanciaKm: number | null): string {
+  const tiempo = formatearDuracionCardio(duracionSeg);
+  if (distanciaKm != null && Number.isFinite(Number(distanciaKm)) && Number(distanciaKm) > 0) {
+    return `${tiempo} · ${Number(distanciaKm).toLocaleString('es-ES', { maximumFractionDigits: 2 })} km`;
+  }
+  return tiempo;
+}
+
 type RoutineExerciseJoinRow = {
   orden: number;
   exercise_id: string;
-  exercises: { nombre: string; musculo_primario: string } | { nombre: string; musculo_primario: string }[] | null;
+  exercises:
+    | { nombre: string; musculo_primario: string; tracking_mode: TrackingMode | null }
+    | { nombre: string; musculo_primario: string; tracking_mode: TrackingMode | null }[]
+    | null;
   routine_sets:
     | {
         numero_serie: number;
@@ -256,12 +299,16 @@ type RoutineExerciseJoinRow = {
         reps: number | null;
         peso_kg: number | null;
         tipo_peso: TipoPeso;
+        duracion_seg?: number | null;
+        distancia_km?: number | null;
       }[]
     | null;
 };
 
 /** Fila cruda de join: relaciones anidadas suelen inferirse como objeto o array. */
 type AnteriorJoinRowRaw = {
+  duracion_seg?: number | null;
+  distancia_km?: number | null;
   repeticiones: number | null;
   peso_kg: number | null;
   tipo_peso: TipoPeso;
@@ -393,6 +440,8 @@ async function escribirRutinaEjercicios(routineId: string, ejercicios: BorradorE
       reps: set.repeticiones,
       peso_kg: set.peso_kg,
       tipo_peso: set.tipo_peso,
+      duracion_seg: set.duracion_seg ?? null,
+      distancia_km: set.distancia_km ?? null,
     }));
   });
 
@@ -438,13 +487,15 @@ async function clonarRutinaBase(original: RoutineMetaRow, userId: string): Promi
           reps: number | null;
           peso_kg: number | null;
           tipo_peso: TipoPeso | null;
+          duracion_seg: number | null;
+          distancia_km: number | null;
         }[]
       | null;
   };
 
   const { data: exerciseRows, error: exerciseErr } = await supabase
     .from('routine_exercises')
-    .select('id, exercise_id, orden, notas, routine_sets ( numero_serie, tipo_serie, reps, peso_kg, tipo_peso )')
+    .select('id, exercise_id, orden, notas, routine_sets ( numero_serie, tipo_serie, reps, peso_kg, tipo_peso, duracion_seg, distancia_km )')
     .eq('routine_id', original.id)
     .order('orden');
 
@@ -481,6 +532,8 @@ async function clonarRutinaBase(original: RoutineMetaRow, userId: string): Promi
         reps: set.reps,
         peso_kg: set.peso_kg,
         tipo_peso: set.tipo_peso ?? 'kg',
+        duracion_seg: set.duracion_seg ?? null,
+        distancia_km: set.distancia_km ?? null,
       });
 
       if (setErr) {
@@ -565,6 +618,8 @@ export const entrenamientoService = {
         reps: set.repeticiones,
         peso_kg: set.peso_kg,
         tipo_peso: set.tipo_peso,
+        duracion_seg: set.duracion_seg ?? null,
+        distancia_km: set.distancia_km ?? null,
       }));
     });
 
@@ -659,8 +714,8 @@ export const entrenamientoService = {
         `id, nombre,
         routine_exercises (
           id, exercise_id, orden, notas,
-          exercises ( nombre, musculo_primario, foto_url ),
-          routine_sets ( numero_serie, tipo_serie, reps, peso_kg, tipo_peso )
+          exercises ( nombre, musculo_primario, foto_url, tracking_mode ),
+          routine_sets ( numero_serie, tipo_serie, reps, peso_kg, tipo_peso, duracion_seg, distancia_km )
         )`,
       )
       .eq('id', routineId)
@@ -723,8 +778,8 @@ export const entrenamientoService = {
       orden: number;
       notas: string | null;
       exercises:
-        | { nombre: string; musculo_primario: string; foto_url: string | null }
-        | { nombre: string; musculo_primario: string; foto_url: string | null }[]
+        | { nombre: string; musculo_primario: string; foto_url: string | null; tracking_mode: TrackingMode | null }
+        | { nombre: string; musculo_primario: string; foto_url: string | null; tracking_mode: TrackingMode | null }[]
         | null;
       routine_sets:
         | {
@@ -733,6 +788,8 @@ export const entrenamientoService = {
             reps: number | null;
             peso_kg: number | null;
             tipo_peso: TipoPeso | null;
+            duracion_seg: number | null;
+            distancia_km: number | null;
           }[]
         | null;
     };
@@ -754,6 +811,8 @@ export const entrenamientoService = {
           rir: rirPorSet.get(`${re.exercise_id}:${re.orden}:${s.numero_serie}`) ?? null,
           peso_kg: s.peso_kg,
           tipo_peso: (s.tipo_peso ?? 'kg') as TipoPeso,
+          duracion_seg: s.duracion_seg ?? null,
+          distancia_km: s.distancia_km ?? null,
         }));
       return {
         id: re.id,
@@ -764,6 +823,7 @@ export const entrenamientoService = {
           nombre: exOne?.nombre?.trim() ?? 'Ejercicio',
           musculo_primario: exOne?.musculo_primario?.trim() ?? '',
           foto_url: exOne?.foto_url != null && String(exOne.foto_url).trim() !== '' ? String(exOne.foto_url).trim() : null,
+          tracking_mode: trackingModeSeguro(exOne?.tracking_mode),
         },
         routine_sets,
       };
@@ -901,11 +961,23 @@ export const entrenamientoService = {
     if (error) console.error('[actualizarWorkoutSession]', error.message);
   },
 
+  async actualizarDuracionSesion(
+    sessionId: string,
+    hora_inicio: string,
+    hora_fin: string,
+  ): Promise<void> {
+    const { error } = await supabase
+      .from('workout_sessions')
+      .update({ hora_inicio, hora_fin })
+      .eq('id', sessionId);
+    if (error) throw new Error(error.message);
+  },
+
   async cargarEjerciciosDesdeRutina(routineId: string): Promise<EjercicioBorrador[]> {
     const { data, error } = await supabase
       .from('routine_exercises')
       .select(
-        'orden, exercise_id, exercises ( nombre, musculo_primario ), routine_sets ( numero_serie, tipo_serie, reps, peso_kg, tipo_peso )',
+        'orden, exercise_id, exercises ( nombre, musculo_primario, tracking_mode ), routine_sets ( numero_serie, tipo_serie, reps, peso_kg, tipo_peso, duracion_seg, distancia_km )',
       )
       .eq('routine_id', routineId)
       .order('orden');
@@ -924,6 +996,7 @@ export const entrenamientoService = {
         const exObj = Array.isArray(ex) ? ex[0] : ex;
         const nombre = exObj?.nombre?.trim() ?? 'Ejercicio';
         const musculo = exObj?.musculo_primario?.trim() ?? '';
+        const tracking_mode = trackingModeSeguro(exObj?.tracking_mode);
         const setsRaw = row.routine_sets ?? [];
         const sets = setsRaw
           .slice()
@@ -934,12 +1007,15 @@ export const entrenamientoService = {
             repeticiones: s.reps,
             peso_kg: s.peso_kg,
             tipo_peso: s.tipo_peso ?? 'kg',
+            duracion_seg: s.duracion_seg ?? null,
+            distancia_km: s.distancia_km ?? null,
           }));
         return {
           exercise_id: row.exercise_id,
           orden: row.orden,
           nombre,
           musculo_primario: musculo,
+          tracking_mode,
           sets,
         };
       });
@@ -948,7 +1024,7 @@ export const entrenamientoService = {
   async obtenerAnteriorPorEjercicio(_userId: string, exerciseId: string): Promise<string | null> {
     // RPC: Postgres filtra por auth.uid(), ordena por sesión más reciente y devuelve 1 fila.
     // Antes: join de 50 filas al cliente + sort en JS. Ahora: 1 fila, 0 JS.
-    const { data, error } = await supabase.rpc('obtener_anterior_ejercicio', {
+    const { data, error } = await supabase.rpc('obtener_anterior_ejercicio_registro', {
       p_exercise_id: exerciseId,
     });
 
@@ -959,6 +1035,10 @@ export const entrenamientoService = {
 
     const row = (data as any[])?.[0];
     if (!row) return null;
+    const tracking = trackingModeSeguro(row.tracking_mode);
+    if (tracking !== 'strength') {
+      return formatearAnteriorCardio(row.duracion_seg ?? null, row.distancia_km ?? null);
+    }
     return formatearAnteriorSet(row.peso_kg, row.repeticiones, row.tipo_peso);
   },
 
@@ -993,8 +1073,9 @@ export const entrenamientoService = {
           rir: set.rir ?? null,
           peso_kg: set.peso_kg,
           tipo_peso: set.tipo_peso,
-          duracion_seg: null,
-          descanso_seg: null,
+          duracion_seg: set.duracion_seg ?? null,
+          distancia_km: set.distancia_km ?? null,
+          descanso_seg: set.descanso_seg ?? null,
           completada: true,
         });
         if (errSet) console.error('[guardarSetsCompletados] workout_sets', errSet.message);
@@ -1150,6 +1231,89 @@ export const entrenamientoService = {
     }));
   },
 
+  /**
+   * Versión optimizada: 2 queries para toda la semana en lugar de 1+N.
+   * Devuelve sesiones con ejercicios, series y volumen ya calculados.
+   */
+  async obtenerResumenSesionesSemana(
+    userId: string,
+    fechaInicio: string,
+    fechaFin: string,
+  ): Promise<{ sesion: SesionResumen; ejercicios: number; series: number; volumenKg: number }[]> {
+    // Query 1: sesiones del rango
+    const { data: sesionesData, error: sesionesError } = await supabase
+      .from('workout_sessions')
+      .select('id, nombre, fecha, hora_inicio, hora_fin')
+      .eq('user_id', userId)
+      .gte('fecha', fechaInicio)
+      .lte('fecha', fechaFin)
+      .order('fecha', { ascending: true })
+      .order('hora_inicio', { ascending: true });
+
+    if (sesionesError) {
+      console.error('[obtenerResumenSesionesSemana] sessions', sesionesError.message);
+      return [];
+    }
+
+    const sesiones = ((sesionesData ?? []) as SesionSemanaRow[]).map((r) => ({
+      id: r.id,
+      nombre: r.nombre,
+      fecha: r.fecha,
+      hora_inicio: r.hora_inicio,
+      hora_fin: r.hora_fin,
+    }));
+
+    if (sesiones.length === 0) return [];
+
+    const sessionIds = sesiones.map((s) => s.id);
+
+    // Query 2: todos los ejercicios + sets de esas sesiones en una sola llamada
+    type WseResumenRow = {
+      session_id: string;
+      exercise_id: string;
+      workout_sets: { peso_kg: number | null; repeticiones: number | null; completada: boolean }[] | null;
+    };
+
+    const { data: wseData, error: wseError } = await supabase
+      .from('workout_session_exercises')
+      .select('session_id, exercise_id, workout_sets ( peso_kg, repeticiones, completada )')
+      .in('session_id', sessionIds);
+
+    if (wseError) {
+      console.error('[obtenerResumenSesionesSemana] wse', wseError.message);
+      // Devolver sesiones sin stats antes que fallar completamente
+      return sesiones.map((s) => ({ sesion: s, ejercicios: 0, series: 0, volumenKg: 0 }));
+    }
+
+    // Agrupar por session_id
+    const statsPorSesion = new Map<string, { ejercicios: Set<string>; series: number; volumenKg: number }>();
+    for (const wse of (wseData ?? []) as WseResumenRow[]) {
+      let entry = statsPorSesion.get(wse.session_id);
+      if (!entry) {
+        entry = { ejercicios: new Set(), series: 0, volumenKg: 0 };
+        statsPorSesion.set(wse.session_id, entry);
+      }
+      entry.ejercicios.add(wse.exercise_id);
+      for (const set of wse.workout_sets ?? []) {
+        if (!set.completada) continue;
+        entry.series += 1;
+        const peso = set.peso_kg != null ? Number(set.peso_kg) : 0;
+        const reps = set.repeticiones != null ? Number(set.repeticiones) : 0;
+        entry.volumenKg += peso * reps;
+      }
+    }
+
+    return sesiones.map((sesion) => {
+      const stats = statsPorSesion.get(sesion.id);
+      return {
+        sesion,
+        ejercicios: stats?.ejercicios.size ?? 0,
+        series: stats?.series ?? 0,
+        volumenKg: stats?.volumenKg ?? 0,
+      };
+    });
+  },
+
   /** Suma (peso_kg × repeticiones) de sets completados en sesiones de la semana. */
   async obtenerVolumenSemanaKg(userId: string, fechaInicio: string, fechaFin: string): Promise<number> {
     // RPC: Postgres calcula el SUM directamente y devuelve 1 número.
@@ -1175,8 +1339,8 @@ export const entrenamientoService = {
         `id, nombre, fecha, hora_inicio, hora_fin,
         workout_session_exercises (
           id, orden, exercise_id, notas,
-          exercises ( nombre, musculo_primario, foto_url ),
-          workout_sets ( numero_serie, tipo_serie, peso_kg, repeticiones, rir, tipo_peso, completada )
+          exercises ( nombre, musculo_primario, foto_url, tracking_mode ),
+          workout_sets ( numero_serie, tipo_serie, peso_kg, repeticiones, rir, tipo_peso, duracion_seg, distancia_km, completada, descanso_seg )
         )`,
       )
       .eq('id', sessionId)
@@ -1199,6 +1363,7 @@ export const entrenamientoService = {
       const fotoRaw = exOne?.foto_url;
       const foto_url =
         fotoRaw != null && String(fotoRaw).trim() !== '' ? String(fotoRaw).trim() : null;
+      const tracking_mode = trackingModeSeguro(exOne?.tracking_mode);
       const setsRaw = wse.workout_sets ?? [];
       const sets: DetalleSesionSet[] = setsRaw
         .slice()
@@ -1210,7 +1375,10 @@ export const entrenamientoService = {
           repeticiones: s.repeticiones,
           rir: s.rir ?? null,
           tipo_peso: s.tipo_peso,
+          duracion_seg: s.duracion_seg ?? null,
+          distancia_km: s.distancia_km ?? null,
           completada: s.completada,
+          descanso_seg: s.descanso_seg ?? null,
         }));
       return {
         id: wse.id,
@@ -1218,6 +1386,7 @@ export const entrenamientoService = {
         nombre,
         musculo_primario: musculo,
         foto_url,
+        tracking_mode,
         notas: wse.notas ?? null,
         sets,
       };
@@ -1261,6 +1430,8 @@ export const entrenamientoService = {
             peso_kg: number | null;
             repeticiones: number | null;
             tipo_peso: TipoPeso;
+            duracion_seg: number | null;
+            distancia_km: number | null;
             completada: boolean;
           }[]
         | null;
@@ -1268,7 +1439,7 @@ export const entrenamientoService = {
 
     const { data: wseData, error: errWse } = await supabase
       .from('workout_session_exercises')
-      .select('orden, exercise_id, workout_sets ( numero_serie, peso_kg, repeticiones, tipo_peso, completada )')
+      .select('orden, exercise_id, workout_sets ( numero_serie, peso_kg, repeticiones, tipo_peso, duracion_seg, distancia_km, completada )')
       .eq('session_id', sessionId)
       .order('orden');
 
@@ -1288,6 +1459,8 @@ export const entrenamientoService = {
           peso_kg: s.peso_kg,
           repeticiones: s.repeticiones,
           tipo_peso: s.tipo_peso,
+          duracion_seg: s.duracion_seg ?? null,
+          distancia_km: s.distancia_km ?? null,
         }));
       return {
         exercise_id: wse.exercise_id,

@@ -30,10 +30,12 @@ import { supabase } from '@/lib/supabase';
 import {
   progresoService,
   type EstadisticaEjercicioDia,
+  type EstadisticaCardioEjercicioDia,
   type RecordsEjercicio,
+  type RecordsCardioEjercicio,
   type SesionEjercicioHistorial,
 } from '@/services/progreso.service';
-import type { CategoriaEjercicio, Exercise, TipoSerie } from '@/types/database.types';
+import type { CategoriaEjercicio, Exercise, TipoSerie, TrackingMode } from '@/types/database.types';
 
 const SPACE_MONO_CHART = require('@expo-google-fonts/space-mono/400Regular/SpaceMono_400Regular.ttf');
 
@@ -65,6 +67,34 @@ const METRICA_OPTS: { key: MetricaGrafico; label: string; icon: IconName }[] = [
   { key: 'mejorVolumenSerie', label: 'Vol. serie', icon: 'server-outline' },
   { key: 'totalRepeticiones', label: 'Total reps', icon: 'repeat-outline' },
 ];
+
+type MetricaCardio = 'mejorTiempo' | 'distancia';
+const METRICA_CARDIO_OPTS: { key: MetricaCardio; label: string; icon: IconName }[] = [
+  { key: 'mejorTiempo', label: 'Mejor tiempo', icon: 'timer-outline' },
+  { key: 'distancia', label: 'Distancia', icon: 'map-outline' },
+];
+
+function isCardio(trackingMode: TrackingMode | undefined): boolean {
+  return trackingMode === 'cardio_time' || trackingMode === 'cardio_time_distance';
+}
+function hasDistancia(trackingMode: TrackingMode | undefined): boolean {
+  return trackingMode === 'cardio_time_distance';
+}
+
+/** Formatea segundos → "mm:ss" o "h:mm:ss" */
+function formatTiempoHMS(seg: number): string {
+  const s = Math.round(seg);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = s % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
+  return `${String(m).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
+}
+
+/** Formatea km con 2 decimales */
+function formatDistancia(km: number): string {
+  return `${km.toFixed(2)} km`;
+}
 
 /** Mismo criterio que sesion/[id].tsx (badge de tipo de serie). */
 function badgeTipoSerie(t: TipoSerie): string {
@@ -180,6 +210,7 @@ function GraficoEstadisticasEjercicio({
   colorGrid,
   colorFondo,
   fontMono,
+  formatYLabel,
 }: {
   datos: { x: number; y: number }[];
   metrica: MetricaGrafico;
@@ -188,6 +219,7 @@ function GraficoEstadisticasEjercicio({
   colorGrid: string;
   colorFondo: string;
   fontMono: string;
+  formatYLabel?: (n: number) => string;
 }) {
   const font = useFont(SPACE_MONO_CHART, 10);
   const unit = unidadMetrica(metrica);
@@ -204,9 +236,6 @@ function GraficoEstadisticasEjercicio({
   const minY = Math.min(...ys);
   const maxY = Math.max(...ys);
   const range = maxY - minY;
-  // Cuando todos los valores son iguales (range === 0), el padding mínimo de 0.01
-  // hace que todos los ticks queden igual al redondear. Usamos al menos el 20% del
-  // valor (mín 2 unidades para kg, 5 para reps) para que los ticks sean distintos.
   const minPad = unit === 'reps' ? 5 : 2;
   const pad = range > 0
     ? Math.max(minPad * 0.25, range * 0.15)
@@ -214,11 +243,11 @@ function GraficoEstadisticasEjercicio({
   const yLow = Math.max(0, minY - pad);
   const yHigh = maxY + pad;
 
-  const formatY = (n: number) => {
+  const formatY = formatYLabel ?? ((n: number) => {
     if (unit === 'reps') return `${Math.round(n)} reps`;
     const v = n >= 100 ? n.toFixed(0) : n.toFixed(1);
     return `${v} kg`;
-  };
+  });
 
   return (
     <View style={stylesChartBase.wrap}>
@@ -515,6 +544,24 @@ function makeStyles(
       paddingHorizontal: 20,
       paddingBottom: 2,
       gap: 12,
+    },
+    chipsRowCardio: {
+      flexDirection: 'row',
+      justifyContent: 'center',
+      marginTop: 10,
+      marginHorizontal: 14,
+      gap: 12,
+    },
+    chipCardio: {
+      flex: 1,
+      height: 58,
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+      borderRadius: r.md,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surface,
     },
     chip: {
       width: 78,
@@ -821,11 +868,15 @@ export default function ConsultaEjercicioPantalla() {
   const [modalImagen, setModalImagen] = useState(false);
 
   const [statsRows, setStatsRows] = useState<EstadisticaEjercicioDia[]>([]);
+  const [statsCardioRows, setStatsCardioRows] = useState<EstadisticaCardioEjercicioDia[]>([]);
   const [cargandoStats, setCargandoStats] = useState(false);
 
   const [records, setRecords] = useState<RecordsEjercicio | null>(null);
+  const [recordsCardio, setRecordsCardio] = useState<RecordsCardioEjercicio | null>(null);
   const [cargandoRecords, setCargandoRecords] = useState(false);
   const recordsCargadosParaEjercicio = useRef<string | null>(null);
+
+  const [metricaCardio, setMetricaCardio] = useState<MetricaCardio>('mejorTiempo');
 
   const [historial, setHistorial] = useState<SesionEjercicioHistorial[]>([]);
   const [cargandoHist, setCargandoHist] = useState(false);
@@ -863,39 +914,53 @@ export default function ConsultaEjercicioPantalla() {
   useEffect(() => {
     recordsCargadosParaEjercicio.current = null;
     setRecords(null);
+    setRecordsCardio(null);
   }, [id]);
 
   useEffect(() => {
-    if (tab !== 1 || !user?.id || !id) return;
+    if (tab !== 1 || !user?.id || !id || !ejercicio) return;
     if (recordsCargadosParaEjercicio.current === id) return;
 
+    const esCardio = isCardio(ejercicio.tracking_mode);
     setCargandoRecords(true);
     void (async () => {
       try {
-        const rec = await progresoService.obtenerRecordsEjercicio(id, user.id);
-        setRecords(rec);
+        if (esCardio) {
+          const rec = await progresoService.obtenerRecordsCardioEjercicio(id, user.id);
+          setRecordsCardio(rec);
+        } else {
+          const rec = await progresoService.obtenerRecordsEjercicio(id, user.id);
+          setRecords(rec);
+        }
         recordsCargadosParaEjercicio.current = id;
       } catch {
         setRecords(null);
+        setRecordsCardio(null);
         recordsCargadosParaEjercicio.current = id;
       } finally {
         setCargandoRecords(false);
       }
     })();
-  }, [tab, id, user?.id]);
+  }, [tab, id, user?.id, ejercicio]);
 
   useEffect(() => {
-    if (tab !== 1 || !user?.id || !id) return;
+    if (tab !== 1 || !user?.id || !id || !ejercicio) return;
 
+    const esCardio = isCardio(ejercicio.tracking_mode);
     setCargandoStats(true);
     let cancelled = false;
 
     void (async () => {
       try {
-        const rows = await progresoService.obtenerEstadisticasEjercicioDetalle(id, user.id, periodo);
-        if (!cancelled) setStatsRows(rows);
+        if (esCardio) {
+          const rows = await progresoService.obtenerEstadisticasCardioDetalle(id, user.id, periodo);
+          if (!cancelled) setStatsCardioRows(rows);
+        } else {
+          const rows = await progresoService.obtenerEstadisticasEjercicioDetalle(id, user.id, periodo);
+          if (!cancelled) setStatsRows(rows);
+        }
       } catch {
-        if (!cancelled) setStatsRows([]);
+        if (!cancelled) { setStatsRows([]); setStatsCardioRows([]); }
       } finally {
         if (!cancelled) setCargandoStats(false);
       }
@@ -904,7 +969,7 @@ export default function ConsultaEjercicioPantalla() {
     return () => {
       cancelled = true;
     };
-  }, [tab, id, user?.id, periodo]);
+  }, [tab, id, user?.id, periodo, ejercicio]);
 
   const cargarHistorial = useCallback(async () => {
     if (!id || !user?.id) return;
@@ -930,6 +995,16 @@ export default function ConsultaEjercicioPantalla() {
       y: valorMetrica(row, metrica),
     }));
   }, [statsRows, metrica]);
+
+  const datosGraficoCardio = useMemo(() => {
+    return statsCardioRows.map((row) => ({
+      x: parseFechaLocal(row.fecha).getTime(),
+      y: metricaCardio === 'mejorTiempo' ? row.mejorTiempoSeg : row.mayorDistanciaKm,
+    }));
+  }, [statsCardioRows, metricaCardio]);
+
+  const esCardio = isCardio(ejercicio?.tracking_mode);
+  const conDistancia = hasDistancia(ejercicio?.tracking_mode);
 
   const secundariosTxt = ejercicio?.musculos_secundarios?.length
     ? ejercicio.musculos_secundarios.join(' · ')
@@ -974,59 +1049,105 @@ export default function ConsultaEjercicioPantalla() {
           ) : null}
         </Pressable>
 
-        <View style={styles.histTablaHead}>
-          <View style={styles.histColSerie}>
-            <Text style={[styles.histTh, styles.histTdLeft]}>#</Text>
-          </View>
-          <View style={styles.histColTipo}>
-            <Text style={styles.histTh}>TIPO</Text>
-          </View>
-          <View style={styles.histColKg}>
-            <View style={styles.histThWrap}>
-              <Ionicons name="scale-outline" size={11} color={c.textSecondary} />
-              <Text style={styles.histTh}>KG</Text>
+        {esCardio ? (
+          // ── Cardio historial table ──────────────────────────────────────
+          <>
+            <View style={styles.histTablaHead}>
+              <View style={styles.histColSerie}>
+                <Text style={[styles.histTh, styles.histTdLeft]}>#</Text>
+              </View>
+              <View style={[styles.histColKg, { flex: 1.4 }]}>
+                <View style={styles.histThWrap}>
+                  <Ionicons name="timer-outline" size={11} color={c.textSecondary} />
+                  <Text style={styles.histTh}>TIEMPO</Text>
+                </View>
+              </View>
+              {conDistancia ? (
+                <View style={[styles.histColReps, { flex: 1.2 }]}>
+                  <View style={styles.histThWrap}>
+                    <Ionicons name="map-outline" size={11} color={c.textSecondary} />
+                    <Text style={styles.histTh}>KM</Text>
+                  </View>
+                </View>
+              ) : null}
             </View>
-          </View>
-          <View style={styles.histColReps}>
-            <View style={styles.histThWrap}>
-              <Ionicons name="refresh-outline" size={11} color={c.textSecondary} />
-              <Text style={styles.histTh}>REPS</Text>
-            </View>
-          </View>
-          <View style={styles.histColRir}>
-            <View style={styles.histThWrap}>
-              <Ionicons name="disc-outline" size={10} color={c.textSecondary} />
-              <Text style={styles.histTh}>RIR</Text>
-            </View>
-          </View>
-        </View>
-
-        {item.sets.map((st, idx) => (
-          <View key={`${item.sessionId}-${st.numeroSerie}-${idx}`} style={[styles.histFila, idx > 0 && styles.histFilaSep]}>
-            <View style={styles.histColSerie}>
-              <Text style={[styles.histTd, styles.histTdLeft]}>{st.numeroSerie}</Text>
-            </View>
-            <View style={styles.histColTipo}>
-              <View style={styles.histBadge}>
-                <Text style={styles.histBadgeTxt}>{badgeTipoSerie(st.tipoSerie as TipoSerie)}</Text>
+            {item.sets.map((st, idx) => (
+              <View key={`${item.sessionId}-${st.numeroSerie}-${idx}`} style={[styles.histFila, idx > 0 && styles.histFilaSep]}>
+                <View style={styles.histColSerie}>
+                  <Text style={[styles.histTd, styles.histTdLeft]}>{st.numeroSerie}</Text>
+                </View>
+                <View style={[styles.histColKg, { flex: 1.4 }]}>
+                  <Text style={styles.histTd}>
+                    {st.duracionSeg != null ? formatTiempoHMS(st.duracionSeg) : '—'}
+                  </Text>
+                </View>
+                {conDistancia ? (
+                  <View style={[styles.histColReps, { flex: 1.2 }]}>
+                    <Text style={styles.histTd}>
+                      {st.distanciaKm != null ? st.distanciaKm.toFixed(2) : '—'}
+                    </Text>
+                  </View>
+                ) : null}
+              </View>
+            ))}
+          </>
+        ) : (
+          // ── Fuerza historial table ──────────────────────────────────────
+          <>
+            <View style={styles.histTablaHead}>
+              <View style={styles.histColSerie}>
+                <Text style={[styles.histTh, styles.histTdLeft]}>#</Text>
+              </View>
+              <View style={styles.histColTipo}>
+                <Text style={styles.histTh}>TIPO</Text>
+              </View>
+              <View style={styles.histColKg}>
+                <View style={styles.histThWrap}>
+                  <Ionicons name="scale-outline" size={11} color={c.textSecondary} />
+                  <Text style={styles.histTh}>KG</Text>
+                </View>
+              </View>
+              <View style={styles.histColReps}>
+                <View style={styles.histThWrap}>
+                  <Ionicons name="refresh-outline" size={11} color={c.textSecondary} />
+                  <Text style={styles.histTh}>REPS</Text>
+                </View>
+              </View>
+              <View style={styles.histColRir}>
+                <View style={styles.histThWrap}>
+                  <Ionicons name="disc-outline" size={10} color={c.textSecondary} />
+                  <Text style={styles.histTh}>RIR</Text>
+                </View>
               </View>
             </View>
-            <View style={styles.histColKg}>
-              <Text style={styles.histTd}>{celdaKgHistorial(st.tipoPeso, st.pesoKg)}</Text>
-            </View>
-            <View style={styles.histColReps}>
-              <Text style={styles.histTd}>{st.repeticiones != null ? String(st.repeticiones) : '—'}</Text>
-            </View>
-            <View style={styles.histColRir}>
-              <View style={styles.histRirPill}>
-                <Text style={styles.histRirTxt}>-</Text>
+            {item.sets.map((st, idx) => (
+              <View key={`${item.sessionId}-${st.numeroSerie}-${idx}`} style={[styles.histFila, idx > 0 && styles.histFilaSep]}>
+                <View style={styles.histColSerie}>
+                  <Text style={[styles.histTd, styles.histTdLeft]}>{st.numeroSerie}</Text>
+                </View>
+                <View style={styles.histColTipo}>
+                  <View style={styles.histBadge}>
+                    <Text style={styles.histBadgeTxt}>{badgeTipoSerie(st.tipoSerie as TipoSerie)}</Text>
+                  </View>
+                </View>
+                <View style={styles.histColKg}>
+                  <Text style={styles.histTd}>{celdaKgHistorial(st.tipoPeso, st.pesoKg)}</Text>
+                </View>
+                <View style={styles.histColReps}>
+                  <Text style={styles.histTd}>{st.repeticiones != null ? String(st.repeticiones) : '—'}</Text>
+                </View>
+                <View style={styles.histColRir}>
+                  <View style={styles.histRirPill}>
+                    <Text style={styles.histRirTxt}>-</Text>
+                  </View>
+                </View>
               </View>
-            </View>
-          </View>
-        ))}
+            ))}
+          </>
+        )}
       </View>
     ),
-    [c.textMuted, c.textSecondary, router, styles],
+    [c.textMuted, c.textSecondary, conDistancia, esCardio, router, styles],
   );
 
   if (cargando) {
@@ -1164,80 +1285,164 @@ export default function ConsultaEjercicioPantalla() {
               </View>
             ) : cargandoStats || cargandoRecords ? (
               <SkeletonEstadisticas styles={styles} s={s} r={r} c={c} />
-            ) : recordsCargadosParaEjercicio.current === id && statsRows.length === 0 && (records == null || (records.mayorPeso === 0 && records.mejorVolumenTotal === 0)) ? (
-              <View style={[styles.centerMsg, { flex: 1, gap: 14 }]}>
-                <Ionicons name="barbell-outline" size={48} color={c.textMuted} />
-                <View style={{ alignItems: 'center', gap: 4 }}>
-                  <Text style={{ textAlign: 'center', fontSize: 16, lineHeight: 22, fontFamily: f.sansBold, color: c.textDisplay }}>
-                    Aún no has entrenado este ejercicio
-                  </Text>
-                  <Text style={{ textAlign: 'center', fontSize: 14, lineHeight: 20, fontFamily: f.sans, color: c.textSecondary }}>
-                    Añádelo a tu próxima sesión y aquí verás tu progreso.
-                  </Text>
-                </View>
-              </View>
-            ) : (
-              <>
-                <Pressable style={styles.periodoBtn} onPress={() => setModalPeriodo(true)} accessibilityRole="button">
-                  <Ionicons name="calendar-outline" size={18} color={c.textDisplay} />
-                  <Text style={styles.periodoBtnTxt} numberOfLines={1}>
-                    {etiquetaPeriodoSeleccionado(periodo)}
-                  </Text>
-                  <Ionicons name="chevron-down" size={18} color={c.textSecondary} />
-                </Pressable>
-
-                <View style={styles.chartBlock}>
-                  <Text style={styles.chartTitle}>{tituloMetrica(metrica)}</Text>
-                  <GraficoEstadisticasEjercicio
-                    datos={datosGrafico}
-                    metrica={metrica}
-                    colorPrimario={c.primary}
-                    colorEtiqueta={c.textSecondary}
-                    colorGrid={c.border}
-                    colorFondo={c.background}
-                    fontMono={f.mono}
-                  />
-                </View>
-
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipsScroll} contentContainerStyle={styles.chipsRow}>
-                  {METRICA_OPTS.map((m) => {
-                    const on = metrica === m.key;
-                    return (
-                      <Pressable key={m.key} style={[styles.chip, on && styles.chipOn]} onPress={() => setMetrica(m.key)}>
-                        <Ionicons name={m.icon} size={24} color={on ? c.primary : c.textDisplay} />
-                        <Text style={[styles.chipTxt, on && styles.chipTxtOn]}>{m.label}</Text>
-                      </Pressable>
-                    );
-                  })}
-                </ScrollView>
-
-                <Text style={styles.recordsTitle}>RECORDS PERSONALES</Text>
-                <View style={styles.recordsCard}>
-                  <View style={styles.recordItem}>
-                    <View style={styles.recordIconBox}>
-                      <Ionicons name="scale-outline" size={19} color={c.primary} />
-                    </View>
-                    <Text style={styles.recordLabel}>Mayor peso</Text>
-                    <Text style={styles.recordValue}>{records ? `${records.mayorPeso.toFixed(1)} kg` : '0.0 kg'}</Text>
-                  </View>
-                  <View style={styles.recordItem}>
-                    <View style={styles.recordIconBox}>
-                      <Ionicons name="trending-up-outline" size={19} color={c.primary} />
-                    </View>
-                    <Text style={styles.recordLabel}>Mejor serie</Text>
-                    <Text style={styles.recordValue}>
-                      {records ? `${records.mejorSeriePesoKg.toFixed(1)} kg × ${records.mejorSerieReps} reps` : '0.0 kg × 0 reps'}
+            ) : esCardio ? (
+              // ── Cardio stats ──────────────────────────────────────────────
+              recordsCargadosParaEjercicio.current === id && statsCardioRows.length === 0 && (recordsCardio == null || (recordsCardio.mejorTiempoSeg === 0 && recordsCardio.mayorDistanciaKm === 0)) ? (
+                <View style={[styles.centerMsg, { flex: 1, gap: 14 }]}>
+                  <Ionicons name="timer-outline" size={48} color={c.textMuted} />
+                  <View style={{ alignItems: 'center', gap: 4 }}>
+                    <Text style={{ textAlign: 'center', fontSize: 16, lineHeight: 22, fontFamily: f.sansBold, color: c.textDisplay }}>
+                      Aún no has entrenado este ejercicio
+                    </Text>
+                    <Text style={{ textAlign: 'center', fontSize: 14, lineHeight: 20, fontFamily: f.sans, color: c.textSecondary }}>
+                      Añádelo a tu próxima sesión y aquí verás tu progreso.
                     </Text>
                   </View>
-                  <View style={styles.recordItem}>
-                    <View style={styles.recordIconBox}>
-                      <Ionicons name="stats-chart-outline" size={19} color={c.primary} />
+                </View>
+              ) : (
+                <>
+                  <Pressable style={styles.periodoBtn} onPress={() => setModalPeriodo(true)} accessibilityRole="button">
+                    <Ionicons name="calendar-outline" size={18} color={c.textDisplay} />
+                    <Text style={styles.periodoBtnTxt} numberOfLines={1}>
+                      {etiquetaPeriodoSeleccionado(periodo)}
+                    </Text>
+                    <Ionicons name="chevron-down" size={18} color={c.textSecondary} />
+                  </Pressable>
+
+                  <View style={styles.chartBlock}>
+                    <Text style={styles.chartTitle}>
+                      {metricaCardio === 'mejorTiempo' ? 'Tiempo' : 'Distancia (km)'}
+                    </Text>
+                    <GraficoEstadisticasEjercicio
+                      datos={datosGraficoCardio}
+                      metrica="mayorPeso"
+                      colorPrimario={c.primary}
+                      colorEtiqueta={c.textSecondary}
+                      colorGrid={c.border}
+                      colorFondo={c.background}
+                      fontMono={f.mono}
+                      formatYLabel={metricaCardio === 'mejorTiempo'
+                        ? (n) => formatTiempoHMS(n)
+                        : (n) => `${n.toFixed(2)} km`}
+                    />
+                  </View>
+
+                  {conDistancia ? (
+                    <View style={styles.chipsRowCardio}>
+                      {METRICA_CARDIO_OPTS.map((m) => {
+                        const on = metricaCardio === m.key;
+                        return (
+                          <Pressable key={m.key} style={[styles.chipCardio, on && styles.chipOn]} onPress={() => setMetricaCardio(m.key)}>
+                            <Ionicons name={m.icon} size={24} color={on ? c.primary : c.textDisplay} />
+                            <Text style={[styles.chipTxt, on && styles.chipTxtOn]}>{m.label}</Text>
+                          </Pressable>
+                        );
+                      })}
                     </View>
-                    <Text style={styles.recordLabel}>Volumen total</Text>
-                    <Text style={styles.recordValue}>{records ? `${records.mejorVolumenTotal.toFixed(1)} kg` : '0.0 kg'}</Text>
+                  ) : null}
+
+                  <Text style={styles.recordsTitle}>RECORDS PERSONALES</Text>
+                  <View style={styles.recordsCard}>
+                    <View style={styles.recordItem}>
+                      <View style={styles.recordIconBox}>
+                        <Ionicons name="timer-outline" size={19} color={c.primary} />
+                      </View>
+                      <Text style={styles.recordLabel}>Mejor tiempo</Text>
+                      <Text style={styles.recordValue}>
+                        {recordsCardio && recordsCardio.mejorTiempoSeg > 0 ? formatTiempoHMS(recordsCardio.mejorTiempoSeg) : '—'}
+                      </Text>
+                    </View>
+                    {conDistancia ? (
+                      <View style={styles.recordItem}>
+                        <View style={styles.recordIconBox}>
+                          <Ionicons name="map-outline" size={19} color={c.primary} />
+                        </View>
+                        <Text style={styles.recordLabel}>Mayor distancia</Text>
+                        <Text style={styles.recordValue}>
+                          {recordsCardio && recordsCardio.mayorDistanciaKm > 0 ? formatDistancia(recordsCardio.mayorDistanciaKm) : '—'}
+                        </Text>
+                      </View>
+                    ) : null}
+                  </View>
+                </>
+              )
+            ) : (
+              // ── Fuerza stats ──────────────────────────────────────────────
+              recordsCargadosParaEjercicio.current === id && statsRows.length === 0 && (records == null || (records.mayorPeso === 0 && records.mejorVolumenTotal === 0)) ? (
+                <View style={[styles.centerMsg, { flex: 1, gap: 14 }]}>
+                  <Ionicons name="barbell-outline" size={48} color={c.textMuted} />
+                  <View style={{ alignItems: 'center', gap: 4 }}>
+                    <Text style={{ textAlign: 'center', fontSize: 16, lineHeight: 22, fontFamily: f.sansBold, color: c.textDisplay }}>
+                      Aún no has entrenado este ejercicio
+                    </Text>
+                    <Text style={{ textAlign: 'center', fontSize: 14, lineHeight: 20, fontFamily: f.sans, color: c.textSecondary }}>
+                      Añádelo a tu próxima sesión y aquí verás tu progreso.
+                    </Text>
                   </View>
                 </View>
-              </>
+              ) : (
+                <>
+                  <Pressable style={styles.periodoBtn} onPress={() => setModalPeriodo(true)} accessibilityRole="button">
+                    <Ionicons name="calendar-outline" size={18} color={c.textDisplay} />
+                    <Text style={styles.periodoBtnTxt} numberOfLines={1}>
+                      {etiquetaPeriodoSeleccionado(periodo)}
+                    </Text>
+                    <Ionicons name="chevron-down" size={18} color={c.textSecondary} />
+                  </Pressable>
+
+                  <View style={styles.chartBlock}>
+                    <Text style={styles.chartTitle}>{tituloMetrica(metrica)}</Text>
+                    <GraficoEstadisticasEjercicio
+                      datos={datosGrafico}
+                      metrica={metrica}
+                      colorPrimario={c.primary}
+                      colorEtiqueta={c.textSecondary}
+                      colorGrid={c.border}
+                      colorFondo={c.background}
+                      fontMono={f.mono}
+                    />
+                  </View>
+
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipsScroll} contentContainerStyle={styles.chipsRow}>
+                    {METRICA_OPTS.map((m) => {
+                      const on = metrica === m.key;
+                      return (
+                        <Pressable key={m.key} style={[styles.chip, on && styles.chipOn]} onPress={() => setMetrica(m.key)}>
+                          <Ionicons name={m.icon} size={24} color={on ? c.primary : c.textDisplay} />
+                          <Text style={[styles.chipTxt, on && styles.chipTxtOn]}>{m.label}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </ScrollView>
+
+                  <Text style={styles.recordsTitle}>RECORDS PERSONALES</Text>
+                  <View style={styles.recordsCard}>
+                    <View style={styles.recordItem}>
+                      <View style={styles.recordIconBox}>
+                        <Ionicons name="scale-outline" size={19} color={c.primary} />
+                      </View>
+                      <Text style={styles.recordLabel}>Mayor peso</Text>
+                      <Text style={styles.recordValue}>{records ? `${records.mayorPeso.toFixed(1)} kg` : '0.0 kg'}</Text>
+                    </View>
+                    <View style={styles.recordItem}>
+                      <View style={styles.recordIconBox}>
+                        <Ionicons name="trending-up-outline" size={19} color={c.primary} />
+                      </View>
+                      <Text style={styles.recordLabel}>Mejor serie</Text>
+                      <Text style={styles.recordValue}>
+                        {records ? `${records.mejorSeriePesoKg.toFixed(1)} kg × ${records.mejorSerieReps} reps` : '0.0 kg × 0 reps'}
+                      </Text>
+                    </View>
+                    <View style={styles.recordItem}>
+                      <View style={styles.recordIconBox}>
+                        <Ionicons name="stats-chart-outline" size={19} color={c.primary} />
+                      </View>
+                      <Text style={styles.recordLabel}>Volumen total</Text>
+                      <Text style={styles.recordValue}>{records ? `${records.mejorVolumenTotal.toFixed(1)} kg` : '0.0 kg'}</Text>
+                    </View>
+                  </View>
+                </>
+              )
             )}
           </ScrollView>
         ) : null}

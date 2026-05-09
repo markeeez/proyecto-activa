@@ -100,7 +100,7 @@ export const ejerciciosService = {
       }
       const { data, error } = await supabase
         .from('exercises')
-        .select('id, nombre, musculo_primario, musculos_secundarios, equipamiento, categoria, foto_url, dificultad, is_custom, created_by, api_source')
+        .select('id, nombre, descripcion, musculo_primario, musculos_secundarios, equipamiento, categoria, tracking_mode, foto_url, dificultad, is_custom, created_by, api_source, api_id, created_at')
         .eq('is_custom', true)
         .eq('created_by', userId)
         .order('nombre');
@@ -364,6 +364,7 @@ export const ejerciciosService = {
         musculo_primario: datos.musculo_primario.trim(),
         musculos_secundarios: datos.musculos_secundarios ?? [],
         categoria: datos.categoria ?? 'fuerza',
+        tracking_mode: datos.categoria === 'cardio' ? 'cardio_time' : 'strength',
         descripcion: datos.descripcion ?? null,
         is_custom: true,
         created_by: userId,

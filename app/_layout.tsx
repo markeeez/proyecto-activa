@@ -24,6 +24,7 @@ import {
 import { AuthProvider } from '@/context/AuthContext';
 import { EntrenoProvider } from '@/context/EntrenoContext';
 import { ThemeProvider } from '@/context/ThemeContext';
+import { TimerDescansoProvider } from '@/context/TimerDescansoContext';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { configurarGoogle } from '@/services/social-auth.service';
 
@@ -58,6 +59,7 @@ function RootLayoutNav() {
   }
 
   return (
+    <TimerDescansoProvider>
     <EntrenoProvider>
       <NavigationThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
         <Stack screenOptions={{ headerShown: false }}>
@@ -70,6 +72,7 @@ function RootLayoutNav() {
         <StatusBar style="auto" />
       </NavigationThemeProvider>
     </EntrenoProvider>
+    </TimerDescansoProvider>
   );
 }
 

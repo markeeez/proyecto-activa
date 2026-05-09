@@ -3,6 +3,7 @@
  */
 
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -646,9 +647,15 @@ export function RutinasListadoTab() {
   const rutinaIniciandoRef = useRef<string | null>(null);
   const routineLayoutsRef = useRef<Record<string, LayoutBox>>({});
 
-  const { misRutinas, favoritas, loading, removeRoutine, removeFavorite } = useRoutines(user?.id);
+  const { misRutinas, favoritas, loading, reload, removeRoutine, removeFavorite } = useRoutines(user?.id);
   const rutinasFiltradas = filtroRutinas === 'mis' ? misRutinas : favoritas;
   const hayEntrenoActivo = entrenoActivo != null;
+
+  useFocusEffect(
+    useCallback(() => {
+      void reload();
+    }, [reload]),
+  );
 
   const onEmpezarEntrenoVacio = useCallback(async () => {
     if (hayEntrenoActivo || iniciandoVacioRef.current) return;
@@ -1062,18 +1069,17 @@ function useRoutines(userId?: string) {
   const [favoritas, setFavoritas] = useState<Routine[]>([]);
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    let alive = true;
-
-    async function load() {
+  const load = useCallback(
+    async (alive: () => boolean) => {
       if (!userId) {
         setMisRutinas([]);
         setFavoritas([]);
+        setLoading(false);
         return;
       }
 
-        setLoading(true);
-        try {
+      setLoading(true);
+      try {
         const routineSelect =
           'id, nombre, created_by, routine_exercises ( orden, exercises ( nombre, musculo_primario, musculos_secundarios ) )';
 
@@ -1092,14 +1098,14 @@ function useRoutines(userId?: string) {
         if (misRes.error || favRes.error) {
           if (misRes.error) console.error('[useRoutines] mis', misRes.error.message);
           if (favRes.error) console.error('[useRoutines] favoritas', favRes.error.message);
-          if (alive) {
+          if (alive()) {
             setMisRutinas([]);
             setFavoritas([]);
           }
           return;
         }
 
-        if (!alive) return;
+        if (!alive()) return;
 
         const nextMis = (misRes.data ?? []).map((row) => mapRoutine(row as RoutineJoinRow, userId, false));
         const nextFavoritas = (favRes.data ?? [])
@@ -1113,16 +1119,25 @@ function useRoutines(userId?: string) {
         setMisRutinas(nextMis);
         setFavoritas(nextFavoritas);
       } finally {
-        if (alive) setLoading(false);
+        if (alive()) setLoading(false);
       }
-    }
+    },
+    [userId],
+  );
 
-    void load();
+  useEffect(() => {
+    let alive = true;
+
+    void load(() => alive);
 
     return () => {
       alive = false;
     };
-  }, [userId]);
+  }, [load]);
+
+  const reload = useCallback(async () => {
+    await load(() => true);
+  }, [load]);
 
   const removeRoutine = useCallback((routineId: string) => {
     setMisRutinas((rows) => rows.filter((routine) => routine.id !== routineId));
@@ -1133,7 +1148,7 @@ function useRoutines(userId?: string) {
     setFavoritas((rows) => rows.filter((routine) => routine.id !== routineId));
   }, []);
 
-  return { misRutinas, favoritas, loading, removeRoutine, removeFavorite };
+  return { misRutinas, favoritas, loading, reload, removeRoutine, removeFavorite };
 }
 
 function mapRoutine(row: RoutineJoinRow, userId: string, isCommunity: boolean): Routine {

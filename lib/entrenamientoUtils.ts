@@ -9,3 +9,16 @@ export function lid(): string {
 export function seriePorDefecto(): BorradorSerieLinea {
   return { setId: lid(), tipoUi: 'lineal', kg: '', reps: '', rir: '', completada: false };
 }
+
+/** Crea el registro único que usa un ejercicio cardio dentro del borrador. */
+export function registroCardioPorDefecto(): BorradorSerieLinea {
+  return {
+    setId: lid(),
+    tipoUi: 'lineal',
+    kg: '',
+    reps: '',
+    duracionSeg: '',
+    distanciaKm: '',
+    completada: false,
+  };
+}

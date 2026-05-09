@@ -96,7 +96,7 @@ function makeStyles(c: Theme, f: ReturnType<typeof useTheme>['f'], ts: ReturnTyp
       minWidth: 0,
     },
     nombre: {
-      ...ts.body,
+      ...ts.bodySm,
       fontFamily: f.sansMedium,
       color: c.textDisplay,
     },
@@ -115,10 +115,11 @@ function makeStyles(c: Theme, f: ReturnType<typeof useTheme>['f'], ts: ReturnTyp
       gap: s.xs,
     },
     th: {
-      ...ts.label,
       fontFamily: f.mono,
-      color: c.textMuted,
+      fontSize: 10,
+      lineHeight: 13,
       letterSpacing: 0.6,
+      color: c.textMuted,
     },
     colSerie: { width: 56 },
     /** Modo entreno: mismas columnas en cabecera y filas (flex compartido) */
@@ -148,8 +149,9 @@ function makeStyles(c: Theme, f: ReturnType<typeof useTheme>['f'], ts: ReturnTyp
       gap: 4,
     },
     serieNum: {
-      ...ts.bodySm,
       fontFamily: f.monoBold,
+      fontSize: 14,
+      lineHeight: 21,
       color: c.textDisplay,
     },
     badge: {
@@ -159,15 +161,16 @@ function makeStyles(c: Theme, f: ReturnType<typeof useTheme>['f'], ts: ReturnTyp
       backgroundColor: c.borderVisible,
     },
     badgeTxt: {
-      ...ts.caption,
       fontFamily: f.monoBold,
       fontSize: 9,
+      lineHeight: 12,
       color: c.textDisplay,
       letterSpacing: 0.3,
     },
     cellInput: {
-      ...ts.bodySm,
       fontFamily: f.mono,
+      fontSize: 14,
+      lineHeight: 21,
       color: c.textDisplay,
       borderBottomWidth: 1,
       borderBottomColor: c.border,
@@ -181,14 +184,16 @@ function makeStyles(c: Theme, f: ReturnType<typeof useTheme>['f'], ts: ReturnTyp
       borderTopColor: c.border,
     },
     addSerieTxt: {
-      ...ts.label,
       fontFamily: f.mono,
+      fontSize: 11,
+      lineHeight: 13,
+      letterSpacing: 0.88,
       color: c.primary,
-      letterSpacing: 0.7,
     },
     antTxt: {
-      ...ts.caption,
       fontFamily: f.mono,
+      fontSize: 12,
+      lineHeight: 17,
       color: c.textSecondary,
     },
     rowHecho: {
@@ -215,12 +220,11 @@ function makeStyles(c: Theme, f: ReturnType<typeof useTheme>['f'], ts: ReturnTyp
     },
     /** Cabecera SERIE modo entreno: cabe en columna estrecha sin partir líneas */
     thEntrenoSerie: {
-      ...ts.label,
       fontFamily: f.mono,
-      color: c.textMuted,
       fontSize: 10,
       lineHeight: 13,
       letterSpacing: 0.35,
+      color: c.textMuted,
     },
     chatHit: {
       padding: s.xs,
@@ -254,10 +258,11 @@ function makeStyles(c: Theme, f: ReturnType<typeof useTheme>['f'], ts: ReturnTyp
       borderBottomColor: c.border,
     },
     aiModalTitle: {
-      ...ts.label,
       fontFamily: f.mono,
-      color: c.textSecondary,
+      fontSize: 11,
+      lineHeight: 13,
       letterSpacing: 0.85,
+      color: c.textSecondary,
     },
     aiModalClose: {
       width: 44,
@@ -281,8 +286,9 @@ function makeStyles(c: Theme, f: ReturnType<typeof useTheme>['f'], ts: ReturnTyp
       paddingVertical: s.sm,
     },
     aiBubbleText: {
-      ...ts.bodySm,
       fontFamily: f.sans,
+      fontSize: 14,
+      lineHeight: 21,
       color: c.textDisplay,
     },
     aiInputFooter: {
@@ -298,8 +304,9 @@ function makeStyles(c: Theme, f: ReturnType<typeof useTheme>['f'], ts: ReturnTyp
     aiInputField: {
       flex: 1,
       minWidth: 0,
-      ...ts.body,
       fontFamily: f.sans,
+      fontSize: 16,
+      lineHeight: 24,
       color: c.textDisplay,
       borderWidth: 1,
       borderColor: c.borderVisible,
@@ -330,10 +337,11 @@ function makeStyles(c: Theme, f: ReturnType<typeof useTheme>['f'], ts: ReturnTyp
       borderBottomColor: c.border,
     },
     notaHeaderLabel: {
-      ...ts.caption,
       fontFamily: f.mono,
-      color: c.textMuted,
+      fontSize: 11,
+      lineHeight: 13,
       letterSpacing: 0.6,
+      color: c.textMuted,
     },
     notaHeaderSpacer: {
       flex: 1,
@@ -346,13 +354,55 @@ function makeStyles(c: Theme, f: ReturnType<typeof useTheme>['f'], ts: ReturnTyp
       borderBottomColor: c.border,
     },
     notaInput: {
-      ...ts.caption,
       fontFamily: f.mono,
+      fontSize: 12,
+      lineHeight: 17,
       color: c.textSecondary,
       backgroundColor: c.surfaceElevated,
       borderRadius: r.sm,
       padding: s.sm,
       maxHeight: 80,
+    },
+    cardioHead: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: s.sm,
+      paddingVertical: s.xs,
+      gap: s.xs,
+      borderBottomWidth: 1,
+      borderBottomColor: c.border,
+    },
+    cardioRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: s.sm,
+      paddingVertical: s.sm,
+      gap: s.xs,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: c.border,
+    },
+    cardioCompact: {
+      justifyContent: 'center',
+      paddingHorizontal: 0,
+      gap: s.xs,
+    },
+    cardioColAnt: { flex: 1.2, minWidth: 0, alignItems: 'center', justifyContent: 'center' },
+    cardioColTiempo: { flex: 1, minWidth: 0, alignItems: 'center', justifyContent: 'center' },
+    cardioColKm: { flex: 0.75, minWidth: 0, alignItems: 'center', justifyContent: 'center' },
+    cardioColTiempoCompact: { width: 100, alignItems: 'center', justifyContent: 'center' },
+    cardioColKmCompact: { width: 80, alignItems: 'center', justifyContent: 'center' },
+    cardioInput: {
+      fontFamily: f.mono,
+      fontSize: 14,
+      lineHeight: 20,
+      color: c.textDisplay,
+      borderBottomWidth: 1,
+      borderBottomColor: c.border,
+      paddingHorizontal: 8,
+      paddingVertical: 6,
+      width: 72,
+      textAlign: 'center' as const,
+      includeFontPadding: false,
     },
   });
 }
@@ -376,6 +426,10 @@ function actualizarSet(sets: BorradorSerieLinea[], setId: string, patch: Partial
   return sets.map((x) => (x.setId === setId ? { ...x, ...patch } : x));
 }
 
+function esTrackingCardio(mode: BorradorEjercicioLinea['tracking_mode']): boolean {
+  return mode === 'cardio_time' || mode === 'cardio_time_distance';
+}
+
 function normalizarDecimalInput(texto: string): string {
   let out = '';
   let separadorUsado = false;
@@ -390,6 +444,10 @@ function normalizarDecimalInput(texto: string): string {
     }
   }
   return out;
+}
+
+function normalizarTiempoInput(texto: string): string {
+  return texto.replace(/[^\d]/g, '');
 }
 
 function normalizarEnteroInput(texto: string): string {
@@ -414,6 +472,9 @@ export function EjercicioRutinaCard({
   const { c, f, ts, s, r, isDark } = useTheme();
   const styles = useMemo(() => makeStyles(c, f, ts, s, r), [c, f, ts, s, r]);
   const esEntreno = modo === 'entreno';
+  const esCardioCard = esTrackingCardio(data.tracking_mode);
+  const esCardioEntreno = esEntreno && esCardioCard;
+  const cardioTieneDistancia = data.tracking_mode === 'cardio_time_distance';
   const { height: windowH } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const aiSheetH = Math.round(windowH * 0.85);
@@ -586,7 +647,132 @@ export function EjercicioRutinaCard({
         </>
       ) : null}
 
-      {esEntreno ? (
+      {esCardioEntreno && data.sets[0] ? (
+        <>
+          <View style={styles.cardioHead}>
+            <View style={styles.cardioColAnt}>
+              <Text style={[styles.th, styles.entrenoThCenter]}>ANTERIOR</Text>
+            </View>
+            <View style={styles.cardioColTiempo}>
+              <Text style={[styles.th, styles.entrenoThCenter]}>TIEMPO</Text>
+            </View>
+            {cardioTieneDistancia ? (
+              <View style={styles.cardioColKm}>
+                <Text style={[styles.th, styles.entrenoThCenter]}>KM</Text>
+              </View>
+            ) : null}
+            <View style={styles.entrenoColCheck} />
+          </View>
+          <View style={[styles.cardioRow, data.sets[0].completada ? styles.rowHecho : null]}>
+            <View style={styles.cardioColAnt}>
+              <Text style={[styles.antTxt, styles.entrenoThCenter]} numberOfLines={1} ellipsizeMode="tail">
+                {textoAnteriorSeries?.[0] ?? '—'}
+              </Text>
+            </View>
+            <View style={styles.cardioColTiempo}>
+              <TextInput
+                style={[styles.cardioInput, data.sets[0].completada ? styles.inputHecho : null]}
+                placeholder="min"
+                placeholderTextColor={c.textMuted}
+                value={data.sets[0].duracionSeg ?? ''}
+                onChangeText={(t) =>
+                  onChange({
+                    ...data,
+                    sets: actualizarSet(data.sets, data.sets[0]!.setId, { duracionSeg: normalizarTiempoInput(t) }),
+                  })
+                }
+                keyboardType="number-pad"
+              />
+            </View>
+            {cardioTieneDistancia ? (
+              <View style={styles.cardioColKm}>
+                <TextInput
+                  style={[styles.cardioInput, data.sets[0].completada ? styles.inputHecho : null]}
+                  placeholder="—"
+                  placeholderTextColor={c.textMuted}
+                  value={data.sets[0].distanciaKm ?? ''}
+                  onChangeText={(t) =>
+                    onChange({
+                      ...data,
+                      sets: actualizarSet(data.sets, data.sets[0]!.setId, { distanciaKm: normalizarDecimalInput(t) }),
+                    })
+                  }
+                  keyboardType="decimal-pad"
+                />
+              </View>
+            ) : null}
+            <Pressable
+              style={styles.entrenoColCheck}
+              onPress={() =>
+                onChange({
+                  ...data,
+                  sets: actualizarSet(data.sets, data.sets[0]!.setId, { completada: !data.sets[0]!.completada }),
+                })
+              }
+              hitSlop={8}
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: Boolean(data.sets[0].completada) }}
+            >
+              <Ionicons
+                name={data.sets[0].completada ? 'checkbox' : 'square-outline'}
+                size={22}
+                color={data.sets[0].completada ? c.success : c.textMuted}
+              />
+            </Pressable>
+          </View>
+        </>
+      ) : null}
+
+      {!esEntreno && esCardioCard && data.sets[0] ? (
+        <>
+          <View style={[styles.cardioHead, styles.cardioCompact]}>
+            <View style={cardioTieneDistancia ? styles.cardioColTiempoCompact : styles.cardioColTiempo}>
+              <Text style={[styles.th, styles.entrenoThCenter]}>TIEMPO (min)</Text>
+            </View>
+            {cardioTieneDistancia ? (
+              <View style={styles.cardioColKmCompact}>
+                <Text style={[styles.th, styles.entrenoThCenter]}>KM</Text>
+              </View>
+            ) : null}
+          </View>
+          <View style={[styles.cardioRow, styles.cardioCompact]}>
+            <View style={cardioTieneDistancia ? styles.cardioColTiempoCompact : styles.cardioColTiempo}>
+              <TextInput
+                style={styles.cardioInput}
+                placeholder="—"
+                placeholderTextColor={c.textMuted}
+                value={data.sets[0].duracionSeg ?? ''}
+                onChangeText={(t) =>
+                  onChange({
+                    ...data,
+                    sets: actualizarSet(data.sets, data.sets[0]!.setId, { duracionSeg: normalizarTiempoInput(t) }),
+                  })
+                }
+                keyboardType="number-pad"
+              />
+            </View>
+            {cardioTieneDistancia ? (
+              <View style={styles.cardioColKmCompact}>
+                <TextInput
+                  style={styles.cardioInput}
+                  placeholder="—"
+                  placeholderTextColor={c.textMuted}
+                  value={data.sets[0].distanciaKm ?? ''}
+                  onChangeText={(t) =>
+                    onChange({
+                      ...data,
+                      sets: actualizarSet(data.sets, data.sets[0]!.setId, { distanciaKm: normalizarDecimalInput(t) }),
+                    })
+                  }
+                  keyboardType="decimal-pad"
+                />
+              </View>
+            ) : null}
+          </View>
+        </>
+      ) : null}
+
+      {!esCardioCard && esEntreno ? (
         <View style={styles.tableHead}>
           <View style={styles.entrenoColSerie}>
             <Text style={[styles.thEntrenoSerie, styles.entrenoThCenter]} numberOfLines={1}>
@@ -608,16 +794,16 @@ export function EjercicioRutinaCard({
           <View style={styles.entrenoColCheck} />
           <View style={styles.colMenu} />
         </View>
-      ) : (
+      ) : !esCardioCard ? (
         <View style={styles.tableHead}>
           <Text style={[styles.th, styles.colSerie]}>SERIE</Text>
           <Text style={[styles.th, styles.colKg]}>KG</Text>
           <Text style={[styles.th, styles.colReps]}>REPS</Text>
           <View style={styles.colMenu} />
         </View>
-      )}
+      ) : null}
 
-      {data.sets.map((set, index) => {
+      {!esCardioCard ? data.sets.map((set, index) => {
         const abrev = abrevTipoSerieUi(set.tipoUi);
         const accent = accentSerie(c, set.tipoUi);
         const hecho = Boolean(set.completada);
@@ -789,11 +975,13 @@ export function EjercicioRutinaCard({
             </Pressable>
           </View>
         );
-      })}
+      }) : null}
 
+      {!esCardioCard ? (
       <Pressable style={styles.addSerie} onPress={añadirSerie}>
         <Text style={styles.addSerieTxt}>+ AGREGAR SERIE</Text>
       </Pressable>
+      ) : null}
 
       <OpcionesMenuModal
         visible={menuEjercicio}
@@ -884,7 +1072,7 @@ export function EjercicioRutinaCard({
       </Modal>
 
       <OpcionesMenuModal
-        visible={menuSetId != null}
+        visible={!esCardioCard && menuSetId != null}
         onClose={() => setMenuSetId(null)}
         options={menuSetId ? opcionesTipo(menuSetId) : []}
       />

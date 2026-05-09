@@ -24,9 +24,9 @@ import { RutinasListadoTab } from '@/components/entrenamiento/RutinasListadoTab'
 import { useEntreno } from '@/context/EntrenoContext';
 import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from '@/hooks/useTheme';
+import { useTimerDescanso, type ModoDescanso } from '@/hooks/useTimerDescanso';
 import {
   entrenamientoService,
-  type DetalleSesion,
   type SesionResumen,
 } from '@/services/entrenamiento.service';
 
@@ -158,31 +158,6 @@ function formatearVolumen(kg: number): string {
   return `${rounded.toLocaleString('es-ES')} kg`;
 }
 
-function contarDetalle(detalle: DetalleSesion | null, sesion: SesionResumen): SesionVista {
-  const duracionMin = entrenamientoService.calcularDuracionMinutos(sesion.hora_inicio, sesion.hora_fin);
-  const duracionSegundos = calcularDuracionSegundos(sesion.hora_inicio, sesion.hora_fin);
-  let series = 0;
-  let volumenKg = 0;
-
-  for (const ejercicio of detalle?.ejercicios ?? []) {
-    for (const set of ejercicio.sets) {
-      if (!set.completada) continue;
-      series += 1;
-      const peso = set.peso_kg != null ? Number(set.peso_kg) : 0;
-      const reps = set.repeticiones != null ? Number(set.repeticiones) : 0;
-      volumenKg += peso * reps;
-    }
-  }
-
-  return {
-    ...sesion,
-    ejercicios: detalle?.ejercicios.length ?? 0,
-    series,
-    volumenKg,
-    duracionMin,
-    duracionSegundos,
-  };
-}
 
 function ordenarSesionesDia(a: SesionVista, b: SesionVista): number {
   const ta = a.hora_inicio ? new Date(a.hora_inicio).getTime() : 0;
@@ -240,13 +215,15 @@ function crearPaletaEntrenos(c: ReturnType<typeof useTheme>['c']): WorkoutPalett
 }
 
 export default function EntrenamientoIndex() {
-  const { c, f } = useTheme();
+  const { c, f, ts, s, r } = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user } = useAuth();
   const { reload: reloadParam } = useLocalSearchParams<{ reload?: string }>();
   const reload = Array.isArray(reloadParam) ? reloadParam[0] : reloadParam;
   const { entrenoActivo, recuperarEntreno } = useEntreno();
+
+  const { preferencia, setModo, setDuracionSeg } = useTimerDescanso();
 
   const [tab, setTab] = useState<TabEntreno>('entrenos');
   const [lunesSemana, setLunesSemana] = useState(() => inicioSemanaLunes(new Date()));
@@ -257,6 +234,7 @@ export default function EntrenamientoIndex() {
   const [diasHeight, setDiasHeight] = useState(0);
   const [modalRecuperacion, setModalRecuperacion] = useState<SesionResumen | null>(null);
   const [recuperando, setRecuperando] = useState(false);
+  const [modalAjustes, setModalAjustes] = useState(false);
   const reqIdRef = useRef(0);
 
   useFocusEffect(
@@ -304,13 +282,15 @@ export default function EntrenamientoIndex() {
     setCargandoSemana(true);
 
     (async () => {
-      const sesiones = await entrenamientoService.obtenerSesionesSemana(user.id, rangoSemana.ini, rangoSemana.fin);
-      const sesionesConDetalle = await Promise.all(
-        sesiones.map(async (sesion) => {
-          const detalle = await entrenamientoService.obtenerDetalleSesion(sesion.id);
-          return contarDetalle(detalle, sesion);
-        }),
-      );
+      const resumenes = await entrenamientoService.obtenerResumenSesionesSemana(user.id, rangoSemana.ini, rangoSemana.fin);
+      const sesionesConDetalle: SesionVista[] = resumenes.map(({ sesion, ejercicios, series, volumenKg }) => ({
+        ...sesion,
+        ejercicios,
+        series,
+        volumenKg,
+        duracionMin: entrenamientoService.calcularDuracionMinutos(sesion.hora_inicio, sesion.hora_fin),
+        duracionSegundos: calcularDuracionSegundos(sesion.hora_inicio, sesion.hora_fin),
+      }));
 
       if (myId !== reqIdRef.current) return;
       setSesionesSemana(sesionesConDetalle);
@@ -379,14 +359,20 @@ export default function EntrenamientoIndex() {
     setLunesSemana((prev) => addDays(prev, -7));
   }, []);
 
+  const esSemanaActual = useMemo(() => mismoDia(lunesSemana, inicioSemanaLunes(hoy)), [lunesSemana, hoy]);
+
   const semanaSiguiente = useCallback(() => {
+    setLunesSemana((prev) => {
+      const siguiente = addDays(prev, 7);
+      if (siguiente > inicioSemanaLunes(new Date())) return prev;
+      return siguiente;
+    });
     setExpandedDate(null);
-    setLunesSemana((prev) => addDays(prev, 7));
   }, []);
 
   const rowHeight = diasHeight > 0 ? Math.max(56, (diasHeight - 30) / 7) : undefined;
   const palette = useMemo(() => crearPaletaEntrenos(c), [c]);
-  const styles = useMemo(() => makeStyles(f, insets.top, palette), [f, insets.top, palette]);
+  const styles = useMemo(() => makeStyles(f, insets.top, palette, c), [f, insets.top, palette, c]);
 
   return (
     <View style={styles.safe}>
@@ -399,7 +385,11 @@ export default function EntrenamientoIndex() {
               <MaterialCommunityIcons name="arm-flex-outline" size={15} color={palette.accent} />
             </View>
           </View>
-          <Pressable style={styles.headerStatsButton} accessibilityRole="button">
+          <Pressable
+            style={styles.headerStatsButton}
+            accessibilityRole="button"
+            onPress={() => setModalAjustes(true)}
+          >
             <Ionicons name="settings-outline" size={20} color={palette.accent} />
           </Pressable>
         </View>
@@ -455,8 +445,13 @@ export default function EntrenamientoIndex() {
               <Text style={styles.weekLabel}>{etiquetaRangoSemana(lunesSemana)}</Text>
               {cargandoSemana ? <ActivityIndicator size="small" color={palette.accent} /> : null}
             </View>
-            <Pressable style={styles.weekButton} onPress={semanaSiguiente} accessibilityRole="button">
-              <Ionicons name="chevron-forward" size={18} color={palette.chevron} />
+            <Pressable
+              style={[styles.weekButton, esSemanaActual && styles.weekButtonDisabled]}
+              onPress={semanaSiguiente}
+              disabled={esSemanaActual}
+              accessibilityRole="button"
+            >
+              <Ionicons name="chevron-forward" size={18} color={esSemanaActual ? palette.textMuted : palette.chevron} />
             </Pressable>
           </View>
 
@@ -523,6 +518,101 @@ export default function EntrenamientoIndex() {
           <RutinasListadoTab />
         </View>
       )}
+
+      <Modal
+        visible={modalAjustes}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setModalAjustes(false)}
+      >
+        <Pressable
+          style={[styles.ajusteOverlay, { padding: s.lg }]}
+          onPress={() => setModalAjustes(false)}
+        >
+          <Pressable style={styles.ajusteCard} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.ajusteAccent} />
+            <Text style={[styles.ajusteTitulo, { ...ts.subheading, fontFamily: f.sansBold, color: c.textDisplay, marginBottom: s.xs }]}>
+              Ajustes de entreno
+            </Text>
+            <Text style={[{ ...ts.bodySm, fontFamily: f.sansMedium, color: c.textSecondary, marginBottom: s.sm, textTransform: 'uppercase', letterSpacing: 0.5, fontSize: 11 }]}>
+              Descanso entre series
+            </Text>
+
+            <View style={{ gap: 2 }}>
+              {(
+                [
+                  { key: 'fijo' as ModoDescanso, titulo: 'Tiempo fijo', desc: 'Cuenta atrás configurable al marcar cada serie.' },
+                  { key: 'auto' as ModoDescanso, titulo: 'Automático', desc: 'Mide el tiempo entre series y lo guarda.' },
+                  { key: 'off' as ModoDescanso, titulo: 'Desactivado', desc: 'Sin timer de descanso.' },
+                ] as const
+              ).map((m) => {
+                const activo = preferencia.modo === m.key;
+                return (
+                  <Pressable
+                    key={m.key}
+                    style={[
+                      styles.ajusteOpcion,
+                      activo && { backgroundColor: c.primaryBg },
+                    ]}
+                    onPress={() => setModo(m.key)}
+                    accessibilityRole="radio"
+                    accessibilityState={{ checked: activo }}
+                  >
+                    <Ionicons
+                      name={activo ? 'checkmark-circle' : 'ellipse-outline'}
+                      size={18}
+                      color={activo ? c.primary : c.textMuted}
+                    />
+                    <View style={{ flex: 1 }}>
+                      <Text style={[{ ...ts.bodySm, fontFamily: activo ? f.sansBold : f.sansMedium, color: activo ? c.primary : c.text }]}>
+                        {m.titulo}
+                      </Text>
+                      <Text style={[{ ...ts.caption, fontFamily: f.sans, color: c.textSecondary, marginTop: 1 }]}>
+                        {m.desc}
+                      </Text>
+                    </View>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            {preferencia.modo === 'fijo' && (
+              <View style={[styles.ajusteDuracionRow, { borderTopColor: c.border }]}>
+                <Pressable
+                  style={[styles.ajusteDuracionBtn, { borderColor: c.borderVisible, backgroundColor: c.surfaceElevated }]}
+                  onPress={() => setDuracionSeg(Math.max(15, preferencia.duracionSeg - 15))}
+                  accessibilityLabel="Quitar 15 segundos"
+                >
+                  <Text style={[{ ...ts.subheading, fontFamily: f.sansBold, color: c.textDisplay }]}>−</Text>
+                </Pressable>
+                <View style={{ alignItems: 'center' }}>
+                  <Text style={[{ ...ts.heading, fontFamily: f.monoBold, color: c.textDisplay, minWidth: 64, textAlign: 'center' }]}>
+                    {`${Math.floor(preferencia.duracionSeg / 60)}:${String(preferencia.duracionSeg % 60).padStart(2, '0')}`}
+                  </Text>
+                  <Text style={[{ ...ts.caption, fontFamily: f.mono, color: c.textMuted, textAlign: 'center' }]}>min:seg</Text>
+                </View>
+                <Pressable
+                  style={[styles.ajusteDuracionBtn, { borderColor: c.borderVisible, backgroundColor: c.surfaceElevated }]}
+                  onPress={() => setDuracionSeg(Math.min(600, preferencia.duracionSeg + 15))}
+                  accessibilityLabel="Añadir 15 segundos"
+                >
+                  <Text style={[{ ...ts.subheading, fontFamily: f.sansBold, color: c.textDisplay }]}>+</Text>
+                </Pressable>
+              </View>
+            )}
+
+            <View style={[styles.ajusteAcciones, { borderTopColor: c.border }]}>
+              <Pressable
+                style={[styles.ajusteBotonCerrar, { borderColor: c.borderVisible }]}
+                onPress={() => setModalAjustes(false)}
+                accessibilityRole="button"
+              >
+                <Text style={[{ ...ts.bodySm, fontFamily: f.sansMedium, color: c.textDisplay }]}>Cerrar</Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       <Modal
         visible={modalRecuperacion != null}
@@ -745,7 +835,7 @@ function Metric({
   );
 }
 
-function makeStyles(f: ReturnType<typeof useTheme>['f'], topInset: number, p: WorkoutPalette) {
+function makeStyles(f: ReturnType<typeof useTheme>['f'], topInset: number, p: WorkoutPalette, c: ReturnType<typeof useTheme>['c']) {
   return StyleSheet.create({
     safe: {
       flex: 1,
@@ -859,6 +949,9 @@ function makeStyles(f: ReturnType<typeof useTheme>['f'], topInset: number, p: Wo
       alignItems: 'center',
       justifyContent: 'center',
       backgroundColor: p.surfacePressed,
+    },
+    weekButtonDisabled: {
+      opacity: 0.35,
     },
     weekLabelWrap: {
       flex: 1,
@@ -1187,6 +1280,71 @@ function makeStyles(f: ReturnType<typeof useTheme>['f'], topInset: number, p: Wo
       color: p.textSecondary,
       fontSize: 14,
       lineHeight: 18,
+    },
+
+    // Modal ajustes — usa variables del tema (no palette hardcodeada)
+    ajusteOverlay: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.68)',
+      justifyContent: 'center',
+    },
+    ajusteCard: {
+      backgroundColor: c.surface,
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: c.borderVisible,
+      paddingHorizontal: 16,
+      paddingTop: 24,
+      paddingBottom: 16,
+      overflow: 'hidden',
+    },
+    ajusteAccent: {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      height: 2,
+      backgroundColor: c.primary,
+    },
+    ajusteTitulo: {
+      marginBottom: 4,
+    },
+    ajusteOpcion: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: 8,
+      paddingHorizontal: 8,
+      borderRadius: 8,
+      gap: 10,
+    },
+    ajusteDuracionRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 20,
+      paddingVertical: 12,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      marginTop: 8,
+    },
+    ajusteDuracionBtn: {
+      width: 44,
+      height: 44,
+      borderRadius: 8,
+      borderWidth: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    ajusteAcciones: {
+      marginTop: 12,
+      paddingTop: 12,
+      borderTopWidth: StyleSheet.hairlineWidth,
+    },
+    ajusteBotonCerrar: {
+      minHeight: 44,
+      borderRadius: 8,
+      borderWidth: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
   });
 }

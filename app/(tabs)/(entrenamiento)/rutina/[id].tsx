@@ -37,7 +37,7 @@ import {
   type DetalleRutinaEjercicio,
   type DetalleRutinaSet,
 } from '@/services/entrenamiento.service';
-import type { Exercise, TipoSerie } from '@/types/database.types';
+import type { Exercise, TipoSerie, TrackingMode } from '@/types/database.types';
 import type { BorradorEjercicioLinea, BorradorSerieLinea } from '@/types/entrenamientoBorrador.types';
 
 const GRUPOS_MUSCULARES_ORDEN = ['PECHO', 'ESPALDA', 'PIERNAS', 'BRAZOS', 'HOMBRO', 'CORE'] as const;
@@ -113,6 +113,18 @@ function seriePorDefecto(): BorradorSerieLinea {
   return { setId: lid(), tipoUi: 'lineal', kg: '', reps: '' };
 }
 
+function registroCardioPorDefecto(): BorradorSerieLinea {
+  return { setId: lid(), tipoUi: 'lineal', kg: '', reps: '', duracionSeg: '', distanciaKm: '' };
+}
+
+function esCardio(trackingMode: TrackingMode | null | undefined): boolean {
+  return trackingMode === 'cardio_time' || trackingMode === 'cardio_time_distance';
+}
+
+function trackingModeEjercicio(ex: Exercise): TrackingMode {
+  return ex.tracking_mode ?? (ex.categoria === 'cardio' ? 'cardio_time' : 'strength');
+}
+
 function parseOptFloat(s: string): number | null {
   const t = s.trim().replace(',', '.');
   if (!t || t === '—') return null;
@@ -149,28 +161,83 @@ function celdaKg(set: DetalleRutinaSet): string {
   return String(set.peso_kg);
 }
 
+function setsRutinaDesdeLinea(line: BorradorEjercicioLinea) {
+  if (esCardio(line.tracking_mode)) {
+    const registro = line.sets[0];
+    return [
+      {
+        numero_serie: 1,
+        tipo_serie: 'lineal' as const,
+        repeticiones: null,
+        peso_kg: null,
+        tipo_peso: 'bodyweight' as const,
+        duracion_seg: parseDuracionMinASeg(registro?.duracionSeg),
+        distancia_km: line.tracking_mode === 'cardio_time_distance' ? parseOptFloat(registro?.distanciaKm ?? '') : null,
+      },
+    ];
+  }
+
+  return line.sets.map((set, i) => ({
+    numero_serie: i + 1,
+    tipo_serie: tipoSerieUiADb(set.tipoUi),
+    repeticiones: parseOptInt(set.reps),
+    peso_kg: parseOptFloat(set.kg),
+    tipo_peso: 'kg' as const,
+  }));
+}
+
 function detalleALineas(detalle: DetalleRutina): BorradorEjercicioLinea[] {
   return detalle.routine_exercises
     .slice()
     .sort((a, b) => a.orden - b.orden)
-    .map((re) => ({
-      lineId: lid(),
-      exerciseId: re.exercise_id,
-      nombre: re.exercises.nombre,
-      musculo_primario: re.exercises.musculo_primario,
-      sets:
-        re.routine_sets.length > 0
-          ? re.routine_sets
-              .slice()
-              .sort((a, b) => a.numero_serie - b.numero_serie)
-              .map((s) => ({
-              setId: lid(),
-              tipoUi: tipoSerieDbAUi(s.tipo_serie),
-              kg: s.peso_kg != null ? String(s.peso_kg) : '',
-              reps: s.reps != null ? String(s.reps) : '',
-            }))
-          : [seriePorDefecto()],
-    }));
+    .map((re) => {
+      const tracking_mode = re.exercises.tracking_mode;
+      const primerSet = re.routine_sets.slice().sort((a, b) => a.numero_serie - b.numero_serie)[0];
+      return {
+        lineId: lid(),
+        exerciseId: re.exercise_id,
+        nombre: re.exercises.nombre,
+        musculo_primario: re.exercises.musculo_primario,
+        tracking_mode,
+        sets: esCardio(tracking_mode)
+          ? [
+              {
+                ...registroCardioPorDefecto(),
+                duracionSeg: formatearDuracionInput(primerSet?.duracion_seg),
+                distanciaKm: primerSet?.distancia_km != null ? String(primerSet.distancia_km) : '',
+              },
+            ]
+          : re.routine_sets.length > 0
+            ? re.routine_sets
+                .slice()
+                .sort((a, b) => a.numero_serie - b.numero_serie)
+                .map((s) => ({
+                  setId: lid(),
+                  tipoUi: tipoSerieDbAUi(s.tipo_serie),
+                  kg: s.peso_kg != null ? String(s.peso_kg) : '',
+                  reps: s.reps != null ? String(s.reps) : '',
+                }))
+            : [seriePorDefecto()],
+      };
+    });
+}
+
+function parseDuracionMinASeg(s: string | undefined): number | null {
+  const t = (s ?? '').trim();
+  if (!t || t === '—') return null;
+  if (!/^\d+$/.test(t)) return null;
+  const min = parseInt(t, 10);
+  return Number.isFinite(min) && min > 0 ? min * 60 : null;
+}
+
+function formatearDuracionInput(seg: number | null | undefined): string {
+  if (seg == null || !Number.isFinite(Number(seg)) || Number(seg) <= 0) return '';
+  return String(Math.round(Number(seg) / 60));
+}
+
+function formatearDuracionLectura(seg: number | null | undefined): string {
+  const input = formatearDuracionInput(seg);
+  return input || '—';
 }
 
 function serializarBorrador(titulo: string, lineas: BorradorEjercicioLinea[]): string {
@@ -178,7 +245,14 @@ function serializarBorrador(titulo: string, lineas: BorradorEjercicioLinea[]): s
     titulo: titulo.trim(),
     lineas: lineas.map((l) => ({
       exerciseId: l.exerciseId,
-      sets: l.sets.map((s) => ({ tipoUi: s.tipoUi, kg: s.kg, reps: s.reps })),
+      tracking_mode: l.tracking_mode,
+      sets: l.sets.map((s) => ({
+        tipoUi: s.tipoUi,
+        kg: s.kg,
+        reps: s.reps,
+        duracionSeg: s.duracionSeg ?? '',
+        distanciaKm: s.distanciaKm ?? '',
+      })),
     })),
   });
 }
@@ -748,6 +822,8 @@ export default function RutinaDetallePantalla() {
 
   const incorporarEjercicio = useCallback(
     (ex: Exercise) => {
+      const tracking_mode = trackingModeEjercicio(ex);
+      const sets = esCardio(tracking_mode) ? [registroCardioPorDefecto()] : [seriePorDefecto()];
       setLineas((prev) => {
         const repId = replaceLineId;
         if (repId) {
@@ -758,6 +834,8 @@ export default function RutinaDetallePantalla() {
                   exerciseId: ex.id,
                   nombre: ex.nombre,
                   musculo_primario: ex.musculo_primario,
+                  tracking_mode,
+                  sets,
                 }
               : l,
           );
@@ -769,7 +847,8 @@ export default function RutinaDetallePantalla() {
             exerciseId: ex.id,
             nombre: ex.nombre,
             musculo_primario: ex.musculo_primario,
-            sets: [seriePorDefecto()],
+            tracking_mode,
+            sets,
           },
         ];
       });
@@ -849,13 +928,7 @@ export default function RutinaDetallePantalla() {
     const ejerciciosPayload = lineas.map((line, idx) => ({
       exercise_id: line.exerciseId,
       orden: idx + 1,
-      sets: line.sets.map((set, i) => ({
-        numero_serie: i + 1,
-        tipo_serie: tipoSerieUiADb(set.tipoUi),
-        repeticiones: parseOptInt(set.reps),
-        peso_kg: parseOptFloat(set.kg),
-        tipo_peso: 'kg' as const,
-      })),
+      sets: setsRutinaDesdeLinea(line),
     }));
 
     setGuardando(true);
@@ -1111,7 +1184,32 @@ export default function RutinaDetallePantalla() {
                             ) : null}
                           </View>
                         </View>
-                        {ej.routine_sets.length === 0 ? (
+                        {esCardio(ej.exercises.tracking_mode) ? (
+                          <>
+                            <View style={styles.tablaHead}>
+                              <View style={styles.colKg}>
+                                <Text style={styles.thText}>TIEMPO</Text>
+                              </View>
+                              {ej.exercises.tracking_mode === 'cardio_time_distance' ? (
+                                <View style={styles.colReps}>
+                                  <Text style={styles.thText}>KM</Text>
+                                </View>
+                              ) : null}
+                            </View>
+                            <View style={styles.fila}>
+                              <View style={styles.colKg}>
+                                <Text style={styles.tdText}>{formatearDuracionLectura(ej.routine_sets[0]?.duracion_seg)}</Text>
+                              </View>
+                              {ej.exercises.tracking_mode === 'cardio_time_distance' ? (
+                                <View style={styles.colReps}>
+                                  <Text style={styles.tdText}>
+                                    {ej.routine_sets[0]?.distancia_km != null ? String(ej.routine_sets[0]?.distancia_km) : '—'}
+                                  </Text>
+                                </View>
+                              ) : null}
+                            </View>
+                          </>
+                        ) : ej.routine_sets.length === 0 ? (
                           <Text style={[styles.emptyText, { textAlign: 'left', marginTop: s.xs }]}>Sin series</Text>
                         ) : (
                           <>

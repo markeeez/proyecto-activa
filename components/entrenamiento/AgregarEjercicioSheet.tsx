@@ -52,7 +52,7 @@ async function obtenerCatalogo(): Promise<Exercise[]> {
       const to = from + CATALOGO_PAGE_SIZE - 1;
       const { data, error } = await supabase
         .from('exercises')
-        .select('id, api_id, nombre, descripcion, musculo_primario, musculos_secundarios, equipamiento, categoria, foto_url, dificultad, is_custom, created_by, api_source, created_at')
+        .select('id, api_id, nombre, descripcion, musculo_primario, musculos_secundarios, equipamiento, categoria, tracking_mode, foto_url, dificultad, is_custom, created_by, api_source, created_at')
         .eq('is_custom', false)
         .order('nombre')
         .range(from, to);

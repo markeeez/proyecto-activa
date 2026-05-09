@@ -7,9 +7,11 @@
 
 import { Ionicons } from '@expo/vector-icons';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
-import { useCallback, useState } from 'react';
+import { usePathname } from 'expo-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   type LayoutChangeEvent,
+  Modal,
   Platform,
   Pressable,
   StyleSheet,
@@ -73,6 +75,8 @@ export function TabBarActivia({
 }: BottomTabBarProps) {
   const safe        = useSafeAreaInsets();
   const { c, isDark } = useTheme();
+  const pathname = usePathname();
+  const previousPathname = useRef(pathname);
   const bottomInset = tabInsets?.bottom ?? safe.bottom;
 
   const barBg     = isDark ? BAR_DARK    : BAR_LIGHT;
@@ -86,7 +90,14 @@ export function TabBarActivia({
     if (width > 0) setBarW(prev => Math.abs(prev - width) > 0.5 ? width : prev);
   }, []);
 
-  const navigateToRoute = useCallback((routeName: string) => {
+  useEffect(() => {
+    if (previousPathname.current !== pathname) {
+      previousPathname.current = pathname;
+      setMoreExpanded(false);
+    }
+  }, [pathname]);
+
+  const navigateToRoute = useCallback((routeName: string, resetToIndex = false) => {
     const targetRoute = state.routes.find(r => r.name === routeName);
     if (!targetRoute) return;
 
@@ -96,7 +107,13 @@ export function TabBarActivia({
       canPreventDefault: true,
     });
     if (!event.defaultPrevented) {
-      navigation.navigate(targetRoute.name, targetRoute.params);
+      if (resetToIndex) {
+        navigation.navigate(targetRoute.name as any, {
+          screen: 'index',
+        });
+      } else {
+        navigation.navigate(targetRoute.name, targetRoute.params);
+      }
     }
   }, [state.routes, navigation]);
 
@@ -111,7 +128,7 @@ export function TabBarActivia({
 
   const onMoreOptionPress = useCallback((routeName: string) => {
     setMoreExpanded(false);
-    navigateToRoute(routeName);
+    navigateToRoute(routeName, true);
   }, [navigateToRoute]);
 
   // El FAB sobresale por encima del borde superior de la barra.
@@ -207,7 +224,20 @@ export function TabBarActivia({
         })}
       </View>
 
-      {moreExpanded ? (
+      <Modal
+        visible={moreExpanded}
+        transparent
+        animationType="none"
+        statusBarTranslucent
+        onRequestClose={() => setMoreExpanded(false)}
+      >
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Cerrar menú Más"
+          onPress={() => setMoreExpanded(false)}
+          style={StyleSheet.absoluteFill}
+        />
+
         <View
           pointerEvents="box-none"
           style={[styles.moreExpandedWrap, { bottom: totalH + 8 }]}
@@ -246,7 +276,7 @@ export function TabBarActivia({
             <Text style={[styles.moreExpandedLabel, { color: c.textDisplay }]}>Perfil</Text>
           </Pressable>
         </View>
-      ) : null}
+      </Modal>
 
       {/* ── Capa 3: FAB IA ────────────────────────────────────────── */}
       {/*

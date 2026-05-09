@@ -24,6 +24,11 @@ export type CategoriaEjercicio =
   | 'flexibilidad'
   | 'otro';
 
+export type TrackingMode =
+  | 'strength'
+  | 'cardio_time'
+  | 'cardio_time_distance';
+
 /** Valores del CHECK en `workout_sets.tipo_serie` (alineado con plantilla). */
 export type TipoSerie =
   | 'lineal'
@@ -169,6 +174,7 @@ export interface Exercise {
   created_at: string;
   /** Opcional hasta migración en Supabase */
   equipamiento?: string | null;
+  tracking_mode?: TrackingMode;
 }
 
 /** Plantilla de rutina (tabla routines). */
@@ -221,8 +227,22 @@ export interface WorkoutSet {
   peso_kg: number | null;
   tipo_peso: TipoPeso;
   duracion_seg: number | null;
+  distancia_km?: number | null;
   descanso_seg: number | null;
   completada: boolean;
+}
+
+export interface RoutineSet {
+  id: string;
+  routine_exercise_id: string;
+  numero_serie: number;
+  tipo_serie: TipoSerie;
+  reps: number | null;
+  peso_kg: number | null;
+  tipo_peso: TipoPeso;
+  duracion_seg?: number | null;
+  distancia_km?: number | null;
+  created_at: string;
 }
 
 export interface PlanLimit {

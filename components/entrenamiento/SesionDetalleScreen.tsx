@@ -2,7 +2,10 @@
  * Detalle de sesión finalizada — solo lectura.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Ionicons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -11,20 +14,21 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
-import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { Image } from 'expo-image';
-import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from '@/hooks/useTheme';
-import type { TipoSerie } from '@/types/database.types';
 import {
   entrenamientoService,
   type DetalleSesion,
+  type DetalleSesionEjercicio,
   type DetalleSesionSet,
 } from '@/services/entrenamiento.service';
+import { progresoService } from '@/services/progreso.service';
+import type { TipoSerie } from '@/types/database.types';
 
 function parseYmdLocal(ymd: string): Date {
   const [y, m, d] = ymd.split('-').map(Number);
@@ -48,6 +52,45 @@ function formatHora(iso: string | null): string {
   return d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
 }
 
+/** Extrae "HH:MM" de un ISO string usando hora local del dispositivo. */
+function isoToHHMM(iso: string | null): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+/**
+ * Formatea la entrada de hora mientras el usuario escribe:
+ * solo dígitos, inserta ':' automáticamente tras los 2 primeros,
+ * limita a 4 dígitos (→ "HH:MM"). Devuelve el string formateado.
+ */
+function formatearEntradaHora(raw: string): string {
+  const digits = raw.replace(/\D/g, '').slice(0, 4);
+  if (digits.length <= 2) return digits;
+  return `${digits.slice(0, 2)}:${digits.slice(2)}`;
+}
+
+/** True si "HH:MM" tiene valores válidos (H 0–23, M 0–59). */
+function esHoraValida(hhmm: string): boolean {
+  if (!/^\d{2}:\d{2}$/.test(hhmm)) return false;
+  const h = parseInt(hhmm.slice(0, 2), 10);
+  const m = parseInt(hhmm.slice(3, 5), 10);
+  return h >= 0 && h <= 23 && m >= 0 && m <= 59;
+}
+
+/**
+ * Combina la fecha base (ISO date) con una hora "HH:MM" y devuelve un ISO string
+ * usando la zona local del dispositivo.
+ */
+function hhmmToIso(fechaBase: string, hhmm: string): string | null {
+  if (!esHoraValida(hhmm)) return null;
+  const h = parseInt(hhmm.slice(0, 2), 10);
+  const m = parseInt(hhmm.slice(3, 5), 10);
+  const [y, mo, d] = fechaBase.split('-').map(Number);
+  return new Date(y, mo - 1, d, h, m, 0, 0).toISOString();
+}
+
 function formatDuracionSesion(hora_inicio: string | null, hora_fin: string | null): string {
   if (hora_fin == null) return 'En curso';
   if (!hora_inicio) return '< 1 min';
@@ -68,6 +111,43 @@ function formatDuracionSesion(hora_inicio: string | null, hora_fin: string | nul
   return `${h}h ${r}min`;
 }
 
+function formatDescanso(seg: number | null | undefined): string {
+  if (seg == null || !Number.isFinite(Number(seg)) || Number(seg) <= 0) return '—';
+  const total = Math.round(Number(seg));
+  if (total < 60) return `${total}s`;
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return s === 0 ? `${m}m` : `${m}m ${s}s`;
+}
+
+function calcMediaDescanso(sets: DetalleSesionSet[]): number | null {
+  const vals = sets
+    .filter((s) => s.completada && s.descanso_seg != null)
+    .map((s) => s.descanso_seg as number);
+  if (vals.length === 0) return null;
+  return vals.reduce((acc, v) => acc + v, 0) / vals.length;
+}
+
+function estimarKcalSesion(
+  ejercicios: DetalleSesionEjercicio[],
+  hora_inicio: string | null,
+  hora_fin: string | null,
+  pesoKg: number | null,
+): number | null {
+  if (pesoKg == null || !hora_inicio || !hora_fin) return null;
+  const inicioMs = new Date(hora_inicio).getTime();
+  const finMs = new Date(hora_fin).getTime();
+  if (Number.isNaN(inicioMs) || Number.isNaN(finMs) || finMs <= inicioMs) return null;
+  const duracionHoras = (finMs - inicioMs) / 3_600_000;
+  if (duracionHoras <= 0 || ejercicios.length === 0) return null;
+  const numCardio = ejercicios.filter(
+    (ej) => ej.tracking_mode === 'cardio_time' || ej.tracking_mode === 'cardio_time_distance',
+  ).length;
+  const numFuerza = ejercicios.length - numCardio;
+  const metPromedio = (numFuerza * 4.0 + numCardio * 7.0) / ejercicios.length;
+  return Math.round(metPromedio * pesoKg * duracionHoras);
+}
+
 function badgeTipoSerie(t: TipoSerie): string {
   switch (t) {
     case 'warm_up':
@@ -85,13 +165,30 @@ function badgeTipoSerie(t: TipoSerie): string {
 }
 
 function celdaKg(set: DetalleSesionSet): string {
-  if (set.tipo_peso === 'bodyweight' && set.peso_kg == null) return 'BW';
+  if (set.tipo_peso === 'bodyweight' && set.peso_kg == null) return 'PC';
   if (set.peso_kg == null) return '—';
   return String(set.peso_kg);
 }
 
 function celdaRir(set: DetalleSesionSet): string {
   return set.rir != null ? String(set.rir) : '-';
+}
+
+function esCardioDetalle(mode: string | null | undefined): boolean {
+  return mode === 'cardio_time' || mode === 'cardio_time_distance';
+}
+
+function formatDuracionCardio(seg: number | null | undefined): string {
+  if (seg == null || !Number.isFinite(Number(seg)) || Number(seg) <= 0) return '—';
+  const total = Math.round(Number(seg));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+function formatKm(km: number | null | undefined): string {
+  if (km == null || !Number.isFinite(Number(km))) return '—';
+  return Number(km).toLocaleString('es-ES', { maximumFractionDigits: 2 });
 }
 
 const TIPOS_SERIE_LEYENDA = [
@@ -113,6 +210,7 @@ export default function DetalleSesionPantalla() {
   }, [router]);
   const insets = useSafeAreaInsets();
   const { c, f, ts, s, r } = useTheme();
+  const { user } = useAuth();
 
   const [detalle, setDetalle] = useState<DetalleSesion | null>(null);
   const [cargando, setCargando] = useState(true);
@@ -120,6 +218,14 @@ export default function DetalleSesionPantalla() {
   const [modalEliminar, setModalEliminar] = useState(false);
   const [eliminando, setEliminando] = useState(false);
   const [modalTipos, setModalTipos] = useState(false);
+  const [pesoKg, setPesoKg] = useState<number | null>(null);
+  const [modalDuracion, setModalDuracion] = useState(false);
+  const [editInicio, setEditInicio] = useState('');
+  const [editFin, setEditFin] = useState('');
+  const [errorInicio, setErrorInicio] = useState(false);
+  const [errorFin, setErrorFin] = useState(false);
+  const [guardandoDuracion, setGuardandoDuracion] = useState(false);
+  const inputFinRef = useRef<TextInput>(null);
 
   const cargar = useCallback(async () => {
     if (!sessionId) {
@@ -143,6 +249,28 @@ export default function DetalleSesionPantalla() {
   useEffect(() => {
     cargar();
   }, [cargar]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    progresoService.obtenerPesoUsuario(user.id).then(setPesoKg);
+  }, [user?.id]);
+
+  const mediaDescansoPorEjercicio = useMemo<Map<string, number | null>>(() => {
+    const map = new Map<string, number | null>();
+    if (!detalle) return map;
+    for (const ej of detalle.ejercicios) map.set(ej.id, calcMediaDescanso(ej.sets));
+    return map;
+  }, [detalle]);
+
+  const mediaDescansoSesion = useMemo<number | null>(() => {
+    if (!detalle) return null;
+    return calcMediaDescanso(detalle.ejercicios.flatMap((ej) => ej.sets));
+  }, [detalle]);
+
+  const kcalEstimadas = useMemo<number | null>(() => {
+    if (!detalle) return null;
+    return estimarKcalSesion(detalle.ejercicios, detalle.hora_inicio, detalle.hora_fin, pesoKg);
+  }, [detalle, pesoKg]);
 
   const styles = useMemo(
     () =>
@@ -227,7 +355,7 @@ export default function DetalleSesionPantalla() {
           color: c.textDisplay,
         },
         metricValDur: {
-          ...ts.heading,
+          ...ts.body,
           fontFamily: f.monoBold,
           color: c.textDisplay,
           letterSpacing: -0.2,
@@ -242,6 +370,23 @@ export default function DetalleSesionPantalla() {
           fontFamily: f.mono,
           color: c.primary,
           letterSpacing: 0.5,
+        },
+        metricValDescanso: {
+          ...ts.body,
+          fontFamily: f.mono,
+          color: c.textDisplay,
+          letterSpacing: -0.2,
+        },
+        ejDescansoChip: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 3,
+        },
+        ejDescansoChipTxt: {
+          ...ts.caption,
+          fontFamily: f.mono,
+          color: c.textSecondary,
+          fontSize: 11,
         },
         scroll: {
           flex: 1,
@@ -375,6 +520,18 @@ export default function DetalleSesionPantalla() {
         },
         colTipo: {
           flex: 0.8,
+          minWidth: 0,
+          alignItems: 'center',
+          justifyContent: 'center',
+        },
+        colCardioMain: {
+          flex: 1.1,
+          minWidth: 0,
+          alignItems: 'center',
+          justifyContent: 'center',
+        },
+        colCardioKm: {
+          flex: 0.85,
           minWidth: 0,
           alignItems: 'center',
           justifyContent: 'center',
@@ -657,9 +814,160 @@ export default function DetalleSesionPantalla() {
           color: c.textSecondary,
           letterSpacing: 0.5,
         },
+        durModalCard: {
+          backgroundColor: c.surface,
+          borderRadius: 18,
+          borderWidth: 1,
+          borderColor: c.borderVisible,
+          paddingHorizontal: s.md,
+          paddingTop: s.lg,
+          paddingBottom: s.md,
+          overflow: 'hidden',
+          zIndex: 1,
+          maxWidth: '100%',
+        },
+        durModalAccent: {
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          height: 2,
+          backgroundColor: c.primary,
+        },
+        durModalTitle: {
+          ...ts.subheading,
+          fontFamily: f.sansBold,
+          color: c.textDisplay,
+          marginBottom: 4,
+          letterSpacing: 0,
+        },
+        durModalSubtitle: {
+          ...ts.caption,
+          fontFamily: f.mono,
+          color: c.textSecondary,
+          marginBottom: s.lg,
+          letterSpacing: 0.3,
+        },
+        durInputRow: {
+          flexDirection: 'row',
+          gap: s.sm,
+          marginBottom: s.lg,
+        },
+        durInputWrap: {
+          flex: 1,
+        },
+        durInputLbl: {
+          ...ts.label,
+          fontFamily: f.monoBold,
+          color: c.textSecondary,
+          letterSpacing: 0.7,
+          marginBottom: s.xs,
+        },
+        durInput: {
+          height: 48,
+          borderRadius: r.sm,
+          borderWidth: 1,
+          borderColor: c.borderVisible,
+          backgroundColor: c.surfaceElevated,
+          paddingHorizontal: s.md,
+          ...ts.body,
+          fontFamily: f.mono,
+          color: c.textDisplay,
+          textAlign: 'center',
+          letterSpacing: 1,
+        },
+        durInputFocused: {
+          borderColor: c.primary,
+        },
+        durInputError: {
+          borderColor: c.danger,
+          color: c.danger,
+        },
+        durBtnRow: {
+          flexDirection: 'column',
+          gap: s.sm,
+        },
+        durBtnPrimary: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minHeight: 48,
+          paddingHorizontal: s.md,
+          borderRadius: r.sm,
+          backgroundColor: c.primary,
+        },
+        durBtnPrimaryTxt: {
+          ...ts.body,
+          fontFamily: f.sansBold,
+          color: '#FFFFFF',
+          textAlign: 'center',
+        },
+        durBtnGhost: {
+          minHeight: 48,
+          alignItems: 'center',
+          justifyContent: 'center',
+          paddingHorizontal: s.md,
+          borderRadius: r.sm,
+          borderWidth: 1,
+          borderColor: c.border,
+          backgroundColor: 'transparent',
+        },
+        durBtnGhostTxt: {
+          ...ts.body,
+          fontFamily: f.sansMedium,
+          color: c.textSecondary,
+          textAlign: 'center',
+        },
       }),
     [c, f, ts, s, r, insets.bottom, insets.top],
   );
+
+  const onAbrirModalDuracion = useCallback(() => {
+    if (!detalle) return;
+    setEditInicio(isoToHHMM(detalle.hora_inicio));
+    setEditFin(isoToHHMM(detalle.hora_fin));
+    setErrorInicio(false);
+    setErrorFin(false);
+    setModalDuracion(true);
+  }, [detalle]);
+
+  const onGuardarDuracion = useCallback(async () => {
+    if (!detalle || !sessionId || guardandoDuracion) return;
+    const inicioValido = esHoraValida(editInicio);
+    const finValido = esHoraValida(editFin);
+    if (!inicioValido || !finValido) {
+      setErrorInicio(!inicioValido);
+      setErrorFin(!finValido);
+      return;
+    }
+    const nuevoInicio = hhmmToIso(detalle.fecha, editInicio)!;
+    let nuevoFin = hhmmToIso(detalle.fecha, editFin)!;
+    if (new Date(nuevoFin).getTime() <= new Date(nuevoInicio).getTime()) {
+      const finSiguienteDia = new Date(nuevoFin);
+      finSiguienteDia.setDate(finSiguienteDia.getDate() + 1);
+      const durMs = finSiguienteDia.getTime() - new Date(nuevoInicio).getTime();
+      if (durMs > 8 * 3_600_000) {
+        setErrorInicio(true);
+        setErrorFin(true);
+        return;
+      }
+      nuevoFin = finSiguienteDia.toISOString();
+    }
+    setErrorInicio(false);
+    setErrorFin(false);
+    setGuardandoDuracion(true);
+    try {
+      await entrenamientoService.actualizarDuracionSesion(sessionId, nuevoInicio, nuevoFin);
+      setDetalle((prev) =>
+        prev ? { ...prev, hora_inicio: nuevoInicio, hora_fin: nuevoFin } : prev,
+      );
+      setModalDuracion(false);
+    } catch {
+      Alert.alert('Error', 'No se pudo guardar la duración.');
+    } finally {
+      setGuardandoDuracion(false);
+    }
+  }, [detalle, sessionId, editInicio, editFin, guardandoDuracion]);
 
   const onConfirmarEliminar = useCallback(async () => {
     if (!sessionId || eliminando) return;
@@ -861,6 +1169,95 @@ export default function DetalleSesionPantalla() {
           </View>
         </Modal>
 
+        <Modal
+          visible={modalDuracion}
+          transparent
+          animationType="fade"
+          onRequestClose={() => {
+            if (!guardandoDuracion) setModalDuracion(false);
+          }}
+        >
+          <View style={styles.delModalBackdrop}>
+            <Pressable
+              style={styles.delModalDismissLayer}
+              onPress={() => {
+                if (!guardandoDuracion) setModalDuracion(false);
+              }}
+              accessibilityRole="button"
+              accessibilityLabel="Cerrar"
+            />
+            <View style={styles.durModalCard}>
+              <View style={styles.durModalAccent} />
+              <Text style={styles.durModalTitle}>Editar duración</Text>
+              <View style={styles.durInputRow}>
+                <View style={styles.durInputWrap}>
+                  <Text style={styles.durInputLbl}>INICIO</Text>
+                  <TextInput
+                    style={[styles.durInput, errorInicio && styles.durInputError]}
+                    value={editInicio}
+                    onChangeText={(t) => {
+                      setErrorInicio(false);
+                      setErrorFin(false);
+                      const formatted = formatearEntradaHora(t);
+                      setEditInicio(formatted);
+                      if (formatted.length === 5) inputFinRef.current?.focus();
+                    }}
+                    placeholder="09:00"
+                    placeholderTextColor={c.textMuted}
+                    keyboardType="number-pad"
+                    maxLength={5}
+                    returnKeyType="next"
+                    onSubmitEditing={() => inputFinRef.current?.focus()}
+                  />
+                </View>
+                <View style={styles.durInputWrap}>
+                  <Text style={styles.durInputLbl}>FIN</Text>
+                  <TextInput
+                    ref={inputFinRef}
+                    style={[styles.durInput, errorFin && styles.durInputError]}
+                    value={editFin}
+                    onChangeText={(t) => {
+                      setErrorInicio(false);
+                      setErrorFin(false);
+                      setEditFin(formatearEntradaHora(t));
+                    }}
+                    placeholder="10:00"
+                    placeholderTextColor={c.textMuted}
+                    keyboardType="number-pad"
+                    maxLength={5}
+                    returnKeyType="done"
+                    onSubmitEditing={onGuardarDuracion}
+                  />
+                </View>
+              </View>
+              <View style={styles.durBtnRow}>
+                <Pressable
+                  style={styles.durBtnPrimary}
+                  onPress={onGuardarDuracion}
+                  disabled={guardandoDuracion}
+                  accessibilityRole="button"
+                >
+                  {guardandoDuracion ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.durBtnPrimaryTxt}>GUARDAR</Text>
+                  )}
+                </Pressable>
+                <Pressable
+                  style={styles.durBtnGhost}
+                  onPress={() => {
+                    if (!guardandoDuracion) setModalDuracion(false);
+                  }}
+                  disabled={guardandoDuracion}
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.durBtnGhostTxt}>CANCELAR</Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
         <View style={styles.gapHeaderMetrics} />
 
         <View style={styles.metricsWrap}>
@@ -874,38 +1271,43 @@ export default function DetalleSesionPantalla() {
                 </View>
               </View>
             </View>
-            <View style={[styles.metricsCell, styles.metricsCellSepH]}>
+            <Pressable
+              style={[styles.metricsCell, styles.metricsCellSepH]}
+              onPress={onAbrirModalDuracion}
+              accessibilityRole="button"
+              accessibilityLabel="Editar duración"
+            >
               <View style={styles.metricsCellInner}>
                 <Ionicons name="time-outline" size={22} color={c.primary} />
                 <View style={styles.metricTextCol}>
                   <Text style={styles.metricLbl}>DURACIÓN</Text>
-                  <Text style={styles.metricValDur}>
+                  <Text style={styles.metricValDur} numberOfLines={1} adjustsFontSizeToFit>
                     {formatDuracionSesion(detalle.hora_inicio, detalle.hora_fin)}
                   </Text>
                 </View>
               </View>
-            </View>
+            </Pressable>
           </View>
           <View style={styles.metricsRow}>
             <View style={[styles.metricsCell, styles.metricsCellSepV]}>
               <View style={styles.metricsCellInner}>
-                <Ionicons name="play-outline" size={22} color={c.primary} />
+                <Ionicons name="flame-outline" size={22} color={c.primary} />
                 <View style={styles.metricTextCol}>
-                  <Text style={styles.metricLbl}>INICIO</Text>
-                  <Text style={styles.metricValHora}>{formatHora(detalle.hora_inicio)}</Text>
+                  <Text style={styles.metricLbl}>KCAL</Text>
+                  <Text style={styles.metricValDescanso} numberOfLines={1}>
+                    {kcalEstimadas != null ? `≈ ${kcalEstimadas}` : '—'}
+                  </Text>
                 </View>
               </View>
             </View>
             <View style={styles.metricsCell}>
               <View style={styles.metricsCellInner}>
-                <Ionicons name="stop-outline" size={22} color={c.primary} />
+                <Ionicons name="hourglass-outline" size={22} color={c.primary} />
                 <View style={styles.metricTextCol}>
-                  <Text style={styles.metricLbl}>FIN</Text>
-                  {detalle.hora_fin == null ? (
-                    <Text style={styles.metricValEnCurso}>EN CURSO</Text>
-                  ) : (
-                    <Text style={styles.metricValHora}>{formatHora(detalle.hora_fin)}</Text>
-                  )}
+                  <Text style={styles.metricLbl}>DESCANSO</Text>
+                  <Text style={styles.metricValDescanso} numberOfLines={1}>
+                    {formatDescanso(mediaDescansoSesion)}
+                  </Text>
                 </View>
               </View>
             </View>
@@ -929,6 +1331,7 @@ export default function DetalleSesionPantalla() {
 
           {detalle.ejercicios.map((ej) => {
             const setsHechas = ej.sets.filter((st) => st.completada);
+            const esCardio = esCardioDetalle(ej.tracking_mode);
             return (
               <View key={ej.id} style={styles.cardEj}>
                 <View style={styles.ejRowHead}>
@@ -964,6 +1367,14 @@ export default function DetalleSesionPantalla() {
                       <Text style={styles.ejMusculo}>{ej.musculo_primario}</Text>
                     ) : null}
                   </View>
+                  {mediaDescansoPorEjercicio.get(ej.id) != null && (
+                    <View style={styles.ejDescansoChip}>
+                      <Ionicons name="time-outline" size={12} color={c.textSecondary} />
+                      <Text style={styles.ejDescansoChipTxt}>
+                        {formatDescanso(mediaDescansoPorEjercicio.get(ej.id))}
+                      </Text>
+                    </View>
+                  )}
                 </View>
                 {ej.notas != null && ej.notas.trim() !== '' ? (
                   <View style={styles.ejNotaFila}>
@@ -972,7 +1383,30 @@ export default function DetalleSesionPantalla() {
                   </View>
                 ) : null}
                 {setsHechas.length === 0 ? (
-                  <Text style={styles.vacioEj}>Sin series registradas</Text>
+                  <Text style={styles.vacioEj}>{esCardio ? 'Sin tiempo registrado' : 'Sin series registradas'}</Text>
+                ) : esCardio ? (
+                  <>
+                    <View style={styles.tablaHead}>
+                      <View style={styles.colCardioMain}>
+                        <Text style={styles.thText}>TIEMPO</Text>
+                      </View>
+                      {ej.tracking_mode === 'cardio_time_distance' ? (
+                        <View style={styles.colCardioKm}>
+                          <Text style={styles.thText}>KM</Text>
+                        </View>
+                      ) : null}
+                    </View>
+                    <View style={styles.fila}>
+                      <View style={styles.colCardioMain}>
+                        <Text style={styles.tdText}>{formatDuracionCardio(setsHechas[0]?.duracion_seg)}</Text>
+                      </View>
+                      {ej.tracking_mode === 'cardio_time_distance' ? (
+                        <View style={styles.colCardioKm}>
+                          <Text style={styles.tdText}>{formatKm(setsHechas[0]?.distancia_km)}</Text>
+                        </View>
+                      ) : null}
+                    </View>
+                  </>
                 ) : (
                   <>
                     <View style={styles.tablaHead}>

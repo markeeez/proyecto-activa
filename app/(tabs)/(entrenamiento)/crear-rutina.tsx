@@ -31,7 +31,7 @@ import { useTheme } from '@/hooks/useTheme';
 import { tipoSerieUiADb } from '@/lib/entrenamientoSerie';
 import { entrenamientoService } from '@/services/entrenamiento.service';
 import { ejerciciosService } from '@/services/ejercicios.service';
-import type { Exercise } from '@/types/database.types';
+import type { Exercise, TrackingMode } from '@/types/database.types';
 import type { BorradorEjercicioLinea, BorradorSerieLinea } from '@/types/entrenamientoBorrador.types';
 
 const MAX_ROUTINE_EXERCISES = 30;
@@ -42,6 +42,39 @@ function lid(): string {
 
 function seriePorDefecto(): BorradorSerieLinea {
   return { setId: lid(), tipoUi: 'lineal', kg: '', reps: '' };
+}
+
+function registroCardioPorDefecto(): BorradorSerieLinea {
+  return { setId: lid(), tipoUi: 'lineal', kg: '', reps: '', duracionSeg: '', distanciaKm: '' };
+}
+
+function esCardio(trackingMode: TrackingMode | null | undefined): boolean {
+  return trackingMode === 'cardio_time' || trackingMode === 'cardio_time_distance';
+}
+
+function setsRutinaDesdeLinea(line: BorradorEjercicioLinea) {
+  if (esCardio(line.tracking_mode)) {
+    const registro = line.sets[0];
+    return [
+      {
+        numero_serie: 1,
+        tipo_serie: 'lineal' as const,
+        repeticiones: null,
+        peso_kg: null,
+        tipo_peso: 'bodyweight' as const,
+        duracion_seg: parseDuracionMinASeg(registro?.duracionSeg),
+        distancia_km: line.tracking_mode === 'cardio_time_distance' ? parseOptFloat(registro?.distanciaKm ?? '') : null,
+      },
+    ];
+  }
+
+  return line.sets.map((set, i) => ({
+    numero_serie: i + 1,
+    tipo_serie: tipoSerieUiADb(set.tipoUi),
+    repeticiones: parseOptInt(set.reps),
+    peso_kg: parseOptFloat(set.kg),
+    tipo_peso: 'kg' as const,
+  }));
 }
 
 function parseOptFloat(s: string): number | null {
@@ -56,6 +89,14 @@ function parseOptInt(s: string): number | null {
   if (!t || t === '—') return null;
   const n = parseInt(t, 10);
   return Number.isFinite(n) ? n : null;
+}
+
+function parseDuracionMinASeg(s: string | undefined): number | null {
+  const t = (s ?? '').trim();
+  if (!t || t === '—') return null;
+  if (!/^\d+$/.test(t)) return null;
+  const min = parseInt(t, 10);
+  return Number.isFinite(min) && min > 0 ? min * 60 : null;
 }
 
 const routineTheme = {
@@ -405,6 +446,8 @@ export default function CrearRutinaScreen() {
 
   const incorporarEjercicio = useCallback(
     (ex: Exercise) => {
+      const tracking_mode = ex.tracking_mode ?? (ex.categoria === 'cardio' ? 'cardio_time' : 'strength');
+      const sets = esCardio(tracking_mode) ? [registroCardioPorDefecto()] : [seriePorDefecto()];
       setLineas((prev) => {
         const repId = replaceLineId;
         if (repId) {
@@ -416,6 +459,8 @@ export default function CrearRutinaScreen() {
                   nombre: ex.nombre,
                   musculo_primario: ex.musculo_primario,
                   foto_url: (ex as any).foto_url ?? null,
+                  tracking_mode,
+                  sets,
                 }
               : l,
           );
@@ -432,7 +477,8 @@ export default function CrearRutinaScreen() {
             nombre: ex.nombre,
             musculo_primario: ex.musculo_primario,
             foto_url: (ex as any).foto_url ?? null,
-            sets: [seriePorDefecto()],
+            tracking_mode,
+            sets,
           },
         ];
       });
@@ -504,13 +550,7 @@ export default function CrearRutinaScreen() {
     const ejercicios = lineas.map((line, idx) => ({
       exercise_id: line.exerciseId,
       orden: idx + 1,
-      sets: line.sets.map((set, i) => ({
-        numero_serie: i + 1,
-        tipo_serie: tipoSerieUiADb(set.tipoUi),
-        repeticiones: parseOptInt(set.reps),
-        peso_kg: parseOptFloat(set.kg),
-        tipo_peso: 'kg' as const,
-      })),
+      sets: setsRutinaDesdeLinea(line),
     }));
 
     setGuardando(true);
