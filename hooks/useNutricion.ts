@@ -7,8 +7,10 @@
 import { useAuth } from '@/hooks/useAuth';
 import { fechaHoyIsoLocal } from '@/lib/fechaNutricion';
 import { NUTRICION_LOG_ACTUALIZADO, type NutricionLogActualizadoPayload } from '@/lib/nutricionEvents';
+import { alimentosService } from '@/services/alimentos.service';
 import { nutricionService } from '@/services/nutricion.service';
 import type { LineaCopiadaNutricion, ResumenDiarioNutricion } from '@/types/app.types';
+import type { Food } from '@/types/database.types';
 import type { UserGoal } from '@/types/database.types';
 import { useFocusEffect } from '@react-navigation/native';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -107,6 +109,22 @@ export function useNutricion() {
     },
     eliminarAlimento: async (itemId: string) => {
       await nutricionService.eliminarAlimentoDeComida(itemId);
+      await cargar();
+    },
+    reemplazarAlimento: async (item: { id: string; meal_id: string }, food: Food, gramos: number) => {
+      const foodReal = await alimentosService.asegurarFoodParaLog(food);
+      await nutricionService.eliminarAlimentoDeComida(item.id);
+      await nutricionService.añadirAlimentoAComida({
+        mealId: item.meal_id,
+        foodId: foodReal.id,
+        gramos,
+        food: {
+          calorias: foodReal.calorias,
+          proteinas: foodReal.proteinas,
+          carbohidratos: foodReal.carbohidratos,
+          grasas: foodReal.grasas,
+        },
+      });
       await cargar();
     },
     vaciarComida: async (mealId: string) => {

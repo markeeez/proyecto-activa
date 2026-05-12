@@ -7,7 +7,7 @@
 
 import { Ionicons } from '@expo/vector-icons';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
-import { usePathname } from 'expo-router';
+import { usePathname, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   type LayoutChangeEvent,
@@ -24,6 +24,7 @@ import { Path, Svg } from 'react-native-svg';
 import LogoSbBlack from '@/assets/images/logo_sb_black.svg';
 import ProfileNavIcon from '@/assets/images/profile_nav_icon.svg';
 import ProgressNavIcon from '@/assets/images/progress_nav_icon.svg';
+import TrophyIcon from '@/assets/images/trophy_icon.svg';
 import { useTheme } from '@/hooks/useTheme';
 
 /* ── Colores ──────────────────────────────────────────────────────── */
@@ -74,8 +75,9 @@ export function TabBarActivia({
   insets: tabInsets,
 }: BottomTabBarProps) {
   const safe        = useSafeAreaInsets();
-  const { c, isDark } = useTheme();
+  const { c, f, isDark } = useTheme();
   const pathname = usePathname();
+  const router = useRouter();
   const previousPathname = useRef(pathname);
   const bottomInset = tabInsets?.bottom ?? safe.bottom;
 
@@ -255,8 +257,29 @@ export function TabBarActivia({
               pressed && styles.moreExpandedActionPressed,
             ]}
           >
-            <ProgressNavIcon width={18} height={18} color={c.primary} />
-            <Text style={[styles.moreExpandedLabel, { color: c.textDisplay }]}>Progreso</Text>
+            <View style={styles.moreExpandedIconSlot}>
+              <ProgressNavIcon width={18} height={18} color={c.primary} />
+            </View>
+            <Text style={[styles.moreExpandedLabel, { color: c.textDisplay, fontFamily: f.sansBold }]}>Progreso</Text>
+          </Pressable>
+
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Ir a records"
+            onPress={() => { setMoreExpanded(false); router.push('/(tabs)/(perfil)/records'); }}
+            style={({ pressed }) => [
+              styles.moreExpandedAction,
+              {
+                backgroundColor: c.surface,
+                borderColor: c.borderVisible,
+              },
+              pressed && styles.moreExpandedActionPressed,
+            ]}
+          >
+            <View style={styles.moreExpandedIconSlot}>
+              <TrophyIcon width={18} height={18} color={c.primary} />
+            </View>
+            <Text style={[styles.moreExpandedLabel, { color: c.textDisplay, fontFamily: f.sansBold }]}>Records</Text>
           </Pressable>
 
           <Pressable
@@ -272,8 +295,10 @@ export function TabBarActivia({
               pressed && styles.moreExpandedActionPressed,
             ]}
           >
-            <ProfileNavIcon width={18} height={18} color={c.primary} />
-            <Text style={[styles.moreExpandedLabel, { color: c.textDisplay }]}>Perfil</Text>
+            <View style={styles.moreExpandedIconSlot}>
+              <ProfileNavIcon width={18} height={18} color={c.primary} />
+            </View>
+            <Text style={[styles.moreExpandedLabel, { color: c.textDisplay, fontFamily: f.sansBold }]}>Perfil</Text>
           </Pressable>
         </View>
       </Modal>
@@ -390,7 +415,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'flex-start',
     gap: 8,
-    paddingHorizontal: 14,
+    paddingLeft: 13,
+    paddingRight: 16,
     ...Platform.select({
       ios: {
         shadowColor: '#000',
@@ -407,9 +433,14 @@ const styles = StyleSheet.create({
   moreExpandedActionPressed: {
     opacity: 0.72,
   },
+  moreExpandedIconSlot: {
+    width: 20,
+    height: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   moreExpandedLabel: {
     fontSize: 13,
-    fontWeight: '700',
     letterSpacing: 0,
   },
 });

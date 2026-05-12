@@ -6,7 +6,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { Stack, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
   FlatList,
   Pressable,
   ScrollView,
@@ -17,6 +16,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ExplorarEjerciciosTab } from '@/components/ExplorarEjerciciosTab';
+import { RutinaCardSkeleton } from '@/components/ui/SkeletonList';
 import type { Theme } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from '@/hooks/useTheme';
@@ -526,9 +526,7 @@ export default function ExplorarRutinasScreen() {
               {error ? (
                 <Text style={styles.errMono}>[ERROR AL CARGAR]</Text>
               ) : cargando ? (
-                <View style={styles.loading}>
-                  <ActivityIndicator color={c.primary} />
-                </View>
+                <RutinaCardSkeleton color={c.surfaceElevated} borderColor={c.border} surface={c.surface} />
               ) : (
                 <FlatList
                   style={styles.list}

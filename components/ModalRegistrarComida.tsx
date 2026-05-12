@@ -1,3 +1,4 @@
+import { BuscadorAlimentos } from '@/components/nutricion/BuscadorAlimentos';
 import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useState } from 'react';
 import {
@@ -14,7 +15,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useTheme } from '@/hooks/useTheme';
 import { iconoComida } from '@/lib/iconosComida';
-import type { ComidaConAlimentos } from '@/types/app.types';
+import type { Food } from '@/types/database.types';
+import type { AlimentoEnLog, ComidaConAlimentos } from '@/types/app.types';
 
 /* ─── Props ────────────────────────────────────────────────────────── */
 interface Props {
@@ -23,7 +25,9 @@ interface Props {
   comidas: ComidaConAlimentos[];
   fecha: string;
   cargando: boolean;
+  userId?: string;
   eliminarAlimento: (itemId: string) => Promise<void>;
+  reemplazarAlimento: (itemId: string, food: Food, gramos: number) => Promise<void>;
   onAgregarAlimento: (mealId: string) => void;
 }
 
@@ -34,7 +38,9 @@ export function ModalRegistrarComida({
   comidas,
   fecha: _fecha, // conservado en Props para compatibilidad, no usado en render
   cargando,
+  userId,
   eliminarAlimento,
+  reemplazarAlimento,
   onAgregarAlimento,
 }: Props) {
   const { c, s } = useTheme();
@@ -43,6 +49,7 @@ export function ModalRegistrarComida({
 
   const [selectedMealId, setSelectedMealId] = useState<string | null>(null);
   const [eliminandoId, setEliminandoId] = useState<string | null>(null);
+  const [itemAReemplazar, setItemAReemplazar] = useState<AlimentoEnLog | null>(null);
 
   // Comida seleccionada: la que marcó el usuario o la primera disponible
   const comidaSeleccionada =
@@ -64,6 +71,15 @@ export function ModalRegistrarComida({
       }
     },
     [eliminandoId, eliminarAlimento],
+  );
+
+  const handleReemplazar = useCallback(
+    async (food: Food, gramos: number) => {
+      if (!itemAReemplazar) return;
+      await reemplazarAlimento(itemAReemplazar.id, food, gramos);
+      setItemAReemplazar(null);
+    },
+    [itemAReemplazar, reemplazarAlimento],
   );
   const sheetHeight = Math.round(height * 0.6);
 
@@ -249,6 +265,14 @@ export function ModalRegistrarComida({
       onRequestClose={onClose}
       statusBarTranslucent
     >
+      {/* Buscador para reemplazar un item */}
+      <BuscadorAlimentos
+        visible={itemAReemplazar !== null}
+        onClose={() => setItemAReemplazar(null)}
+        onAlimentoSeleccionado={handleReemplazar}
+        userId={userId}
+      />
+
       {/* Toca fuera → cierra */}
       <Pressable style={st.overlay} onPress={onClose}>
         <Pressable onPress={(e) => e.stopPropagation()}>
@@ -343,7 +367,11 @@ export function ModalRegistrarComida({
                       <Text style={st.emptyTxt}>Todavía no hay alimentos en esta comida.</Text>
                     ) : (
                       comidaSeleccionada.items.map((item) => (
-                        <View key={item.id} style={st.itemRow}>
+                        <Pressable
+                          key={item.id}
+                          style={st.itemRow}
+                          onPress={() => setItemAReemplazar(item)}
+                        >
                           <Text style={st.itemNombre} numberOfLines={1}>
                             {item.food.nombre}
                           </Text>
@@ -362,7 +390,7 @@ export function ModalRegistrarComida({
                             </Text>
                           </View>
                           <Pressable
-                            onPress={() => void handleEliminar(item.id)}
+                            onPress={(e) => { e.stopPropagation(); void handleEliminar(item.id); }}
                             hitSlop={8}
                             disabled={eliminandoId === item.id}
                           >
@@ -372,7 +400,7 @@ export function ModalRegistrarComida({
                               <Ionicons name="trash-outline" size={16} color={c.danger} />
                             )}
                           </Pressable>
-                        </View>
+                        </Pressable>
                       ))
                     )}
                   </ScrollView>

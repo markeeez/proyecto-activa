@@ -19,8 +19,18 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import KmRecordIcon from '@/assets/images/km_record_trophy_icon.svg';
+import PrRecordIcon from '@/assets/images/pr_trophy_icon.svg';
+import TimeRecordIcon from '@/assets/images/time_record_trophy_icon.svg';
+import VolumeRecordIcon from '@/assets/images/volume_record_trophy_icon.svg';
 import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from '@/hooks/useTheme';
+import {
+  calcularRecordFlagsPorSetIds,
+  tieneRecordFlags,
+  type RecordEvent,
+  type SetRecordFlags,
+} from '@/lib/entrenamientoRecords';
 import {
   entrenamientoService,
   type DetalleSesion,
@@ -215,6 +225,7 @@ export default function DetalleSesionPantalla() {
   const [detalle, setDetalle] = useState<DetalleSesion | null>(null);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [recordEvents, setRecordEvents] = useState<RecordEvent[]>([]);
   const [modalEliminar, setModalEliminar] = useState(false);
   const [eliminando, setEliminando] = useState(false);
   const [modalTipos, setModalTipos] = useState(false);
@@ -232,6 +243,7 @@ export default function DetalleSesionPantalla() {
       setError('Sesión no válida.');
       setCargando(false);
       setDetalle(null);
+      setRecordEvents([]);
       return;
     }
     setCargando(true);
@@ -240,8 +252,10 @@ export default function DetalleSesionPantalla() {
     if (!data) {
       setError('No se pudo cargar la sesión.');
       setDetalle(null);
+      setRecordEvents([]);
     } else {
       setDetalle(data);
+      setRecordEvents(await entrenamientoService.obtenerRecordEventsSesion(sessionId));
     }
     setCargando(false);
   }, [sessionId]);
@@ -495,10 +509,29 @@ export default function DetalleSesionPantalla() {
           marginBottom: s.xs,
         },
         colSerie: {
-          flex: 0.72,
+          flex: 1.05,
           minWidth: 0,
           alignItems: 'center',
           justifyContent: 'center',
+        },
+        recordSerieWrap: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 4,
+          width: '100%',
+        },
+        recordIconsSlot: {
+          width: 30,
+          minHeight: 14,
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'flex-end',
+          gap: 1,
+        },
+        recordIcon: {
+          width: 14,
+          height: 14,
         },
         colKg: {
           flex: 0.78,
@@ -527,6 +560,11 @@ export default function DetalleSesionPantalla() {
         colCardioMain: {
           flex: 1.1,
           minWidth: 0,
+          alignItems: 'center',
+          justifyContent: 'center',
+        },
+        colCardioRecord: {
+          width: 34,
           alignItems: 'center',
           justifyContent: 'center',
         },
@@ -920,6 +958,24 @@ export default function DetalleSesionPantalla() {
         },
       }),
     [c, f, ts, s, r, insets.bottom, insets.top],
+  );
+
+  const recordFlagsPorSetId = useMemo(() => calcularRecordFlagsPorSetIds(recordEvents), [recordEvents]);
+
+  const renderRecordIcons = useCallback(
+    (flags: SetRecordFlags | undefined) => {
+      if (!tieneRecordFlags(flags)) return null;
+
+      return (
+        <View style={styles.recordIconsSlot} pointerEvents="none">
+          {flags?.maxWeight ? <PrRecordIcon width={14} height={14} style={styles.recordIcon} /> : null}
+          {flags?.maxVolume ? <VolumeRecordIcon width={14} height={14} style={styles.recordIcon} /> : null}
+          {flags?.maxDuration ? <TimeRecordIcon width={14} height={14} style={styles.recordIcon} /> : null}
+          {flags?.maxDistance ? <KmRecordIcon width={14} height={14} style={styles.recordIcon} /> : null}
+        </View>
+      );
+    },
+    [styles.recordIcon, styles.recordIconsSlot],
   );
 
   const onAbrirModalDuracion = useCallback(() => {
@@ -1387,6 +1443,7 @@ export default function DetalleSesionPantalla() {
                 ) : esCardio ? (
                   <>
                     <View style={styles.tablaHead}>
+                      <View style={styles.colCardioRecord} />
                       <View style={styles.colCardioMain}>
                         <Text style={styles.thText}>TIEMPO</Text>
                       </View>
@@ -1397,6 +1454,9 @@ export default function DetalleSesionPantalla() {
                       ) : null}
                     </View>
                     <View style={styles.fila}>
+                      <View style={styles.colCardioRecord}>
+                        {renderRecordIcons(recordFlagsPorSetId.get(setsHechas[0]?.id ?? ''))}
+                      </View>
                       <View style={styles.colCardioMain}>
                         <Text style={styles.tdText}>{formatDuracionCardio(setsHechas[0]?.duracion_seg)}</Text>
                       </View>
@@ -1440,11 +1500,14 @@ export default function DetalleSesionPantalla() {
                         </View>
                       </View>
                     </View>
-                    {setsHechas.map((st, idx) => (
-                      <View key={`${ej.id}-set-${idx}`} style={styles.fila}>
+                    {setsHechas.map((st) => (
+                      <View key={st.id} style={styles.fila}>
                         <View style={styles.colSerie}>
-                          <View style={styles.setPill}>
-                            <Text style={styles.setPillText}>{st.numero_serie}</Text>
+                          <View style={styles.recordSerieWrap}>
+                            {renderRecordIcons(recordFlagsPorSetId.get(st.id))}
+                            <View style={styles.setPill}>
+                              <Text style={styles.setPillText}>{st.numero_serie}</Text>
+                            </View>
                           </View>
                         </View>
                         <View style={styles.colReps}>

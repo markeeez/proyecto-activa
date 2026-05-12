@@ -9,6 +9,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Animated,
+  Easing,
   Modal,
   Pressable,
   ScrollView,
@@ -622,6 +624,72 @@ function makeStyles(
 }
 // --- RUTINAS STYLES END ---
 
+function RoutineSkeleton({ theme }: { theme: RoutinesTheme }) {
+  const anim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(anim, { toValue: 1, duration: 900, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        Animated.timing(anim, { toValue: 0, duration: 900, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+      ]),
+    ).start();
+  }, [anim]);
+
+  const opacity = anim.interpolate({ inputRange: [0, 1], outputRange: [0.35, 0.7] });
+  const bg = theme.border;
+
+  return (
+    <>
+      {[0, 1, 2].map((i) => (
+        <Animated.View
+          key={i}
+          style={[skeletonStyles.card, { backgroundColor: theme.surface, borderColor: theme.border, opacity }]}
+        >
+          <View style={[skeletonStyles.titleLine, { backgroundColor: bg, width: i === 1 ? '55%' : '70%' }]} />
+          <View style={skeletonStyles.metaRow}>
+            <View style={[skeletonStyles.metaChip, { backgroundColor: bg, width: 80 }]} />
+            <View style={[skeletonStyles.metaChip, { backgroundColor: bg, width: 110 }]} />
+          </View>
+          <View style={[skeletonStyles.divider, { backgroundColor: bg }]} />
+          <View style={[skeletonStyles.actionLine, { backgroundColor: bg }]} />
+        </Animated.View>
+      ))}
+    </>
+  );
+}
+
+const skeletonStyles = StyleSheet.create({
+  card: {
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 12,
+    gap: 10,
+  },
+  titleLine: {
+    height: 14,
+    borderRadius: 6,
+  },
+  metaRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  metaChip: {
+    height: 10,
+    borderRadius: 5,
+  },
+  divider: {
+    height: 1,
+    marginVertical: 2,
+  },
+  actionLine: {
+    height: 10,
+    borderRadius: 5,
+    width: 100,
+    alignSelf: 'center',
+  },
+});
+
 export function RutinasListadoTab() {
   const router = useRouter();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
@@ -838,8 +906,8 @@ export function RutinasListadoTab() {
       </Pressable>
 
       {loading ? (
-          <View style={styles.loadingBox}>
-            <ActivityIndicator color={theme.accent} />
+          <View style={styles.listArea}>
+            <RoutineSkeleton theme={theme} />
           </View>
         ) : (
           <View

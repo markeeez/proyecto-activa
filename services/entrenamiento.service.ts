@@ -13,6 +13,8 @@ import type {
   WorkoutSet,
 } from '@/types/database.types';
 import type { TipoSeriePlantillaDb } from '@/lib/entrenamientoSerie';
+import type { RecordBaseline, RecordEvent, RecordType, RecordUsuario } from '@/lib/entrenamientoRecords';
+import { fechaIsoDesdeDate } from '@/lib/fechaNutricion';
 import type { SesionCompleta } from '@/types/app.types';
 
 /** Listado de rutinas con nombres de ejercicios (plantilla). */
@@ -152,6 +154,7 @@ export type EntrenoResumen = {
 };
 
 export type DetalleSesionSet = {
+  id: string;
   numero_serie: number;
   tipo_serie: TipoSerie;
   peso_kg: number | null;
@@ -243,6 +246,7 @@ type DetalleSesionRow = {
       | { nombre: string; musculo_primario: string; foto_url: string | null; tracking_mode: TrackingMode | null }[]
       | null;
     workout_sets: {
+      id: string;
       numero_serie: number;
       tipo_serie: TipoSerie;
       peso_kg: number | null;
@@ -255,6 +259,19 @@ type DetalleSesionRow = {
       descanso_seg: number | null;
     }[] | null;
   }[] | null;
+};
+
+type RecordBaselineRpcRow = {
+  exercise_id: string;
+  record_type: RecordType;
+  value: number | string;
+};
+
+type RecordEventRpcRow = {
+  exercise_id: string;
+  workout_set_id: string;
+  record_type: RecordType;
+  value: number | string;
 };
 
 function formatearAnteriorSet(peso_kg: number | null, repeticiones: number | null, tipo_peso: TipoPeso): string {
@@ -915,11 +932,7 @@ export const entrenamientoService = {
 
   async crearWorkoutSession(userId: string, nombre: string, routineId: string | null): Promise<string> {
     const hoy = new Date();
-    const fecha = [
-      hoy.getFullYear(),
-      String(hoy.getMonth() + 1).padStart(2, '0'),
-      String(hoy.getDate()).padStart(2, '0'),
-    ].join('-');
+    const fecha = fechaIsoDesdeDate(hoy);
     const horaInicio = hoy.toISOString();
 
     const { data, error } = await supabase
@@ -944,8 +957,10 @@ export const entrenamientoService = {
   },
 
   async marcarHoraFinWorkoutSession(sessionId: string): Promise<void> {
-    const horaFin = new Date().toISOString();
-    const { error } = await supabase.from('workout_sessions').update({ hora_fin: horaFin }).eq('id', sessionId);
+    const fin = new Date();
+    const horaFin = fin.toISOString();
+    const fecha = fechaIsoDesdeDate(fin);
+    const { error } = await supabase.from('workout_sessions').update({ fecha, hora_fin: horaFin }).eq('id', sessionId);
     if (error) console.error('[marcarHoraFinWorkoutSession]', error.message);
   },
 
@@ -1043,6 +1058,8 @@ export const entrenamientoService = {
   },
 
   async guardarSetsCompletados(sessionId: string, ejercicios: EntrenoEjercicioPersistido[]): Promise<void> {
+    const workoutSetIds: string[] = [];
+
     for (const ex of ejercicios) {
       if (!ex.sets.length) continue;
 
@@ -1065,22 +1082,116 @@ export const entrenamientoService = {
       const sessionExerciseId = wseRow.id as string;
 
       for (const set of ex.sets) {
-        const { error: errSet } = await supabase.from('workout_sets').insert({
-          session_exercise_id: sessionExerciseId,
-          numero_serie: set.numero_serie,
-          tipo_serie: set.tipo_serie,
-          repeticiones: set.repeticiones,
-          rir: set.rir ?? null,
-          peso_kg: set.peso_kg,
-          tipo_peso: set.tipo_peso,
-          duracion_seg: set.duracion_seg ?? null,
-          distancia_km: set.distancia_km ?? null,
-          descanso_seg: set.descanso_seg ?? null,
-          completada: true,
-        });
+        const { data: setRow, error: errSet } = await supabase
+          .from('workout_sets')
+          .insert({
+            session_exercise_id: sessionExerciseId,
+            numero_serie: set.numero_serie,
+            tipo_serie: set.tipo_serie,
+            repeticiones: set.repeticiones,
+            rir: set.rir ?? null,
+            peso_kg: set.peso_kg,
+            tipo_peso: set.tipo_peso,
+            duracion_seg: set.duracion_seg ?? null,
+            distancia_km: set.distancia_km ?? null,
+            descanso_seg: set.descanso_seg ?? null,
+            completada: true,
+          })
+          .select('id')
+          .single();
         if (errSet) console.error('[guardarSetsCompletados] workout_sets', errSet.message);
+        else if (setRow?.id) workoutSetIds.push(setRow.id as string);
       }
     }
+
+    if (workoutSetIds.length > 0) {
+      const { error } = await supabase.rpc('registrar_record_events_para_sets', {
+        p_set_ids: workoutSetIds,
+      });
+      if (error) console.error('[guardarSetsCompletados] registrar_record_events_para_sets', error.message);
+    }
+  },
+
+  async obtenerRecordsVigentesEjercicios(_userId: string, exerciseIds: string[]): Promise<RecordBaseline[]> {
+    const ids = [...new Set(exerciseIds.filter(Boolean))];
+    if (!ids.length) return [];
+
+    const { data, error } = await supabase.rpc('obtener_records_vigentes_ejercicios', {
+      p_exercise_ids: ids,
+    });
+
+    if (error) {
+      console.error('[obtenerRecordsVigentesEjercicios]', error.message);
+      return [];
+    }
+
+    return ((data ?? []) as RecordBaselineRpcRow[])
+      .map((row) => ({
+        exerciseId: row.exercise_id,
+        recordType: row.record_type,
+        value: Number(row.value),
+      }))
+      .filter((row) => Number.isFinite(row.value) && row.value > 0);
+  },
+
+  async obtenerRecordEventsSesion(sessionId: string): Promise<RecordEvent[]> {
+    const { data, error } = await supabase.rpc('obtener_record_events_sesion', {
+      p_session_id: sessionId,
+    });
+
+    if (error) {
+      console.error('[obtenerRecordEventsSesion]', error.message);
+      return [];
+    }
+
+    return ((data ?? []) as RecordEventRpcRow[])
+      .map((row) => ({
+        exerciseId: row.exercise_id,
+        workoutSetId: row.workout_set_id,
+        recordType: row.record_type,
+        value: Number(row.value),
+      }))
+      .filter((row) => Number.isFinite(row.value) && row.value > 0);
+  },
+
+  async obtenerTodosLosRecords(userId: string): Promise<RecordUsuario[]> {
+    const { data, error } = await supabase
+      .from('exercise_records')
+      .select(`
+        id, record_type, value, achieved_at, exercise_id,
+        exercises(nombre, tracking_mode),
+        workout_sets(repeticiones, peso_kg, tipo_peso, duracion_seg, distancia_km)
+      `)
+      .eq('user_id', userId)
+      .order('achieved_at', { ascending: false });
+
+    if (error) {
+      console.error('[obtenerTodosLosRecords]', error.message);
+      return [];
+    }
+
+    return ((data ?? []) as any[]).map((row) => {
+      const ex = row.exercises as { nombre: string; tracking_mode: string | null } | null;
+      const ws = row.workout_sets as { repeticiones: number | null; peso_kg: number | null; tipo_peso: string; duracion_seg: number | null; distancia_km: number | null } | null;
+      return {
+        id: row.id as string,
+        exerciseId: row.exercise_id as string,
+        exerciseNombre: ex?.nombre ?? '',
+        trackingMode: (ex?.tracking_mode ?? null) as RecordUsuario['trackingMode'],
+        recordType: row.record_type as RecordType,
+        value: Number(row.value),
+        achievedAt: row.achieved_at as string,
+        serie: ws
+          ? {
+              repeticiones: ws.repeticiones,
+              pesoKg: ws.peso_kg,
+              tipoPeso: ws.tipo_peso,
+              duracionSeg: ws.duracion_seg,
+              distanciaKm: ws.distancia_km,
+            }
+          : null,
+      } satisfies RecordUsuario;
+    }).filter((r) => Number.isFinite(r.value) && r.value > 0);
   },
 
   async descartarWorkoutSession(sessionId: string): Promise<void> {
@@ -1340,7 +1451,7 @@ export const entrenamientoService = {
         workout_session_exercises (
           id, orden, exercise_id, notas,
           exercises ( nombre, musculo_primario, foto_url, tracking_mode ),
-          workout_sets ( numero_serie, tipo_serie, peso_kg, repeticiones, rir, tipo_peso, duracion_seg, distancia_km, completada, descanso_seg )
+          workout_sets ( id, numero_serie, tipo_serie, peso_kg, repeticiones, rir, tipo_peso, duracion_seg, distancia_km, completada, descanso_seg )
         )`,
       )
       .eq('id', sessionId)
@@ -1369,6 +1480,7 @@ export const entrenamientoService = {
         .slice()
         .sort((a, b) => a.numero_serie - b.numero_serie)
         .map((s) => ({
+          id: s.id,
           numero_serie: s.numero_serie,
           tipo_serie: s.tipo_serie,
           peso_kg: s.peso_kg,

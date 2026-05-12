@@ -1,4 +1,5 @@
 import { CrearAlimentoModal } from '@/components/nutricion/CrearAlimentoModal';
+import { AlimentoRowSkeleton } from '@/components/ui/SkeletonList';
 import { useTheme } from '@/hooks/useTheme';
 import { alimentosService } from '@/services/alimentos.service';
 import type { Food } from '@/types/database.types';
@@ -122,15 +123,18 @@ export function BuscadorAlimentos({
         return [food, ...rest];
       });
     }
+    const versionAlAbrir = busquedaVersionRef.current;
     void (async () => {
       if (userId) {
         try {
           const list = await alimentosService.obtenerAlimentosCreados(userId);
+          if (busquedaVersionRef.current !== versionAlAbrir) return;
           setCreados(list);
         } catch {
           /* noop */
         }
       }
+      if (busquedaVersionRef.current !== versionAlAbrir) return;
       setFoodSeleccionado(food);
       setGramos('100');
     })();
@@ -471,7 +475,7 @@ export function BuscadorAlimentos({
                 value={query}
                 onChangeText={setQuery}
                 style={styles.searchInput}
-                autoFocus
+                selectTextOnFocus
               />
             </View>
             <Pressable
@@ -500,9 +504,7 @@ export function BuscadorAlimentos({
 
           {/* ── Estados de carga ── */}
           {cargandoEnPestanaActiva && (
-            <View style={styles.stateRow}>
-              <ActivityIndicator color={c.primary} />
-            </View>
+            <AlimentoRowSkeleton color={c.surfaceElevated} />
           )}
           {!cargandoEnPestanaActiva && cargandoApis && tab === 'base' && (
             <View style={styles.apisRow}>

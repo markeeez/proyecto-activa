@@ -31,6 +31,11 @@ import { useEntreno, useEntrenoDuracionTexto, type SnapshotRutina } from '@/cont
 import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from '@/hooks/useTheme';
 import { tipoSerieUiADb } from '@/lib/entrenamientoSerie';
+import {
+  buildRecordBaselineMap,
+  calcularRecordFlagsPorLinea,
+  type RecordBaselineMap,
+} from '@/lib/entrenamientoRecords';
 import { lid, registroCardioPorDefecto, seriePorDefecto } from '@/lib/entrenamientoUtils';
 import { ejerciciosService } from '@/services/ejercicios.service';
 import {
@@ -490,6 +495,7 @@ export default function EntrenoActivoScreen() {
   const [crearEjercicioAbierto, setCrearEjercicioAbierto] = useState(false);
   const [replaceLineId, setReplaceLineId] = useState<string | null>(null);
   const [anteriorPorEjercicio, setAnteriorPorEjercicio] = useState<Record<string, string>>({});
+  const [recordBaselines, setRecordBaselines] = useState<RecordBaselineMap>({});
   const [modalIncompletas, setModalIncompletas] = useState(false);
   const [modalConfirmarTerminar, setModalConfirmarTerminar] = useState(false);
   const [modalDescartar, setModalDescartar] = useState(false);
@@ -618,6 +624,35 @@ export default function EntrenoActivoScreen() {
     }
     return m;
   }, [lineas, entrenoActivo?.ultimaSesionRutina, anteriorPorEjercicio]);
+
+  const claveRecordsEjercicios = useMemo(
+    () => [...new Set(lineas.map((l) => l.exerciseId).filter(Boolean))].sort().join(','),
+    [lineas],
+  );
+
+  useEffect(() => {
+    if (!user?.id || !claveRecordsEjercicios) {
+      setRecordBaselines({});
+      return;
+    }
+    const exerciseIds = claveRecordsEjercicios.split(',').filter(Boolean);
+    let cancel = false;
+    void (async () => {
+      const records = await entrenamientoService.obtenerRecordsVigentesEjercicios(user.id, exerciseIds);
+      if (!cancel) setRecordBaselines(buildRecordBaselineMap(records));
+    })();
+    return () => {
+      cancel = true;
+    };
+  }, [user?.id, claveRecordsEjercicios]);
+
+  const recordFlagsPorLineId = useMemo(() => {
+    const m = new Map<string, ReturnType<typeof calcularRecordFlagsPorLinea>>();
+    for (const line of lineas) {
+      m.set(line.lineId, calcularRecordFlagsPorLinea(line, recordBaselines));
+    }
+    return m;
+  }, [lineas, recordBaselines]);
 
   const hayIncompletas = useMemo(
     () => lineas.some((l) => l.sets.some((s) => !s.completada)),
@@ -989,6 +1024,7 @@ export default function EntrenoActivoScreen() {
                     if (!fondoPostEntreno) actualizarNotaLinea(line.lineId, texto);
                   }}
                   textoAnteriorSeries={textosAnteriorPorLineId.get(line.lineId)}
+                  recordFlagsSeries={recordFlagsPorLineId.get(line.lineId)}
                   data={line}
                   onChange={(next) => {
                     if (fondoPostEntreno) return;

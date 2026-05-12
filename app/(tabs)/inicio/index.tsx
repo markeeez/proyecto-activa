@@ -308,6 +308,7 @@ export default function HomeScreen() {
     objetivos,
     cargando: cargandoNutricion,
     eliminarAlimento,
+    reemplazarAlimento,
     fecha: fechaNutricion,
   } = useNutricion();
 
@@ -522,13 +523,14 @@ export default function HomeScreen() {
             Icon: WorkoutNavIcon,
             ruta: '/(tabs)/(entrenamiento)' as const,
             onPlus: () => setModalEntrenoVisible(true),
+            onPress: () => router.push({ pathname: '/(tabs)/(entrenamiento)', params: { tab: 'rutinas' } } as any),
           },
         ].map(({ Icon, ...a }) => (
           <TouchableOpacity
             key={a.label}
             style={[st.quickCard, { flex: 1, backgroundColor: c.surface, borderColor: c.border }]}
             activeOpacity={0.75}
-            onPress={() => router.push(a.ruta)}
+            onPress={a.onPress ?? (() => router.push(a.ruta))}
           >
             <View style={[row, { alignItems: 'center', gap: 10 }]}>
               <Icon width={22} height={22} color={c.textDisplay} />
@@ -690,7 +692,14 @@ export default function HomeScreen() {
         comidas={resumen?.comidas ?? []}
         fecha={fechaNutricion}
         cargando={cargandoNutricion}
+        userId={user?.id}
         eliminarAlimento={eliminarAlimento}
+        reemplazarAlimento={async (itemId, food, gramos) => {
+          const item = resumen?.comidas.flatMap((c) => c.items).find((i) => i.id === itemId);
+          if (!item) return;
+          await reemplazarAlimento(item, food, gramos);
+          emitNutricionLogActualizado({ fechaLog: fechaNutricion });
+        }}
         onAgregarAlimento={(mealId) => setMealIdBuscador(mealId)}
       />
 

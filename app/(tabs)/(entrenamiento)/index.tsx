@@ -219,13 +219,15 @@ export default function EntrenamientoIndex() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user } = useAuth();
-  const { reload: reloadParam } = useLocalSearchParams<{ reload?: string }>();
+  const { reload: reloadParam, tab: tabParam } = useLocalSearchParams<{ reload?: string; tab?: string }>();
   const reload = Array.isArray(reloadParam) ? reloadParam[0] : reloadParam;
   const { entrenoActivo, recuperarEntreno } = useEntreno();
 
   const { preferencia, setModo, setDuracionSeg } = useTimerDescanso();
 
-  const [tab, setTab] = useState<TabEntreno>('entrenos');
+  const [tab, setTab] = useState<TabEntreno>(() =>
+    (Array.isArray(tabParam) ? tabParam[0] : tabParam) === 'rutinas' ? 'rutinas' : 'entrenos'
+  );
   const [lunesSemana, setLunesSemana] = useState(() => inicioSemanaLunes(new Date()));
   const [sesionesSemana, setSesionesSemana] = useState<SesionVista[]>([]);
   const [cargandoSemana, setCargandoSemana] = useState(false);
@@ -235,6 +237,12 @@ export default function EntrenamientoIndex() {
   const [modalRecuperacion, setModalRecuperacion] = useState<SesionResumen | null>(null);
   const [recuperando, setRecuperando] = useState(false);
   const [modalAjustes, setModalAjustes] = useState(false);
+  const [modalCalendario, setModalCalendario] = useState(false);
+  const [mesCalendario, setMesCalendario] = useState<Date>(() => {
+    const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0); return d;
+  });
+  const [diasEntrenados, setDiasEntrenados] = useState<Set<string>>(new Set());
+  const [cargandoCalendario, setCargandoCalendario] = useState(false);
   const reqIdRef = useRef(0);
 
   useFocusEffect(
@@ -301,6 +309,11 @@ export default function EntrenamientoIndex() {
   useEffect(() => {
     if (reload) setSemanaRecarga((n) => n + 1);
   }, [reload]);
+
+  useEffect(() => {
+    const t = Array.isArray(tabParam) ? tabParam[0] : tabParam;
+    if (t === 'rutinas') setTab('rutinas');
+  }, [tabParam]);
 
   const sesionesPorFecha = useMemo(() => {
     const map = new Map<string, SesionVista[]>();
@@ -370,6 +383,46 @@ export default function EntrenamientoIndex() {
     setExpandedDate(null);
   }, []);
 
+  const cargarDiasDelMes = useCallback(async (primerDia: Date) => {
+    if (!user?.id) return;
+    setCargandoCalendario(true);
+    try {
+      const ini = toYmd(primerDia);
+      const ultimoDia = new Date(primerDia.getFullYear(), primerDia.getMonth() + 1, 0);
+      const fin = toYmd(ultimoDia);
+      const resumenes = await entrenamientoService.obtenerResumenSesionesSemana(user.id, ini, fin);
+      setDiasEntrenados(new Set(resumenes.map((r) => r.sesion.fecha)));
+    } finally {
+      setCargandoCalendario(false);
+    }
+  }, [user?.id]);
+
+  const abrirCalendario = useCallback(() => {
+    const primer = new Date();
+    primer.setDate(1); primer.setHours(0, 0, 0, 0);
+    setMesCalendario(primer);
+    setModalCalendario(true);
+    void cargarDiasDelMes(primer);
+  }, [cargarDiasDelMes]);
+
+  const mesAnteriorCal = useCallback(() => {
+    setMesCalendario((prev) => {
+      const nuevo = new Date(prev.getFullYear(), prev.getMonth() - 1, 1);
+      void cargarDiasDelMes(nuevo);
+      return nuevo;
+    });
+  }, [cargarDiasDelMes]);
+
+  const mesSiguienteCal = useCallback(() => {
+    setMesCalendario((prev) => {
+      const hoyMes = new Date(); hoyMes.setDate(1); hoyMes.setHours(0, 0, 0, 0);
+      if (prev >= hoyMes) return prev;
+      const nuevo = new Date(prev.getFullYear(), prev.getMonth() + 1, 1);
+      void cargarDiasDelMes(nuevo);
+      return nuevo;
+    });
+  }, [cargarDiasDelMes]);
+
   const rowHeight = diasHeight > 0 ? Math.max(56, (diasHeight - 30) / 7) : undefined;
   const palette = useMemo(() => crearPaletaEntrenos(c), [c]);
   const styles = useMemo(() => makeStyles(f, insets.top, palette, c), [f, insets.top, palette, c]);
@@ -388,9 +441,13 @@ export default function EntrenamientoIndex() {
           <Pressable
             style={styles.headerStatsButton}
             accessibilityRole="button"
-            onPress={() => setModalAjustes(true)}
+            onPress={() => tab === 'entrenos' ? abrirCalendario() : setModalAjustes(true)}
           >
-            <Ionicons name="settings-outline" size={20} color={palette.accent} />
+            <Ionicons
+              name={tab === 'entrenos' ? 'calendar-outline' : 'settings-outline'}
+              size={20}
+              color={palette.accent}
+            />
           </Pressable>
         </View>
 
@@ -667,6 +724,83 @@ export default function EntrenamientoIndex() {
           </View>
         </View>
       </Modal>
+
+      {/* ── Modal Calendario mensual ── */}
+      <Modal
+        visible={modalCalendario}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setModalCalendario(false)}
+      >
+        <Pressable style={styles.ajusteOverlay} onPress={() => setModalCalendario(false)}>
+          <Pressable style={[styles.ajusteCard, styles.calCard]} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.ajusteAccent} />
+
+            {/* Cabecera mes */}
+            <View style={styles.calHeader}>
+              <Pressable
+                style={styles.weekButton}
+                onPress={mesAnteriorCal}
+                accessibilityRole="button"
+              >
+                <Ionicons name="chevron-back" size={18} color={palette.chevron} />
+              </Pressable>
+              <View style={{ flex: 1, alignItems: 'center' }}>
+                <Text style={[styles.calMesLabel]}>
+                  {mesCalendario.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' }).toUpperCase()}
+                </Text>
+              </View>
+              <Pressable
+                style={[
+                  styles.weekButton,
+                  (() => { const h = new Date(); h.setDate(1); h.setHours(0,0,0,0); return mesCalendario >= h; })() && styles.weekButtonDisabled,
+                ]}
+                onPress={mesSiguienteCal}
+                disabled={(() => { const h = new Date(); h.setDate(1); h.setHours(0,0,0,0); return mesCalendario >= h; })()}
+                accessibilityRole="button"
+              >
+                <Ionicons name="chevron-forward" size={18} color={palette.chevron} />
+              </Pressable>
+            </View>
+
+            {/* Días de la semana */}
+            <View style={styles.calWeekRow}>
+              {['LUN','MAR','MIÉ','JUE','VIE','SÁB','DOM'].map((d) => (
+                <Text key={d} style={styles.calWeekLabel}>{d}</Text>
+              ))}
+            </View>
+
+            {/* Grid del mes */}
+            <CalendarioGrid
+              mes={mesCalendario}
+              hoy={hoy}
+              diasEntrenados={diasEntrenados}
+              cargando={cargandoCalendario}
+              palette={palette}
+              styles={styles}
+            />
+
+            {/* Leyenda */}
+            <View style={styles.calLeyenda}>
+              <View style={[styles.calDotLeyenda, { backgroundColor: palette.accent }]} />
+              <Text style={[styles.calWeekLabel, { textTransform: 'none', letterSpacing: 0, fontSize: 11 }]}>
+                Día con entreno
+              </Text>
+            </View>
+
+            {/* Cerrar */}
+            <View style={[styles.ajusteAcciones, { borderTopColor: c.border }]}>
+              <Pressable
+                style={[styles.ajusteBotonCerrar, { borderColor: c.borderVisible }]}
+                onPress={() => setModalCalendario(false)}
+                accessibilityRole="button"
+              >
+                <Text style={[{ fontFamily: f.sansMedium, color: c.textDisplay, fontSize: 14 }]}>Cerrar</Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -831,6 +965,89 @@ function Metric({
         </Text>
       </View>
       <Text style={styles.metricLabel}>{label}</Text>
+    </View>
+  );
+}
+
+// ── Subcomponente: grid del mes ──────────────────────────────────────────────
+
+function CalendarioGrid({
+  mes,
+  hoy,
+  diasEntrenados,
+  cargando,
+  palette,
+  styles,
+}: {
+  mes: Date;
+  hoy: Date;
+  diasEntrenados: Set<string>;
+  cargando: boolean;
+  palette: WorkoutPalette;
+  styles: ReturnType<typeof makeStyles>;
+}) {
+  const semanas = useMemo(() => {
+    const primerDia = new Date(mes.getFullYear(), mes.getMonth(), 1);
+    const dow = primerDia.getDay();
+    const offset = dow === 0 ? 6 : dow - 1;
+    const inicio = new Date(primerDia);
+    inicio.setDate(inicio.getDate() - offset);
+
+    const filas: Date[][] = [];
+    const cursor = new Date(inicio);
+    while (cursor.getMonth() <= mes.getMonth() || cursor <= primerDia) {
+      const fila: Date[] = [];
+      for (let i = 0; i < 7; i++) {
+        fila.push(new Date(cursor));
+        cursor.setDate(cursor.getDate() + 1);
+      }
+      filas.push(fila);
+      if (cursor.getMonth() > mes.getMonth() && cursor.getFullYear() >= mes.getFullYear()) break;
+    }
+    return filas;
+  }, [mes]);
+
+  return (
+    <View style={styles.calGrid}>
+      {semanas.map((fila, fi) => (
+        <View key={fi} style={styles.calWeekRow}>
+          {fila.map((dia, di) => {
+            const ymd = toYmd(dia);
+            const esMismoMes = dia.getMonth() === mes.getMonth();
+            const esHoy = mismoDia(dia, hoy);
+            const entreno = !cargando && diasEntrenados.has(ymd);
+            return (
+              <View key={di} style={styles.calDayCell}>
+                <View
+                  style={[
+                    styles.calDayInner,
+                    !cargando && esHoy && { borderWidth: 1, borderColor: palette.accent },
+                    !cargando && entreno && { backgroundColor: palette.accentSoft },
+                  ]}
+                >
+                  {cargando && esMismoMes ? (
+                    <View style={styles.calSkeletonCell} />
+                  ) : (
+                    <>
+                      <Text
+                        style={[
+                          styles.calDayText,
+                          !esMismoMes && { color: palette.textMuted },
+                          esHoy && { color: palette.accent, fontWeight: '700' },
+                          entreno && esMismoMes && { color: palette.accent },
+                        ]}
+                      >
+                        {dia.getDate()}
+                      </Text>
+                      {entreno && esMismoMes && <View style={[styles.calDot, { backgroundColor: palette.accent }]} />}
+                    </>
+                  )}
+                </View>
+              </View>
+            );
+          })}
+        </View>
+      ))}
     </View>
   );
 }
@@ -1345,6 +1562,83 @@ function makeStyles(f: ReturnType<typeof useTheme>['f'], topInset: number, p: Wo
       borderWidth: 1,
       alignItems: 'center',
       justifyContent: 'center',
+    },
+
+    // Modal calendario
+    calCard: {
+      marginHorizontal: 16,
+    },
+    calHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 12,
+    },
+    calMesLabel: {
+      fontFamily: f.monoBold,
+      color: p.text,
+      fontSize: 12,
+      letterSpacing: 0,
+    },
+    calWeekRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      marginBottom: 2,
+    },
+    calWeekLabel: {
+      flex: 1,
+      textAlign: 'center',
+      fontFamily: f.mono,
+      color: p.textMuted,
+      fontSize: 9,
+      lineHeight: 16,
+      letterSpacing: 0,
+      textTransform: 'uppercase',
+    },
+    calGrid: {
+      marginVertical: 4,
+      gap: 2,
+    },
+    calDayCell: {
+      flex: 1,
+      alignItems: 'center',
+    },
+    calDayInner: {
+      width: 32,
+      height: 32,
+      borderRadius: 16,
+      overflow: 'hidden',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    calDayText: {
+      fontFamily: f.sans,
+      color: p.text,
+      fontSize: 13,
+      lineHeight: 16,
+    },
+    calDot: {
+      width: 4,
+      height: 4,
+      borderRadius: 2,
+      marginTop: 1,
+    },
+    calSkeletonCell: {
+      width: 18,
+      height: 10,
+      borderRadius: 4,
+      backgroundColor: p.border,
+    },
+    calLeyenda: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      marginTop: 10,
+      marginBottom: 4,
+    },
+    calDotLeyenda: {
+      width: 8,
+      height: 8,
+      borderRadius: 4,
     },
   });
 }

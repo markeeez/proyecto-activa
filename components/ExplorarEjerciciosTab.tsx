@@ -8,7 +8,6 @@ import { useRouter } from 'expo-router';
 import type { ComponentProps } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   FlatList,
   Keyboard,
   Modal,
@@ -25,6 +24,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Theme } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from '@/hooks/useTheme';
+import { EjercicioRowSkeleton } from '@/components/ui/SkeletonList';
 import { normalizarTexto } from '@/lib/texto';
 import {
   ejerciciosService,
@@ -532,9 +532,7 @@ export function ExplorarEjerciciosTab({
       {error ? (
         <Text style={styles.errMono}>[ERROR AL CARGAR]</Text>
       ) : cargando ? (
-        <View style={styles.loading}>
-          <ActivityIndicator color={c.primary} />
-        </View>
+        <EjercicioRowSkeleton color={c.surfaceElevated} />
       ) : (
         <FlatList
           style={styles.list}

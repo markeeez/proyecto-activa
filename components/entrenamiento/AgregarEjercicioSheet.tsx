@@ -5,7 +5,6 @@
 import type { ComponentProps } from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
   FlatList,
   Keyboard,
   Modal,
@@ -33,6 +32,7 @@ import {
   type ModoListaEjercicios,
 } from '@/services/ejercicios.service';
 import { supabase } from '@/lib/supabase';
+import { EjercicioRowSkeleton } from '@/components/ui/SkeletonList';
 
 // ─── Caché de módulo ──────────────────────────────────────────────────────────
 // El catálogo global (is_custom=false) es estático: se carga una sola vez por
@@ -677,9 +677,7 @@ export function AgregarEjercicioSheet({ visible, onClose, onSeleccionar, onCrear
           </View>
 
           {cargando ? (
-            <View style={styles.loading}>
-              <ActivityIndicator color={c.primary} />
-            </View>
+            <EjercicioRowSkeleton color={c.surfaceElevated} />
           ) : (
             <FlatList
               style={styles.list}

@@ -225,18 +225,21 @@ async function upsertGlobalFoodsViaEdge(
   return results;
 }
 
-function aplicarIlikeNombreAndFoods(q: any, palabras: string[]): any {
+// Aplica ilike AND sobre nombre_norm (columna generada sin tildes/mayúsculas en BD).
+// Las palabras ya vienen normalizadas (sin tildes, en minúsculas) desde el cliente.
+function aplicarIlikeNormAndFoods(q: any, palabrasNorm: string[]): any {
   let out = q;
-  for (const w of palabras) {
+  for (const w of palabrasNorm) {
     const s = sanitizarFragmentoIlike(w);
     if (!s) continue;
-    out = out.ilike('nombre', `%${s}%`);
+    out = out.ilike('nombre_norm', `%${s}%`);
   }
   return out;
 }
 
 /**
- * Búsqueda por nombre en `foods`: palabras (AND) + tildes vía filtro en cliente.
+ * Búsqueda por nombre en `foods` usando la columna `nombre_norm` (accent-free, lowercase).
+ * Siempre busca sin tildes → encuentra "Salmón" al escribir "salmon" y viceversa.
  * `aplicarPrefiltro` recibe la query base (`select('*')`) ya encadenada con eq/is/order si aplica.
  */
 async function buscarFoodsPorTextoLibre(
@@ -250,52 +253,48 @@ async function buscarFoodsPorTextoLibre(
   const palabrasNorm = palabrasBusqueda(normalizarTexto(term))
     .map(sanitizarFragmentoIlike)
     .filter((w) => w.length > 0);
-  const palabrasSplit = palabrasBusqueda(term);
-  const palabrasRaw = palabrasSplit.map(sanitizarFragmentoIlike).filter((w) => w.length > 0);
 
   if (palabrasNorm.length === 0) {
+    const termNorm = sanitizarFragmentoIlike(normalizarTexto(term));
     const { data, error } = await aplicarPrefiltro(supabase.from('foods').select('*'))
-      .ilike('nombre', `%${sanitizarFragmentoIlike(term)}%`)
+      .ilike('nombre_norm', `%${termNorm}%`)
       .limit(limite);
     if (error) throw error;
     return (data ?? []) as Food[];
   }
 
-  const busquedaRawEquivNorm =
-    palabrasRaw.length === palabrasNorm.length &&
-    palabrasRaw.every(
-      (_, i) => sanitizarFragmentoIlike(normalizarTexto(palabrasSplit[i] ?? '')) === palabrasNorm[i],
-    );
-
   const ancla = elegirAnclajeBusqueda(palabrasNorm);
   const anclaSafe = ancla ? sanitizarFragmentoIlike(ancla) : '';
+  // Traemos más filas con el ancla para no perdernos combinaciones multi-palabra
   const limiteAncla = Math.min(Math.max(limite * 8, 120), 800);
 
   const ejecutar = async (words: string[], maxRows: number) => {
     let qq = aplicarPrefiltro(supabase.from('foods').select('*'));
-    qq = aplicarIlikeNombreAndFoods(qq, words);
+    qq = aplicarIlikeNormAndFoods(qq, words);
     const { data, error } = await qq.limit(maxRows);
     if (error) throw error;
     return (data ?? []) as Food[];
   };
 
-  const [rNorm, rRaw, rAncla] = await Promise.all([
+  // Una sola query AND + ancla amplia en paralelo (ya no necesitamos rRaw)
+  const [rAnd, rAncla] = await Promise.all([
     ejecutar(palabrasNorm, limite),
-    !busquedaRawEquivNorm && palabrasRaw.length > 0 ? ejecutar(palabrasRaw, limite) : Promise.resolve([] as Food[]),
-    anclaSafe ? ejecutar([anclaSafe], limiteAncla) : Promise.resolve([] as Food[]),
+    anclaSafe && palabrasNorm.length > 1
+      ? ejecutar([anclaSafe], limiteAncla)
+      : Promise.resolve([] as Food[]),
   ]);
 
   const porId = new Map<string, Food>();
-  for (const f of [...rNorm, ...rRaw, ...rAncla]) {
+  for (const f of [...rAnd, ...rAncla]) {
     porId.set(f.id, f);
   }
 
-  const merged = [...porId.values()].filter((f) => nombreContieneTodasLasPalabras(f.nombre, palabrasNorm));
+  // Filtro en cliente: AND estricto sobre nombre_norm (garantía de consistencia)
+  const merged = [...porId.values()].filter((f) =>
+    nombreContieneTodasLasPalabras(f.nombre, palabrasNorm),
+  );
 
-  // Fallback AND → OR: si la búsqueda estricta no encontró nada en BD pero sí
-  // hay resultados del ancla (que ya contienen al menos la palabra más relevante),
-  // aceptar cualquier resultado que incluya al menos UNA de las palabras clave.
-  // Solo se activa con queries de varias palabras; no añade consultas extra.
+  // Fallback AND → OR cuando no hay resultados multi-palabra exactos
   if (merged.length === 0 && palabrasNorm.length > 1) {
     const orFallback = [...porId.values()].filter((f) =>
       palabrasNorm.some((p) => normalizeText(f.nombre).includes(p)),

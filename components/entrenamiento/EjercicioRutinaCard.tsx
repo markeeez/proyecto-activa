@@ -22,10 +22,15 @@ import { useRouter } from 'expo-router';
 
 import LogoLight from '@/assets/images/logo_light_sb.svg';
 import LogoDark from '@/assets/images/logo_sb.svg';
+import KmRecordIcon from '@/assets/images/km_record_trophy_icon.svg';
+import PrRecordIcon from '@/assets/images/pr_trophy_icon.svg';
+import TimeRecordIcon from '@/assets/images/time_record_trophy_icon.svg';
+import VolumeRecordIcon from '@/assets/images/volume_record_trophy_icon.svg';
 import { useTheme } from '@/hooks/useTheme';
 import type { Theme } from '@/constants/theme';
 import type { BorradorEjercicioLinea, BorradorSerieLinea } from '@/types/entrenamientoBorrador.types';
 import { abrevTipoSerieUi, type TipoSerieUi } from '@/lib/entrenamientoSerie';
+import { tieneRecordFlags, type SetRecordFlags } from '@/lib/entrenamientoRecords';
 import { OpcionesMenuModal, type OpcionMenuItem } from '@/components/entrenamiento/OpcionesMenuModal';
 
 function lid(): string {
@@ -44,6 +49,8 @@ type Props = {
   modo?: 'rutina' | 'entreno';
   /** modo entreno: texto "Anterior" por fila de serie (misma longitud que data.sets) */
   textoAnteriorSeries?: (string | null)[];
+  /** modo entreno: records conseguidos o candidatos por fila de serie */
+  recordFlagsSeries?: SetRecordFlags[];
   /** modo entreno: nota del ejercicio (controlada desde el padre) */
   nota?: string;
   onNotaChange?: (nota: string) => void;
@@ -123,7 +130,7 @@ function makeStyles(c: Theme, f: ReturnType<typeof useTheme>['f'], ts: ReturnTyp
     },
     colSerie: { width: 56 },
     /** Modo entreno: mismas columnas en cabecera y filas (flex compartido) */
-    entrenoColSerie: { width: 40, alignItems: 'center', justifyContent: 'center', minWidth: 0 },
+    entrenoColSerie: { width: 66, alignItems: 'center', justifyContent: 'center', minWidth: 0 },
     entrenoColAnt: { flex: 1.15, alignItems: 'center', justifyContent: 'center', minWidth: 0 },
     entrenoColKg: { width: 52, alignItems: 'center', justifyContent: 'center', minWidth: 0 },
     entrenoColReps: { width: 40, alignItems: 'center', justifyContent: 'center', minWidth: 0 },
@@ -147,6 +154,18 @@ function makeStyles(c: Theme, f: ReturnType<typeof useTheme>['f'], ts: ReturnTyp
       flexDirection: 'row',
       alignItems: 'center',
       gap: 4,
+    },
+    recordIconsSlot: {
+      width: 30,
+      minHeight: 14,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'flex-end',
+      gap: 1,
+    },
+    recordIcon: {
+      width: 14,
+      height: 14,
     },
     serieNum: {
       fontFamily: f.monoBold,
@@ -387,6 +406,7 @@ function makeStyles(c: Theme, f: ReturnType<typeof useTheme>['f'], ts: ReturnTyp
       gap: s.xs,
     },
     cardioColAnt: { flex: 1.2, minWidth: 0, alignItems: 'center', justifyContent: 'center' },
+    cardioRecordSlot: { width: 32, alignItems: 'center', justifyContent: 'center' },
     cardioColTiempo: { flex: 1, minWidth: 0, alignItems: 'center', justifyContent: 'center' },
     cardioColKm: { flex: 0.75, minWidth: 0, alignItems: 'center', justifyContent: 'center' },
     cardioColTiempoCompact: { width: 100, alignItems: 'center', justifyContent: 'center' },
@@ -465,6 +485,7 @@ export function EjercicioRutinaCard({
   canMoveDown,
   modo = 'rutina',
   textoAnteriorSeries,
+  recordFlagsSeries,
   nota,
   onNotaChange,
 }: Props) {
@@ -538,6 +559,19 @@ export function EjercicioRutinaCard({
 
   const fotoUri =
     data.foto_url != null && String(data.foto_url).trim() !== '' ? String(data.foto_url).trim() : '';
+
+  const renderRecordIcons = (flags: SetRecordFlags | undefined) => {
+    if (!tieneRecordFlags(flags)) return null;
+
+    return (
+      <View style={styles.recordIconsSlot} pointerEvents="none">
+        {flags?.maxWeight ? <PrRecordIcon width={14} height={14} style={styles.recordIcon} /> : null}
+        {flags?.maxVolume ? <VolumeRecordIcon width={14} height={14} style={styles.recordIcon} /> : null}
+        {flags?.maxDuration ? <TimeRecordIcon width={14} height={14} style={styles.recordIcon} /> : null}
+        {flags?.maxDistance ? <KmRecordIcon width={14} height={14} style={styles.recordIcon} /> : null}
+      </View>
+    );
+  };
 
   return (
     <View style={styles.card}>
@@ -653,6 +687,7 @@ export function EjercicioRutinaCard({
             <View style={styles.cardioColAnt}>
               <Text style={[styles.th, styles.entrenoThCenter]}>ANTERIOR</Text>
             </View>
+            <View style={styles.cardioRecordSlot} />
             <View style={styles.cardioColTiempo}>
               <Text style={[styles.th, styles.entrenoThCenter]}>TIEMPO</Text>
             </View>
@@ -669,6 +704,7 @@ export function EjercicioRutinaCard({
                 {textoAnteriorSeries?.[0] ?? '—'}
               </Text>
             </View>
+            <View style={styles.cardioRecordSlot}>{renderRecordIcons(recordFlagsSeries?.[0])}</View>
             <View style={styles.cardioColTiempo}>
               <TextInput
                 style={[styles.cardioInput, data.sets[0].completada ? styles.inputHecho : null]}
@@ -819,6 +855,7 @@ export function EjercicioRutinaCard({
             {esEntreno ? (
               <View style={styles.entrenoColSerie}>
                 <View style={styles.serieNumWrap}>
+                  {renderRecordIcons(recordFlagsSeries?.[index])}
                   <Text style={[styles.serieNum, hecho ? { opacity: 0.65 } : null]}>{index + 1}</Text>
                   {abrev ? (
                     <View style={styles.badge}>
@@ -829,6 +866,7 @@ export function EjercicioRutinaCard({
               </View>
             ) : (
               <View style={[styles.serieNumWrap, styles.colSerie]}>
+                {tieneRecordFlags(recordFlagsSeries?.[index]) ? renderRecordIcons(recordFlagsSeries?.[index]) : null}
                 <Text style={[styles.serieNum, hecho ? { opacity: 0.65 } : null]}>{index + 1}</Text>
                 {abrev ? (
                   <View style={styles.badge}>

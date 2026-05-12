@@ -24,6 +24,7 @@ export default function PerfilLayout() {
       <Stack.Screen name="cambiar-contrasena" options={{ title: 'Cambiar contraseña' }} />
       <Stack.Screen name="perfil-ejercicios" options={{ title: 'Mis ejercicios' }} />
       <Stack.Screen name="perfil-entrenos" options={{ title: 'Mis entrenos' }} />
+      <Stack.Screen name="records" options={{ headerShown: false }} />
       <Stack.Screen name="consulta-ejercicio" options={{ headerShown: false }} />
       <Stack.Screen name="sesion/[id]" options={{ headerShown: false }} />
     </Stack>

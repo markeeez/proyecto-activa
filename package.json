@@ -9,6 +9,7 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "lint": "expo lint",
+    "test:records": "node --experimental-strip-types --test tests/entrenamientoRecords.test.ts",
     "test:fatsecret": "node scripts/test-fatsecret.mjs",
     "test:usda": "node scripts/test-usda.mjs",
     "test:openfoodfacts": "node scripts/test-openfoodfacts.mjs"

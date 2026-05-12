@@ -239,6 +239,7 @@ export default function NutricionIndex() {
     eliminarComidaDelLog,
     crearComidaPersonalizada,
     eliminarAlimento,
+    reemplazarAlimento,
     vaciarComida,
     pegarAlimentosEnComida,
   } = useNutricion();
@@ -270,6 +271,7 @@ export default function NutricionIndex() {
   const [menuComida, setMenuComida] = useState<ComidaConAlimentos | null>(null);
   const [menuAnchor, setMenuAnchor] = useState({ x: 0, y: 0 });
   const [mealIdBuscador, setMealIdBuscador] = useState<string | null>(null);
+  const [itemAReemplazar, setItemAReemplazar] = useState<{ id: string; meal_id: string } | null>(null);
 
   useEffect(() => {
     const showSub = Keyboard.addListener('keyboardDidShow', (event) => {
@@ -515,6 +517,16 @@ export default function NutricionIndex() {
   const cerrarBuscadorAlimentos = useCallback(() => {
     setMealIdBuscador(null);
   }, []);
+
+  const handleReemplazar = useCallback(
+    async (food: Food, gramos: number) => {
+      if (!itemAReemplazar) return;
+      await reemplazarAlimento(itemAReemplazar, food, gramos);
+      emitNutricionLogActualizado({ fechaLog: fecha });
+      setItemAReemplazar(null);
+    },
+    [itemAReemplazar, reemplazarAlimento, fecha],
+  );
 
   const registrarAlimentoSeleccionado = useCallback(
     async (food: Food, gramos: number) => {
@@ -785,7 +797,9 @@ export default function NutricionIndex() {
                       }}
                     >
                       <View style={styles.foodRow}>
-                        <Text style={styles.foodName} numberOfLines={1}>{item.food?.nombre ?? 'Alimento'}</Text>
+                        <Pressable onPress={() => setItemAReemplazar({ id: item.id, meal_id: item.meal_id })}>
+                          <Text style={styles.foodName} numberOfLines={1}>{item.food?.nombre ?? 'Alimento'}</Text>
+                        </Pressable>
 
                         <View style={styles.foodMetaRow}>
                           <Text style={styles.foodMeta}>{Math.round(item.gramos)} g</Text>
@@ -827,6 +841,7 @@ export default function NutricionIndex() {
     [
       styles,
       eliminarAlimento,
+      setItemAReemplazar,
       c.primary,
       c.danger,
       c.textDisplay,
@@ -954,6 +969,13 @@ export default function NutricionIndex() {
         visible={mealIdBuscador !== null}
         onClose={cerrarBuscadorAlimentos}
         onAlimentoSeleccionado={registrarAlimentoSeleccionado}
+        userId={user?.id}
+      />
+
+      <BuscadorAlimentos
+        visible={itemAReemplazar !== null}
+        onClose={() => setItemAReemplazar(null)}
+        onAlimentoSeleccionado={handleReemplazar}
         userId={user?.id}
       />
 
