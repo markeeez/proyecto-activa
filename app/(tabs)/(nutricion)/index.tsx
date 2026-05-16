@@ -21,6 +21,7 @@ import Svg, { Circle } from 'react-native-svg';
 
 import { BuscadorAlimentos } from '@/components/nutricion/BuscadorAlimentos';
 import { CalendarioNutricion } from '@/components/nutricion/CalendarioNutricion';
+import { MealShareModal } from '@/components/nutricion/MealShareModal';
 import { SortableMealList } from '@/components/SortableMealList';
 import { GlowButton } from '@/components/ui/GlowButton';
 
@@ -39,10 +40,11 @@ import {
 } from '@/lib/fechaNutricion';
 import { iconoComida } from '@/lib/iconosComida';
 import { emitNutricionLogActualizado } from '@/lib/nutricionEvents';
+import { calcularEstadoDia } from '@/lib/nutricionEstadoDia';
 import { guardarOrdenComidas, obtenerOrdenComidas } from '@/lib/nutricionLogPreferencias';
 import { alimentosService } from '@/services/alimentos.service';
 import { nutricionService } from '@/services/nutricion.service';
-import type { ComidaConAlimentos } from '@/types/app.types';
+import type { ComidaConAlimentos, UltimaComidaAnteriorNutricion } from '@/types/app.types';
 import type { Food } from '@/types/database.types';
 
 const SKELETON_FADE_MS = 200;
@@ -55,10 +57,28 @@ type SkeletonPalette = {
   block: string;
   shimmer: string;
 };
+type SugerenciaComidaAnterior =
+  | { estado: 'cargando' }
+  | { estado: 'sinDatos' }
+  | { estado: 'disponible'; data: UltimaComidaAnteriorNutricion };
 
 function pct(actual: number, objetivo: number): number {
   if (!Number.isFinite(actual) || !Number.isFinite(objetivo) || objetivo <= 0) return 0;
   return Math.max(0, Math.min(actual / objetivo, 1));
+}
+
+function textoCompartirComida(comida: ComidaConAlimentos): string {
+  const macros = `${Math.round(comida.totalCalorias)} kcal | ${Math.round(comida.totalProteinas)}P ${Math.round(comida.totalCarbos)}C ${Math.round(comida.totalGrasas)}G`;
+  const alimentos = comida.items
+    .map((item) => {
+      const nombre = item.food?.nombre ?? 'Alimento';
+      return `- ${nombre}: ${Math.round(item.gramos)} g, ${Math.round(item.calorias_calculadas)} kcal`;
+    })
+    .join('\n');
+
+  return alimentos.length > 0
+    ? `${comida.nombre}\n${macros}\n${alimentos}`
+    : `${comida.nombre}\n${macros}`;
 }
 
 function KcalRing({
@@ -242,6 +262,8 @@ export default function NutricionIndex() {
     reemplazarAlimento,
     vaciarComida,
     pegarAlimentosEnComida,
+    obtenerUltimaComidaAnterior,
+    copiarComidaAnteriorEnComida,
   } = useNutricion();
   const {
     lineas: lineasCopiadas,
@@ -270,8 +292,16 @@ export default function NutricionIndex() {
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [menuComida, setMenuComida] = useState<ComidaConAlimentos | null>(null);
   const [menuAnchor, setMenuAnchor] = useState({ x: 0, y: 0 });
+  const [comidaCompartir, setComidaCompartir] = useState<ComidaConAlimentos | null>(null);
   const [mealIdBuscador, setMealIdBuscador] = useState<string | null>(null);
-  const [itemAReemplazar, setItemAReemplazar] = useState<{ id: string; meal_id: string } | null>(null);
+  const [itemAReemplazar, setItemAReemplazar] = useState<
+    | { id: string; meal_id: string; food: Food; gramos: number }
+    | null
+  >(null);
+  const [sugerenciasComidaAnterior, setSugerenciasComidaAnterior] = useState<Record<string, SugerenciaComidaAnterior>>({});
+  const [sugerenciasDescartadas, setSugerenciasDescartadas] = useState<Set<string>>(() => new Set());
+  const [copiandoComidaAnteriorId, setCopiandoComidaAnteriorId] = useState<string | null>(null);
+  const fechaActualNutricionRef = useRef(fecha);
 
   useEffect(() => {
     const showSub = Keyboard.addListener('keyboardDidShow', (event) => {
@@ -291,6 +321,13 @@ export default function NutricionIndex() {
     if (!user?.id) return;
     void obtenerOrdenComidas(user.id, fecha).then(setOrdenIds);
   }, [user?.id, fecha]);
+
+  useEffect(() => {
+    fechaActualNutricionRef.current = fecha;
+    setSugerenciasComidaAnterior({});
+    setSugerenciasDescartadas(new Set());
+    setCopiandoComidaAnteriorId(null);
+  }, [fecha]);
 
   /** Quitar del orden guardado los meal_id que ya no existen en el log. */
   useEffect(() => {
@@ -322,6 +359,56 @@ export default function NutricionIndex() {
   // true mientras se cargan datos de un día nuevo (resumen aún no corresponde a `fecha`)
   const cargandoDia = cargando && !resumen;
 
+  useEffect(() => {
+    if (!user?.id || cargandoDia) return;
+
+    const comidasPendientes = comidasData.filter(
+      (meal) =>
+        meal.items.length === 0 &&
+        !sugerenciasDescartadas.has(meal.mealId) &&
+        !sugerenciasComidaAnterior[meal.mealId],
+    );
+    if (!comidasPendientes.length) return;
+
+    setSugerenciasComidaAnterior((prev) => {
+      const next = { ...prev };
+      for (const meal of comidasPendientes) {
+        next[meal.mealId] = { estado: 'cargando' };
+      }
+      return next;
+    });
+
+    const fechaCarga = fecha;
+    for (const meal of comidasPendientes) {
+      void obtenerUltimaComidaAnterior(meal.nombre)
+        .then((data) => {
+          if (fechaActualNutricionRef.current !== fechaCarga) return;
+          setSugerenciasComidaAnterior((prev) => ({
+            ...prev,
+            [meal.mealId]: data?.lineas.length
+              ? { estado: 'disponible', data }
+              : { estado: 'sinDatos' },
+          }));
+        })
+        .catch((e) => {
+          if (fechaActualNutricionRef.current !== fechaCarga) return;
+          console.error('[Nutricion] sugerencia comida anterior', e);
+          setSugerenciasComidaAnterior((prev) => ({
+            ...prev,
+            [meal.mealId]: { estado: 'sinDatos' },
+          }));
+        });
+    }
+  }, [
+    cargandoDia,
+    comidasData,
+    fecha,
+    obtenerUltimaComidaAnterior,
+    sugerenciasComidaAnterior,
+    sugerenciasDescartadas,
+    user?.id,
+  ]);
+
   const semana = useMemo(() => getSemanaMovil(fecha), [fecha]);
   const rangoSemanaLabel = useMemo(() => formatRangoSemanaCortoES(semana), [semana]);
   const skeletonFadeOpacity = useRef(new Animated.Value(cargandoDia ? 1 : 0)).current;
@@ -331,6 +418,12 @@ export default function NutricionIndex() {
 
   const kcalActual = Math.round(resumen?.totalCalorias ?? 0);
   const kcalObjetivo = Math.round(objetivos?.calorias_objetivo ?? 0);
+  const estadoKcal = calcularEstadoDia(kcalActual, kcalObjetivo);
+  const colorKcalRing =
+    estadoKcal === 'dentro' ? c.success
+    : estadoKcal === 'cerca' ? c.warning
+    : estadoKcal === 'sobre' ? c.danger
+    : c.primary;
   const goalMacros = useMemo(
     () => [
       {
@@ -373,7 +466,7 @@ export default function NutricionIndex() {
         <KcalRing
           actual={kcalActual}
           objetivo={kcalObjetivo}
-          color={c.primary}
+          color={colorKcalRing}
           trackColor={c.primaryBg}
           styles={styles}
         />
@@ -420,7 +513,7 @@ export default function NutricionIndex() {
         </View>
       </View>
     ),
-    [c.primary, c.primaryBg, goalMacros, kcalActual, kcalObjetivo, styles],
+    [c.primaryBg, colorKcalRing, goalMacros, kcalActual, kcalObjetivo, styles],
   );
 
   const avanzarDia = useCallback(() => {
@@ -509,9 +602,49 @@ export default function NutricionIndex() {
 
   const abrirRegistrarComida = useCallback(
     (mealId: string) => {
+      setSugerenciasDescartadas((prev) => {
+        const next = new Set(prev);
+        next.add(mealId);
+        return next;
+      });
       setMealIdBuscador(mealId);
     },
     [],
+  );
+
+  const descartarSugerenciaComidaAnterior = useCallback((mealId: string) => {
+    setSugerenciasDescartadas((prev) => {
+      const next = new Set(prev);
+      next.add(mealId);
+      return next;
+    });
+  }, []);
+
+  const confirmarCopiarComidaAnterior = useCallback(
+    async (meal: ComidaConAlimentos) => {
+      if (copiandoComidaAnteriorId) return;
+      setCopiandoComidaAnteriorId(meal.mealId);
+      try {
+        const copiada = await copiarComidaAnteriorEnComida(meal.mealId, meal.nombre);
+        if (copiada) {
+          setSugerenciasComidaAnterior((prev) => {
+            const next = { ...prev };
+            delete next[meal.mealId];
+            return next;
+          });
+          setSugerenciasDescartadas((prev) => {
+            const next = new Set(prev);
+            next.add(meal.mealId);
+            return next;
+          });
+        }
+      } catch (e) {
+        console.error('[Nutricion] copiar comida anterior', e);
+      } finally {
+        setCopiandoComidaAnteriorId(null);
+      }
+    },
+    [copiandoComidaAnteriorId, copiarComidaAnteriorEnComida],
   );
 
   const cerrarBuscadorAlimentos = useCallback(() => {
@@ -567,6 +700,13 @@ export default function NutricionIndex() {
     copiarDesdeComida(menuComida.items);
     setMenuComida(null);
   }, [copiarDesdeComida, menuComida]);
+
+  const compartirComidaSeleccionada = useCallback(() => {
+    if (!menuComida) return;
+    const meal = menuComida;
+    setMenuComida(null);
+    setComidaCompartir(meal);
+  }, [menuComida]);
 
   const pegarEnComidaSeleccionada = useCallback(async () => {
     const meal = menuComida;
@@ -724,6 +864,14 @@ export default function NutricionIndex() {
   const renderItem = useCallback(
     ({ item: meal, drag, isActive }: { item: ComidaConAlimentos; drag: () => void; isActive: boolean; }) => {
       const mealIcon = iconoComida(meal.nombre, meal.isDefault);
+      const sugerenciaAnterior = sugerenciasComidaAnterior[meal.mealId];
+      const sugerenciaAnteriorData =
+        sugerenciaAnterior?.estado === 'disponible' ? sugerenciaAnterior.data : null;
+      const mostrarSugerenciaAnterior =
+        meal.items.length === 0 &&
+        !sugerenciasDescartadas.has(meal.mealId) &&
+        sugerenciaAnteriorData !== null;
+      const copiandoAnterior = copiandoComidaAnteriorId === meal.mealId;
 
       return (
         <Animated.View style={{ opacity: contentOpacity }}>
@@ -796,10 +944,20 @@ export default function NutricionIndex() {
                         })();
                       }}
                     >
-                      <View style={styles.foodRow}>
-                        <Pressable onPress={() => setItemAReemplazar({ id: item.id, meal_id: item.meal_id })}>
-                          <Text style={styles.foodName} numberOfLines={1}>{item.food?.nombre ?? 'Alimento'}</Text>
-                        </Pressable>
+                      <Pressable
+                        style={styles.foodRow}
+                        hitSlop={6}
+                        onPress={() => {
+                          if (!item.food) return;
+                          setItemAReemplazar({
+                            id: item.id,
+                            meal_id: item.meal_id,
+                            food: item.food,
+                            gramos: item.gramos,
+                          });
+                        }}
+                      >
+                        <Text style={styles.foodName} numberOfLines={1}>{item.food?.nombre ?? 'Alimento'}</Text>
 
                         <View style={styles.foodMetaRow}>
                           <Text style={styles.foodMeta}>{Math.round(item.gramos)} g</Text>
@@ -816,11 +974,43 @@ export default function NutricionIndex() {
                             <Text style={styles.foodKcalText}>{Math.round(item.calorias_calculadas)} kcal</Text>
                           </View>
                         </View>
-                      </View>
+                      </Pressable>
                     </Swipeable>
                   );
                 })}
-                {meal.items.length === 0 && (
+                {mostrarSugerenciaAnterior && (
+                  <View style={styles.previousMealSuggestion}>
+                    <View style={styles.previousMealSuggestionTextWrap}>
+                      <Text style={styles.previousMealSuggestionTitle} numberOfLines={1}>
+                        Copiar comida anterior
+                      </Text>
+                      <Text style={styles.previousMealSuggestionMeta} numberOfLines={1}>
+                        {sugerenciaAnteriorData?.lineas.length} alimentos del {sugerenciaAnteriorData?.fecha}
+                      </Text>
+                    </View>
+                    <View style={styles.previousMealSuggestionActions}>
+                      <Pressable
+                        style={[styles.previousMealSuggestionBtn, styles.previousMealSuggestionAccept]}
+                        onPress={() => void confirmarCopiarComidaAnterior(meal)}
+                        disabled={copiandoAnterior}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Copiar comida anterior en ${meal.nombre}`}
+                      >
+                        <Ionicons name="checkmark" size={17} color={c.textOnPrimary} />
+                      </Pressable>
+                      <Pressable
+                        style={styles.previousMealSuggestionBtn}
+                        onPress={() => descartarSugerenciaComidaAnterior(meal.mealId)}
+                        disabled={copiandoAnterior}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Descartar copiar comida anterior en ${meal.nombre}`}
+                      >
+                        <Ionicons name="close" size={17} color={c.textDisplay} />
+                      </Pressable>
+                    </View>
+                  </View>
+                )}
+                {meal.items.length === 0 && !mostrarSugerenciaAnterior && (
                   <Text style={styles.emptyMealSlotHint}>Todavía no hay alimentos en esta comida</Text>
                 )}
               </View>
@@ -845,9 +1035,15 @@ export default function NutricionIndex() {
       c.primary,
       c.danger,
       c.textDisplay,
+      c.textOnPrimary,
       contentOpacity,
       abrirRegistrarComida,
       MealAiLogo,
+      sugerenciasComidaAnterior,
+      sugerenciasDescartadas,
+      copiandoComidaAnteriorId,
+      confirmarCopiarComidaAnterior,
+      descartarSugerenciaComidaAnterior,
     ],
   );
 
@@ -913,6 +1109,15 @@ export default function NutricionIndex() {
               {menuComida.nombre}
             </Text>
             <Pressable
+              style={styles.mealMenuOption}
+              onPress={compartirComidaSeleccionada}
+            >
+              <Ionicons name="share-outline" size={17} color={c.textDisplay} />
+              <Text style={styles.mealMenuOptionText}>
+                Compartir
+              </Text>
+            </Pressable>
+            <Pressable
               style={[styles.mealMenuOption, menuComida.items.length === 0 && styles.mealMenuOptionDisabled]}
               onPress={copiarComidaSeleccionada}
               disabled={menuComida.items.length === 0}
@@ -965,6 +1170,14 @@ export default function NutricionIndex() {
         onSeleccionarDia={seleccionarDiaCalendario}
       />
 
+      <MealShareModal
+        visible={comidaCompartir !== null}
+        onClose={() => setComidaCompartir(null)}
+        comida={comidaCompartir}
+        initialDark={isDark}
+        fallbackMessage={comidaCompartir ? textoCompartirComida(comidaCompartir) : ''}
+      />
+
       <BuscadorAlimentos
         visible={mealIdBuscador !== null}
         onClose={cerrarBuscadorAlimentos}
@@ -972,12 +1185,15 @@ export default function NutricionIndex() {
         userId={user?.id}
       />
 
-      <BuscadorAlimentos
-        visible={itemAReemplazar !== null}
-        onClose={() => setItemAReemplazar(null)}
-        onAlimentoSeleccionado={handleReemplazar}
-        userId={user?.id}
-      />
+      {itemAReemplazar !== null && (
+        <BuscadorAlimentos
+          visible
+          onClose={() => setItemAReemplazar(null)}
+          onAlimentoSeleccionado={handleReemplazar}
+          userId={user?.id}
+          alimentoInicial={{ food: itemAReemplazar.food, gramos: itemAReemplazar.gramos }}
+        />
+      )}
 
       <Modal visible={modalNuevaComida} transparent animationType="fade" onRequestClose={() => setModalNuevaComida(false)}>
         <KeyboardAvoidingView
@@ -1456,6 +1672,52 @@ function makeStyles(
       paddingHorizontal: s.md,
       paddingVertical: 10,
       textAlign: 'center',
+    },
+    previousMealSuggestion: {
+      minHeight: 54,
+      paddingHorizontal: s.md,
+      paddingVertical: s.sm,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: s.sm,
+    },
+    previousMealSuggestionTextWrap: {
+      flex: 1,
+      minWidth: 0,
+      gap: 2,
+    },
+    previousMealSuggestionTitle: {
+      fontSize: 13,
+      lineHeight: 16,
+      fontFamily: f.sansBold,
+      color: c.textDisplay,
+    },
+    previousMealSuggestionMeta: {
+      fontSize: 11,
+      lineHeight: 14,
+      fontFamily: f.sans,
+      color: c.textMuted,
+    },
+    previousMealSuggestionActions: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: s.xs,
+      flexShrink: 0,
+    },
+    previousMealSuggestionBtn: {
+      width: 32,
+      height: 32,
+      borderRadius: r.sm,
+      borderWidth: 1,
+      borderColor: c.borderVisible,
+      backgroundColor: c.surface,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    previousMealSuggestionAccept: {
+      borderColor: c.primary,
+      backgroundColor: c.primary,
     },
     emptyOverlay: {
       ...StyleSheet.absoluteFillObject,

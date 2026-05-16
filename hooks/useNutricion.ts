@@ -9,9 +9,12 @@ import { fechaHoyIsoLocal } from '@/lib/fechaNutricion';
 import { NUTRICION_LOG_ACTUALIZADO, type NutricionLogActualizadoPayload } from '@/lib/nutricionEvents';
 import { alimentosService } from '@/services/alimentos.service';
 import { nutricionService } from '@/services/nutricion.service';
-import type { LineaCopiadaNutricion, ResumenDiarioNutricion } from '@/types/app.types';
-import type { Food } from '@/types/database.types';
-import type { UserGoal } from '@/types/database.types';
+import type {
+  LineaCopiadaNutricion,
+  ResumenDiarioNutricion,
+  UltimaComidaAnteriorNutricion,
+} from '@/types/app.types';
+import type { Food, UserGoal } from '@/types/database.types';
 import { useFocusEffect } from '@react-navigation/native';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { DeviceEventEmitter } from 'react-native';
@@ -91,6 +94,30 @@ export function useNutricion() {
     setFecha(nueva);
   }, []);
 
+  const obtenerUltimaComidaAnterior = useCallback(
+    async (nombreComida: string): Promise<UltimaComidaAnteriorNutricion | null> => {
+      if (!user?.id) return null;
+      return nutricionService.obtenerUltimaComidaAnterior(user.id, fechaRef.current, nombreComida);
+    },
+    [user?.id],
+  );
+
+  const copiarComidaAnteriorEnComida = useCallback(
+    async (mealId: string, nombreComida: string): Promise<boolean> => {
+      if (!user?.id) return false;
+      const anterior = await nutricionService.obtenerUltimaComidaAnterior(
+        user.id,
+        fechaRef.current,
+        nombreComida,
+      );
+      if (!anterior?.lineas.length) return false;
+      await nutricionService.pegarAlimentosEnComida(mealId, anterior.lineas);
+      await cargar();
+      return true;
+    },
+    [cargar, user?.id],
+  );
+
   return {
     resumen,
     objetivos,
@@ -98,6 +125,8 @@ export function useNutricion() {
     fecha,
     cambiarFecha,
     recargar: cargar,
+    obtenerUltimaComidaAnterior,
+    copiarComidaAnteriorEnComida,
     añadirAlimento: async (
       mealId: string,
       foodId: string,

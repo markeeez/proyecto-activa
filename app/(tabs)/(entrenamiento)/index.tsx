@@ -9,6 +9,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  DeviceEventEmitter,
   LayoutAnimation,
   LayoutChangeEvent,
   Modal,
@@ -21,10 +22,16 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { RutinasListadoTab } from '@/components/entrenamiento/RutinasListadoTab';
+import { WorkoutCalendarShareModal } from '@/components/entrenamiento/WorkoutCalendarShareModal';
 import { useEntreno } from '@/context/EntrenoContext';
 import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from '@/hooks/useTheme';
 import { useTimerDescanso, type ModoDescanso } from '@/hooks/useTimerDescanso';
+import {
+  consumirEntrenamientoTabSolicitado,
+  ENTRENAMIENTO_TAB_SOLICITADO,
+  type EntrenamientoTabSolicitado,
+} from '@/lib/entrenamientoTabEvents';
 import {
   entrenamientoService,
   type SesionResumen,
@@ -110,6 +117,14 @@ function etiquetaRangoSemana(lunes: Date): string {
       .replace(/\./g, '')
       .toUpperCase();
   return `${fmt(lunes)} – ${fmt(domingo)}`;
+}
+
+function textoCompartirCalendarioEntrenos(mes: Date, diasEntrenados: Set<string>): string {
+  const monthKey = `${mes.getFullYear()}-${String(mes.getMonth() + 1).padStart(2, '0')}`;
+  const totalDias = Array.from(diasEntrenados).filter((fecha) => fecha.startsWith(monthKey)).length;
+  const mesLabel = mes.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
+  const entrenosLabel = totalDias === 1 ? '1 dia con entreno' : `${totalDias} dias con entreno`;
+  return `Calendario de entrenos - ${mesLabel}\n${entrenosLabel}`;
 }
 
 function formatearTiempo(totalMin: number, mostrarMenorQueUno = false): string {
@@ -215,7 +230,7 @@ function crearPaletaEntrenos(c: ReturnType<typeof useTheme>['c']): WorkoutPalett
 }
 
 export default function EntrenamientoIndex() {
-  const { c, f, ts, s, r } = useTheme();
+  const { c, f, ts, s, isDark } = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user } = useAuth();
@@ -242,8 +257,32 @@ export default function EntrenamientoIndex() {
     const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0); return d;
   });
   const [diasEntrenados, setDiasEntrenados] = useState<Set<string>>(new Set());
+  const [resumenMes, setResumenMes] = useState<{ sesiones: number; segundos: number; volumenKg: number }>({
+    sesiones: 0,
+    segundos: 0,
+    volumenKg: 0,
+  });
   const [cargandoCalendario, setCargandoCalendario] = useState(false);
+  const [modalShareCalendario, setModalShareCalendario] = useState(false);
   const reqIdRef = useRef(0);
+
+  useEffect(() => {
+    const subscription = DeviceEventEmitter.addListener(
+      ENTRENAMIENTO_TAB_SOLICITADO,
+      ({ tab }: { tab?: EntrenamientoTabSolicitado }) => {
+        if (tab === 'entrenos' || tab === 'rutinas') setTab(tab);
+      },
+    );
+
+    return () => subscription.remove();
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      const tabSolicitado = consumirEntrenamientoTabSolicitado();
+      if (tabSolicitado) setTab(tabSolicitado);
+    }, []),
+  );
 
   useFocusEffect(
     useCallback(() => {
@@ -313,6 +352,7 @@ export default function EntrenamientoIndex() {
   useEffect(() => {
     const t = Array.isArray(tabParam) ? tabParam[0] : tabParam;
     if (t === 'rutinas') setTab('rutinas');
+    if (t === 'entrenos') setTab('entrenos');
   }, [tabParam]);
 
   const sesionesPorFecha = useMemo(() => {
@@ -392,6 +432,13 @@ export default function EntrenamientoIndex() {
       const fin = toYmd(ultimoDia);
       const resumenes = await entrenamientoService.obtenerResumenSesionesSemana(user.id, ini, fin);
       setDiasEntrenados(new Set(resumenes.map((r) => r.sesion.fecha)));
+      let segundos = 0;
+      let volumenKg = 0;
+      for (const r of resumenes) {
+        segundos += calcularDuracionSegundos(r.sesion.hora_inicio, r.sesion.hora_fin);
+        volumenKg += r.volumenKg;
+      }
+      setResumenMes({ sesiones: resumenes.length, segundos, volumenKg });
     } finally {
       setCargandoCalendario(false);
     }
@@ -782,10 +829,21 @@ export default function EntrenamientoIndex() {
 
             {/* Leyenda */}
             <View style={styles.calLeyenda}>
+              <View style={styles.calLeyendaTextWrap}>
               <View style={[styles.calDotLeyenda, { backgroundColor: palette.accent }]} />
               <Text style={[styles.calWeekLabel, { textTransform: 'none', letterSpacing: 0, fontSize: 11 }]}>
                 Día con entreno
               </Text>
+              </View>
+              <Pressable
+                style={({ pressed }) => [styles.calShareButton, pressed && { opacity: 0.7 }]}
+                onPress={() => setModalShareCalendario(true)}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Compartir calendario"
+              >
+                <Ionicons name="share-outline" size={18} color={c.textDisplay} />
+              </Pressable>
             </View>
 
             {/* Cerrar */}
@@ -801,6 +859,17 @@ export default function EntrenamientoIndex() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      <WorkoutCalendarShareModal
+        visible={modalShareCalendario}
+        onClose={() => setModalShareCalendario(false)}
+        mes={mesCalendario}
+        diasEntrenados={diasEntrenados}
+        resumen={resumenMes}
+        user={user}
+        initialDark={isDark}
+        fallbackMessage={textoCompartirCalendarioEntrenos(mesCalendario, diasEntrenados)}
+      />
     </View>
   );
 }
@@ -1631,14 +1700,31 @@ function makeStyles(f: ReturnType<typeof useTheme>['f'], topInset: number, p: Wo
     calLeyenda: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 6,
+      justifyContent: 'space-between',
       marginTop: 10,
       marginBottom: 4,
+    },
+    calLeyendaTextWrap: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      flex: 1,
+      minWidth: 0,
     },
     calDotLeyenda: {
       width: 8,
       height: 8,
       borderRadius: 4,
+    },
+    calShareButton: {
+      width: 32,
+      height: 32,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surfaceElevated,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
   });
 }

@@ -3,18 +3,18 @@ import PrRecordIcon from '@/assets/images/pr_trophy_icon.svg';
 import TimeRecordIcon from '@/assets/images/time_record_trophy_icon.svg';
 import VolumeRecordIcon from '@/assets/images/volume_record_trophy_icon.svg';
 import { Ionicons } from '@expo/vector-icons';
-import { Stack, useRouter } from 'expo-router';
+import { Stack } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   FlatList,
   Pressable,
-  Share,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { RecordShareModal } from '@/components/progreso/RecordShareModal';
 import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from '@/hooks/useTheme';
 import type { RecordType, RecordUsuario } from '@/lib/entrenamientoRecords';
@@ -32,13 +32,6 @@ const RECORD_SUBTITLES: Record<RecordType, string> = {
   max_volume: 'Volumen',
   max_duration: 'Resistencia',
   max_distance: 'Cardio',
-};
-
-const FILTRO_LABELS: Record<RecordType, string> = {
-  max_weight: 'Peso máximo',
-  max_volume: 'Volumen máximo',
-  max_duration: 'Tiempo máximo',
-  max_distance: 'Km máximo',
 };
 
 const TIPOS: RecordType[] = ['max_weight', 'max_volume', 'max_duration', 'max_distance'];
@@ -123,7 +116,6 @@ function SkeletonItem({ bgColor, borderColor }: { bgColor: string; borderColor: 
 }
 
 export default function RecordsScreen() {
-  const router = useRouter();
   const insets = useSafeAreaInsets();
   const { c, f, ts, s, r, isDark } = useTheme();
   const { user } = useAuth();
@@ -133,6 +125,7 @@ export default function RecordsScreen() {
   const [ordenFecha, setOrdenFecha] = useState<'desc' | 'asc'>('desc');
   const [filtroTipo, setFiltroTipo] = useState<RecordType | null>(null);
   const [mostrarTipos, setMostrarTipos] = useState(false);
+  const [recordCompartir, setRecordCompartir] = useState<RecordUsuario | null>(null);
 
   const cargar = useCallback(async () => {
     if (!user?.id) return;
@@ -189,16 +182,6 @@ export default function RecordsScreen() {
       borderWidth: 1,
       borderColor: c.primary,
       backgroundColor: isDark ? 'rgba(0, 212, 255, 0.08)' : c.primaryBg,
-    },
-    settingsButton: {
-      width: 36,
-      height: 36,
-      borderRadius: 10,
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderWidth: 1,
-      borderColor: c.borderVisible,
-      backgroundColor: c.surfaceElevated,
     },
     filtersRow: {
       flexDirection: 'row',
@@ -415,7 +398,7 @@ export default function RecordsScreen() {
         <Text style={styles.cardFecha} numberOfLines={1}>{formatFecha(item.achievedAt)}</Text>
         <Pressable
           style={({ pressed }) => [styles.shareBtn, pressed && { opacity: 0.7 }]}
-          onPress={() => void Share.share({ message: textoCompartir(item) })}
+          onPress={() => setRecordCompartir(item)}
           hitSlop={8}
           accessibilityRole="button"
           accessibilityLabel={`Compartir ${RECORD_LABELS[item.recordType]}`}
@@ -435,14 +418,6 @@ export default function RecordsScreen() {
             <Ionicons name="radio-button-on-outline" size={13} color={c.primary} />
           </View>
         </View>
-        <Pressable
-          style={({ pressed }) => [styles.settingsButton, pressed && { opacity: 0.72 }]}
-          onPress={() => router.push('/(tabs)/(perfil)/ajustes')}
-          accessibilityRole="button"
-          accessibilityLabel="Abrir ajustes"
-        >
-          <Ionicons name="settings-outline" size={18} color={c.primary} />
-        </Pressable>
       </View>
 
       <View style={styles.filtersRow}>
@@ -470,7 +445,7 @@ export default function RecordsScreen() {
         >
           <Ionicons name="filter-outline" size={15} color={filtroTipo != null ? c.primary : c.textMuted} />
           <Text style={[styles.filterText, filtroTipo != null && styles.filterTextActive]} numberOfLines={1}>
-            {filtroTipo ? FILTRO_LABELS[filtroTipo] : 'Filtrar por tipo'}
+            {filtroTipo ? RECORD_LABELS[filtroTipo] : 'Filtrar por tipo'}
           </Text>
         </Pressable>
       </View>
@@ -498,7 +473,7 @@ export default function RecordsScreen() {
               accessibilityRole="button"
             >
               <Text style={[styles.typeChipText, filtroTipo === tipo && styles.typeChipTextActive]}>
-                {FILTRO_LABELS[tipo]}
+                {RECORD_LABELS[tipo]}
               </Text>
             </Pressable>
           ))}
@@ -551,6 +526,15 @@ export default function RecordsScreen() {
           showsVerticalScrollIndicator={false}
         />
       )}
+
+      <RecordShareModal
+        visible={recordCompartir != null}
+        onClose={() => setRecordCompartir(null)}
+        record={recordCompartir}
+        user={user}
+        initialDark={isDark}
+        fallbackMessage={recordCompartir ? textoCompartir(recordCompartir) : ''}
+      />
     </View>
   );
 }

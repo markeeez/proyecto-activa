@@ -14,6 +14,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useTheme } from '@/hooks/useTheme';
+import { FontFamily } from '@/constants/theme';
 import { iconoComida } from '@/lib/iconosComida';
 import type { Food } from '@/types/database.types';
 import type { AlimentoEnLog, ComidaConAlimentos } from '@/types/app.types';
@@ -115,7 +116,7 @@ export function ModalRegistrarComida({
     },
     headerTitle: {
       fontSize: 17,
-      fontWeight: '600',
+      fontFamily: FontFamily.sansBold,
       color: c.textDisplay,
     },
     closeBtn: {
@@ -123,6 +124,7 @@ export function ModalRegistrarComida({
     },
     subtitle: {
       fontSize: 13,
+      fontFamily: FontFamily.sans,
       color: c.textSecondary,
       paddingHorizontal: s.md,
       marginBottom: s.sm,
@@ -146,6 +148,7 @@ export function ModalRegistrarComida({
     },
     mealTabLabel: {
       fontSize: 11,
+      fontFamily: FontFamily.sansMedium,
       textAlign: 'center',
     },
     /* Separador */
@@ -166,13 +169,13 @@ export function ModalRegistrarComida({
     mealNombre: {
       flex: 1,
       fontSize: 15,
-      fontWeight: '600',
+      fontFamily: FontFamily.sansBold,
       color: c.textDisplay,
       marginRight: s.sm,
     },
     mealKcal: {
       fontSize: 12,
-      fontWeight: '600',
+      fontFamily: FontFamily.sansBold,
       color: c.textSecondary,
     },
     metricsRow: {
@@ -189,13 +192,13 @@ export function ModalRegistrarComida({
     totalLabel: {
       fontSize: 12,
       lineHeight: 15,
-      fontWeight: '600',
+      fontFamily: FontFamily.sansBold,
       color: c.textSecondary,
     },
     macroMetric: {
       fontSize: 12,
       lineHeight: 15,
-      fontWeight: '700',
+      fontFamily: FontFamily.sansBold,
     },
     macroProtein: {
       color: c.primary,
@@ -226,6 +229,7 @@ export function ModalRegistrarComida({
     itemNombre: {
       flex: 1,
       fontSize: 14,
+      fontFamily: FontFamily.sans,
       color: c.textDisplay,
       marginRight: s.sm,
     },
@@ -235,6 +239,7 @@ export function ModalRegistrarComida({
     emptyTxt: {
       flex: 1,
       fontSize: 13,
+      fontFamily: FontFamily.sans,
       color: c.textMuted,
       textAlign: 'center',
       textAlignVertical: 'center',
@@ -253,7 +258,7 @@ export function ModalRegistrarComida({
     addBtnTxt: {
       color: '#fff',
       fontSize: 15,
-      fontWeight: '600',
+      fontFamily: FontFamily.sansBold,
     },
   });
 
@@ -265,18 +270,20 @@ export function ModalRegistrarComida({
       onRequestClose={onClose}
       statusBarTranslucent
     >
-      {/* Buscador para reemplazar un item */}
-      <BuscadorAlimentos
-        visible={itemAReemplazar !== null}
-        onClose={() => setItemAReemplazar(null)}
-        onAlimentoSeleccionado={handleReemplazar}
-        userId={userId}
-      />
+      {/* Buscador para reemplazar un item — montado solo cuando se necesita */}
+      {itemAReemplazar !== null && (
+        <BuscadorAlimentos
+          visible
+          onClose={() => setItemAReemplazar(null)}
+          onAlimentoSeleccionado={handleReemplazar}
+          userId={userId}
+          alimentoInicial={{ food: itemAReemplazar.food, gramos: itemAReemplazar.gramos }}
+        />
+      )}
 
       {/* Toca fuera → cierra */}
       <Pressable style={st.overlay} onPress={onClose}>
-        <Pressable onPress={(e) => e.stopPropagation()}>
-          <View style={st.sheet}>
+        <Pressable style={st.sheet} onPress={(e) => e.stopPropagation()}>
             {/* Handle */}
             <View style={st.handle} />
 
@@ -416,9 +423,8 @@ export function ModalRegistrarComida({
             >
               <Text style={st.addBtnTxt}>+ Añadir alimento</Text>
             </Pressable>
-          </View>
+          </Pressable>
         </Pressable>
-      </Pressable>
     </Modal>
   );
 }

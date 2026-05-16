@@ -68,6 +68,9 @@ export function EntrenosListado() {
           marginBottom: s.md,
           overflow: 'hidden',
         },
+        cardPressed: {
+          opacity: 0.78,
+        },
         cardHeader: {
           flexDirection: 'row',
           alignItems: 'center',
@@ -79,7 +82,6 @@ export function EntrenosListado() {
         },
         headerLeft: { flex: 1, minWidth: 0 },
         fecha: { fontSize: 12, lineHeight: 16, fontFamily: f.mono, color: c.textSecondary, marginBottom: 4 },
-        nombrePress: { alignSelf: 'flex-start' },
         nombre: { ...ts.body, fontFamily: f.sansMedium, color: c.primary },
         dotsBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
         statsRow: {
@@ -262,17 +264,21 @@ export function EntrenosListado() {
           const hiddenCount = Math.max(0, item.totalEjercicios - 3);
           const title = item.nombre?.trim() || item.rutinaNombre?.trim() || 'Entreno';
           return (
-            <View style={styles.card}>
+            <Pressable
+              style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
+              onPress={() => router.push(`/(tabs)/(perfil)/sesion/${item.id}`)}
+              accessibilityRole="button"
+              accessibilityLabel={`Abrir entreno ${title}`}
+            >
               <View style={styles.cardHeader}>
                 <View style={styles.headerLeft}>
                   <Text style={styles.fecha}>{formatFecha(item.fecha)}</Text>
-                  <Pressable style={styles.nombrePress} onPress={() => router.push(`/(tabs)/(perfil)/sesion/${item.id}`)}>
-                    <Text style={styles.nombre}>{title}</Text>
-                  </Pressable>
+                  <Text style={styles.nombre}>{title}</Text>
                 </View>
                 <Pressable
                   style={styles.dotsBtn}
                   onPress={(event) => {
+                    event.stopPropagation();
                     setMenuAnchor({
                       x: event.nativeEvent.pageX,
                       y: event.nativeEvent.pageY,
@@ -309,14 +315,20 @@ export function EntrenosListado() {
                   </View>
                 ))}
                 {item.totalEjercicios > 3 ? (
-                  <Pressable style={styles.toggleMore} onPress={() => setExpandidos((p) => ({ ...p, [item.id]: !expanded }))}>
+                  <Pressable
+                    style={styles.toggleMore}
+                    onPress={(event) => {
+                      event.stopPropagation();
+                      setExpandidos((p) => ({ ...p, [item.id]: !expanded }));
+                    }}
+                  >
                     <Text style={styles.toggleMoreTxt}>
                       {expanded ? 'Ver menos' : `Ver ${hiddenCount} más ejercicios`}
                     </Text>
                   </Pressable>
                 ) : null}
               </View>
-            </View>
+            </Pressable>
           );
         }}
       />

@@ -32,7 +32,6 @@ export default function EntrenamientoLayout() {
       <Stack.Screen name="rutina/[id]" options={{ headerShown: false, animation: 'slide_from_right' }} />
       <Stack.Screen name="consulta-ejercicio" options={{ headerShown: false, animation: 'slide_from_right' }} />
       <Stack.Screen name="nueva-sesion" options={{ title: 'Nueva sesión', presentation: 'modal' }} />
-      <Stack.Screen name="sesion/[id]" options={{ title: 'Sesión' }} />
       <Stack.Screen name="ejercicio/[id]" options={{ title: 'Ejercicio' }} />
     </Stack>
   );

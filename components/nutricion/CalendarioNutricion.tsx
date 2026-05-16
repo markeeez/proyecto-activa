@@ -19,7 +19,9 @@ import {
   View,
 } from 'react-native';
 
+import { NutritionCalendarShareModal } from '@/components/nutricion/NutritionCalendarShareModal';
 import type { Theme } from '@/constants/theme';
+import { useAuth } from '@/hooks/useAuth';
 import { useResumenMes } from '@/hooks/useResumenMes';
 import { useTheme } from '@/hooks/useTheme';
 import {
@@ -45,6 +47,21 @@ export type CalendarioNutricionProps = {
 
 const DIAS_CABECERA = ['L', 'M', 'X', 'J', 'V', 'S', 'D'] as const;
 
+function textoCompartirCalendarioNutricion(
+  tituloMes: string,
+  estadoPorFecha: Map<string, EstadoDiaNutricion>,
+): string {
+  let dentro = 0;
+  let cerca = 0;
+  let sobre = 0;
+  estadoPorFecha.forEach((estado) => {
+    if (estado === 'dentro') dentro += 1;
+    if (estado === 'cerca') cerca += 1;
+    if (estado === 'sobre') sobre += 1;
+  });
+  return `Calendario de alimentación - ${tituloMes}\nDentro del objetivo: ${dentro}\nCerca del límite: ${cerca}\nSobre el objetivo: ${sobre}`;
+}
+
 export function CalendarioNutricion({
   visible,
   fechaActual,
@@ -52,8 +69,10 @@ export function CalendarioNutricion({
   onClose,
   onSeleccionarDia,
 }: CalendarioNutricionProps) {
-  const { c, f, ts, s, r } = useTheme();
+  const { c, f, ts, s, r, isDark } = useTheme();
+  const { user } = useAuth();
   const styles = useMemo(() => makeStyles(c, f, ts, s, r), [c, f, ts, s, r]);
+  const [modalShare, setModalShare] = useState(false);
 
   // El mes mostrado arranca en el de la fecha actual; cambia con las flechas.
   const [mesVista, setMesVista] = useState(() => {
@@ -81,6 +100,14 @@ export function CalendarioNutricion({
 
   const tituloMes = formatMesAñoES(mesVista.año, mesVista.mesIndex);
   const hoyIso = fechaHoyIsoLocal();
+  const mesShare = useMemo(
+    () => new Date(mesVista.año, mesVista.mesIndex, 1),
+    [mesVista.año, mesVista.mesIndex],
+  );
+  const fallbackMessageShare = useMemo(
+    () => textoCompartirCalendarioNutricion(tituloMes, estadoPorFecha),
+    [tituloMes, estadoPorFecha],
+  );
   const mesSiguiente = useMemo(
     () => añadirMeses(mesVista.año, mesVista.mesIndex, 1),
     [mesVista.año, mesVista.mesIndex],
@@ -236,14 +263,33 @@ export function CalendarioNutricion({
           <View style={styles.legendCard}>
             <Text style={styles.legendTitle}>Estado del día</Text>
             <View style={styles.legendRow}>
-              <LegendItem styles={styles} color={c.success} label="Dentro del objetivo" hint="0 a +10%" />
-              <LegendItem styles={styles} color={c.warning} label="Cerca del límite" hint="+10% a +25%" />
-              <LegendItem styles={styles} color={c.danger} label="Sobre el objetivo" hint="+25% o más" />
+              <LegendItem styles={styles} color={c.success} label="Dentro del objetivo" hint="-5% a +5%" />
+              <LegendItem styles={styles} color={c.warning} label="Cerca del límite" hint="< -5% o +5% a +15%" />
+              <LegendItem styles={styles} color={c.danger} label="Sobre el objetivo" hint="> +15%" />
               <LegendItem styles={styles} color={c.textMuted} label="Sin datos" />
             </View>
+            <Pressable
+              style={({ pressed }) => [styles.legendShareButton, pressed && { opacity: 0.7 }]}
+              onPress={() => setModalShare(true)}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Compartir calendario de nutrición"
+            >
+              <Ionicons name="share-outline" size={18} color={c.primary} />
+            </Pressable>
           </View>
         </View>
       </View>
+
+      <NutritionCalendarShareModal
+        visible={modalShare}
+        onClose={() => setModalShare(false)}
+        mes={mesShare}
+        estadoPorFecha={estadoPorFecha}
+        user={user}
+        initialDark={isDark}
+        fallbackMessage={fallbackMessageShare}
+      />
     </Modal>
   );
 }
@@ -426,9 +472,11 @@ function makeStyles(
       borderRadius: 999,
     },
     legendCard: {
+      position: 'relative',
       borderTopWidth: StyleSheet.hairlineWidth,
       borderTopColor: c.borderVisible,
       paddingTop: s.sm,
+      paddingRight: 38,
       gap: s.xs,
     },
     legendTitle: {
@@ -471,6 +519,19 @@ function makeStyles(
       fontFamily: f.mono,
       color: c.textMuted,
       letterSpacing: 0.4,
+    },
+    legendShareButton: {
+      position: 'absolute',
+      right: 0,
+      bottom: 0,
+      width: 32,
+      height: 32,
+      borderRadius: r.sm,
+      borderWidth: 1,
+      borderColor: c.borderVisible,
+      backgroundColor: c.surfaceElevated,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
   });
 }

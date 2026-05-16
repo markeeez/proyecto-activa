@@ -9,7 +9,12 @@ import { COMIDAS_PREDETERMINADAS } from '@/constants/comidasPredeterminadas';
 import { esDiaPasadoVsHoy } from '@/lib/fechaNutricion';
 import { supabase } from '@/lib/supabase';
 import { alimentosService } from '@/services/alimentos.service';
-import type { ComidaConAlimentos, ResumenDiarioNutricion } from '@/types/app.types';
+import type {
+  ComidaConAlimentos,
+  LineaCopiadaNutricion,
+  ResumenDiarioNutricion,
+  UltimaComidaAnteriorNutricion,
+} from '@/types/app.types';
 import type { NutritionLog, UserGoal } from '@/types/database.types';
 
 function normalizarNombre(s: string): string {
@@ -283,6 +288,90 @@ export const nutricionService = {
     });
 
     return totalesPorFecha;
+  },
+
+  async obtenerUltimaComidaAnterior(
+    userId: string,
+    fecha: string,
+    nombreComida: string,
+  ): Promise<UltimaComidaAnteriorNutricion | null> {
+    const nombreObjetivo = normalizarNombre(nombreComida);
+    if (!nombreObjetivo) return null;
+
+    const { data: logs, error: errLogs } = await supabase
+      .from('nutrition_logs')
+      .select('id, fecha')
+      .eq('user_id', userId)
+      .lt('fecha', fecha)
+      .order('fecha', { ascending: false })
+      .limit(60);
+    if (errLogs) throw errLogs;
+    if (!logs?.length) return null;
+
+    const logRows = logs as { id: string; fecha: string }[];
+    const logIds = logRows.map((log) => log.id);
+    const fechaPorLogId = new Map(logRows.map((log) => [log.id, log.fecha]));
+    const ordenLogId = new Map(logRows.map((log, index) => [log.id, index]));
+
+    const { data: meals, error: errMeals } = await supabase
+      .from('nutrition_log_meals')
+      .select(`
+        id,
+        log_id,
+        nombre,
+        orden,
+        is_default,
+        nutrition_log_items (
+          food_id,
+          gramos,
+          calorias_calculadas,
+          proteinas_calculadas,
+          carbos_calculados,
+          grasas_calculadas
+        )
+      `)
+      .in('log_id', logIds);
+    if (errMeals) throw errMeals;
+
+    const candidatas = ((meals ?? []) as any[])
+      .filter((meal) => {
+        const items = meal.nutrition_log_items ?? [];
+        return items.length > 0 && normalizarNombre(resolverNombreComida(meal)) === nombreObjetivo;
+      })
+      .sort((a, b) => {
+        const posA = ordenLogId.get(a.log_id) ?? Number.MAX_SAFE_INTEGER;
+        const posB = ordenLogId.get(b.log_id) ?? Number.MAX_SAFE_INTEGER;
+        if (posA !== posB) return posA - posB;
+        return Number(a.orden ?? 999) - Number(b.orden ?? 999);
+      });
+
+    const meal = candidatas[0];
+    if (!meal) return null;
+
+    const lineas: LineaCopiadaNutricion[] = (meal.nutrition_log_items ?? [])
+      .map((item: any) => {
+        const gramos = Number(item.gramos ?? 0);
+        const factor = gramos > 0 ? gramos / 100 : 1;
+        return {
+          foodId: item.food_id,
+          gramos,
+          food: {
+            calorias: Number(item.calorias_calculadas ?? 0) / factor,
+            proteinas: Number(item.proteinas_calculadas ?? 0) / factor,
+            carbohidratos: Number(item.carbos_calculados ?? 0) / factor,
+            grasas: Number(item.grasas_calculadas ?? 0) / factor,
+          },
+        };
+      })
+      .filter((linea: LineaCopiadaNutricion) => linea.foodId && linea.gramos > 0);
+
+    if (!lineas.length) return null;
+
+    return {
+      fecha: fechaPorLogId.get(meal.log_id) ?? '',
+      nombre: resolverNombreComida(meal),
+      lineas,
+    };
   },
 
   async actualizarOrdenComidas(logId: string, mealIdsEnOrden: string[]): Promise<void> {

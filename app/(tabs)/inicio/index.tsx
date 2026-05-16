@@ -28,7 +28,10 @@ import { supabase } from '@/lib/supabase';
 import { ModalRegistrarComida } from '@/components/ModalRegistrarComida';
 import { ModalRegistrarEntreno } from '@/components/ModalRegistrarEntreno';
 import { BuscadorAlimentos } from '@/components/nutricion/BuscadorAlimentos';
+import { DailyGoalShareModal } from '@/components/nutricion/DailyGoalShareModal';
+import { solicitarEntrenamientoTab } from '@/lib/entrenamientoTabEvents';
 import { emitNutricionLogActualizado } from '@/lib/nutricionEvents';
+import { calcularEstadoDia } from '@/lib/nutricionEstadoDia';
 import { alimentosService } from '@/services/alimentos.service';
 import { nutricionService } from '@/services/nutricion.service';
 import type { Food } from '@/types/database.types';
@@ -39,7 +42,7 @@ const GAUGE_RADIUS = (GAUGE_SIZE - GAUGE_STROKE) / 2;
 const GAUGE_CIRCUMFERENCE = 2 * Math.PI * GAUGE_RADIUS;
 const GAUGE_ARC_RATIO = 0.78;
 const GAUGE_ARC = GAUGE_CIRCUMFERENCE * GAUGE_ARC_RATIO;
-const GAUGE_START_ANGLE = 90 + ((1 - GAUGE_ARC_RATIO) * 360) / 2;
+const GAUGE_START_ANGLE = 135;
 
 /* ─────────────────────────────────────────────────────────────────────
    Sub-componentes
@@ -142,8 +145,23 @@ function formatearDuracionSegundos(totalSegundos: number): string {
   return minutosRestantes === 0 ? `${horas} h` : `${horas} h ${minutosRestantes} min`;
 }
 
+function textoCompartirObjetivoDiario({
+  kcalConsumed,
+  kcalTotal,
+  macros,
+}: {
+  kcalConsumed: number;
+  kcalTotal: number;
+  macros: { label: string; current: number; total: number }[];
+}): string {
+  const macroLines = macros
+    .map((m) => `${m.label}: ${Math.round(m.current)} / ${Math.round(m.total)} g`)
+    .join('\n');
+  return `Objetivo diario\n${Math.round(kcalConsumed)} / ${Math.round(kcalTotal)} kcal\n${macroLines}`;
+}
+
 export default function HomeScreen() {
-  const { c, s } = useTheme();
+  const { c, s, isDark } = useTheme();
   const insets   = useSafeAreaInsets();
   const { user } = useAuth();
 
@@ -314,6 +332,7 @@ export default function HomeScreen() {
 
   const [modalComidaVisible, setModalComidaVisible] = useState(false);
   const [modalEntrenoVisible, setModalEntrenoVisible] = useState(false);
+  const [modalCompartirObjetivoVisible, setModalCompartirObjetivoVisible] = useState(false);
   const [mealIdBuscador, setMealIdBuscador] = useState<string | null>(null);
 
   const registrarAlimentoDesdeInicio = useCallback(
@@ -341,8 +360,12 @@ export default function HomeScreen() {
   const kcalRestantes = Math.max(0, kcalTotal - kcalConsumed);
   const kcalProgress  = kcalTotal > 0 ? Math.min(kcalConsumed / kcalTotal, 1) : 0;
   const gaugeProgress = Math.max(0.03, kcalProgress);
-  const diferenciaKcal = kcalConsumed - kcalTotal;
-  const colorGauge = Math.abs(diferenciaKcal) > 300 ? c.warningKcal : c.primary;
+  const estadoKcal = calcularEstadoDia(kcalConsumed, kcalTotal);
+  const colorGauge =
+    estadoKcal === 'dentro' ? c.success
+    : estadoKcal === 'cerca' ? c.warning
+    : estadoKcal === 'sobre' ? c.danger
+    : c.primary;
 
   const macros = [
     { key: 'proteinas', label: 'Proteínas',     current: resumen?.totalProteinas ?? 0, total: objetivos?.proteinas_objetivo ?? 0, color: c.primary  },
@@ -465,9 +488,20 @@ export default function HomeScreen() {
 
           <View style={st.macrosPanel}>
             <View style={[st.goalBlock, { borderBottomColor: c.borderVisible }]}>
-              <Text style={[st.summaryEyebrow, { backgroundColor: c.primaryBg, color: c.primary }]}>
-                OBJETIVO DIARIO
-              </Text>
+              <View style={st.goalHeaderRow}>
+                <Text style={[st.summaryEyebrow, { backgroundColor: c.primaryBg, color: c.primary }]}>
+                  OBJETIVO DIARIO
+                </Text>
+                <TouchableOpacity
+                  activeOpacity={0.7}
+                  style={[st.goalShareButton, { backgroundColor: c.surfaceElevated, borderColor: c.border }]}
+                  onPress={() => setModalCompartirObjetivoVisible(true)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Compartir objetivo diario"
+                >
+                  <Ionicons name="share-outline" size={17} color={c.textDisplay} />
+                </TouchableOpacity>
+              </View>
               <Text style={[st.summaryValue, { color: c.textDisplay }]}>
                 {Math.round(kcalTotal)} <Text style={[st.summaryUnit, { color: c.text }]}>kcal</Text>
               </Text>
@@ -523,7 +557,10 @@ export default function HomeScreen() {
             Icon: WorkoutNavIcon,
             ruta: '/(tabs)/(entrenamiento)' as const,
             onPlus: () => setModalEntrenoVisible(true),
-            onPress: () => router.push({ pathname: '/(tabs)/(entrenamiento)', params: { tab: 'rutinas' } } as any),
+            onPress: () => {
+              solicitarEntrenamientoTab('rutinas');
+              router.push({ pathname: '/(tabs)/(entrenamiento)', params: { tab: 'rutinas' } } as any);
+            },
           },
         ].map(({ Icon, ...a }) => (
           <TouchableOpacity
@@ -551,7 +588,15 @@ export default function HomeScreen() {
       <View style={[st.card, { backgroundColor: c.surface, borderColor: c.border, marginHorizontal: ph, marginBottom: s.md }]}>
         <View style={[row, { justifyContent: 'space-between', marginBottom: 12 }]}>
           <Text style={[st.cardTitle, { color: c.textDisplay }]}>Último entrenamiento</Text>
-          <TouchableOpacity onPress={() => router.push('/(tabs)/(entrenamiento)')}>
+          <TouchableOpacity
+            onPress={() => {
+              solicitarEntrenamientoTab('entrenos');
+              router.push({
+                pathname: '/(tabs)/(entrenamiento)',
+                params: { tab: 'entrenos' },
+              } as any);
+            }}
+          >
             <Text style={[st.seeAll, { color: c.primary }]}>Ver todo</Text>
           </TouchableOpacity>
         </View>
@@ -570,7 +615,16 @@ export default function HomeScreen() {
 
         {/* Con datos reales */}
         {ultimoEntreno != null && ultimoEntreno !== undefined && (
-          <View style={[row, { alignItems: 'center', gap: 14 }]}>
+          <TouchableOpacity
+            style={[row, { alignItems: 'center', gap: 14 }]}
+            activeOpacity={0.7}
+            onPress={() => router.push({
+              pathname: '/(tabs)/inicio/sesion/[id]',
+              params: { id: ultimoEntreno.id },
+            } as any)}
+            accessibilityRole="button"
+            accessibilityLabel={`Abrir entrenamiento ${ultimoEntreno.nombre}`}
+          >
             {/* Icono */}
             <View style={[st.workoutIcon, { backgroundColor: c.primaryBg }]}>
               <WorkoutNavIcon width={28} height={28} color={c.primary} />
@@ -578,17 +632,9 @@ export default function HomeScreen() {
 
             {/* Info */}
             <View style={{ flex: 1 }}>
-              <TouchableOpacity
-                onPress={() => router.push({
-                  pathname: '/(tabs)/inicio/sesion/[id]',
-                  params: { id: ultimoEntreno.id },
-                } as any)}
-                activeOpacity={0.7}
-              >
-                <Text style={[st.workoutName, { color: c.textDisplay }]} numberOfLines={1}>
-                  {ultimoEntreno.nombre}
-                </Text>
-              </TouchableOpacity>
+              <Text style={[st.workoutName, { color: c.textDisplay }]} numberOfLines={1}>
+                {ultimoEntreno.nombre}
+              </Text>
               {ultimoEntreno.musculos ? (
                 <Text style={[st.workoutMuscles, { color: c.textSecondary }]} numberOfLines={1}>
                   {ultimoEntreno.musculos}
@@ -607,7 +653,7 @@ export default function HomeScreen() {
               <Text style={[st.ejNum,   { color: c.primary }]}>{ultimoEntreno.numEjercicios}</Text>
               <Text style={[st.ejLabel, { color: c.primary }]}>ej.</Text>
             </View>
-          </View>
+          </TouchableOpacity>
         )}
       </View>
 
@@ -714,6 +760,23 @@ export default function HomeScreen() {
       <ModalRegistrarEntreno
         visible={modalEntrenoVisible}
         onClose={() => setModalEntrenoVisible(false)}
+      />
+
+      {/* ── Modal compartir objetivo diario ────────────────────────── */}
+      <DailyGoalShareModal
+        visible={modalCompartirObjetivoVisible}
+        onClose={() => setModalCompartirObjetivoVisible(false)}
+        kcalConsumed={kcalConsumed}
+        kcalTotal={kcalTotal}
+        macros={macros.map((m) => ({
+          key: m.key,
+          label: m.label,
+          current: m.current,
+          total: m.total,
+        }))}
+        user={user}
+        initialDark={isDark}
+        fallbackMessage={textoCompartirObjetivoDiario({ kcalConsumed, kcalTotal, macros })}
       />
 
     </View>
@@ -840,6 +903,20 @@ const st = StyleSheet.create({
     paddingBottom: 6,
     marginBottom: 4,
     gap: 3,
+  },
+  goalHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  goalShareButton: {
+    width: 30,
+    height: 30,
+    borderRadius: 10,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   summaryEyebrow: {
     fontFamily: FontFamily.monoBold,

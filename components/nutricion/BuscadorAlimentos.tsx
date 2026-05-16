@@ -8,6 +8,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
@@ -28,6 +29,12 @@ export type BuscadorAlimentosProps = {
   onAlimentoSeleccionado: (food: Food, gramos: number) => void | Promise<void>;
   userId?: string;
   onRegistrarPorFoto?: () => void;
+  /**
+   * Si se pasa, el buscador omite la lista de búsqueda y abre directamente el
+   * modal de cantidad con este alimento preseleccionado. Útil para editar la
+   * cantidad de un alimento ya registrado sin tener que volver a buscarlo.
+   */
+  alimentoInicial?: { food: Food; gramos: number } | null;
 };
 
 function storageKeyUltimaBusqueda(userId: string) {
@@ -71,6 +78,7 @@ export function BuscadorAlimentos({
   onAlimentoSeleccionado,
   userId,
   onRegistrarPorFoto,
+  alimentoInicial,
 }: BuscadorAlimentosProps) {
   const { c, f, ts, s, r } = useTheme();
   const styles = useMemo(() => makeStyles(c, f, ts, s, r), [c, f, ts, s, r]);
@@ -91,10 +99,11 @@ export function BuscadorAlimentos({
   const [guardando, setGuardando] = useState(false);
   const [okMsg, setOkMsg] = useState<string | null>(null);
   const [crearAlimentoModo, setCrearAlimentoModo] = useState<'foto' | 'manual' | 'escaner' | null>(null);
-  const [inputCantidadEnfocado, setInputCantidadEnfocado] = useState(false);
   const busquedaVersionRef = useRef(0);
 
   const favStorageKey = userId ? `activa_food_favorites_${userId}` : '';
+
+  const modoSoloCantidad = alimentoInicial != null;
 
   useEffect(() => {
     if (visible) return;
@@ -113,8 +122,15 @@ export function BuscadorAlimentos({
     setGramos('100');
     setGuardando(false);
     setCrearAlimentoModo(null);
-    setInputCantidadEnfocado(false);
   }, [visible]);
+
+  // Modo "editar cantidad": al abrirse, pre-selecciona el alimento y sus gramos
+  // para saltar directo al modal de cantidad sin pasar por la lista de búsqueda.
+  useEffect(() => {
+    if (!visible || !alimentoInicial) return;
+    setFoodSeleccionado(alimentoInicial.food);
+    setGramos(String(Math.round(alimentoInicial.gramos)));
+  }, [visible, alimentoInicial]);
 
   const alimentoCreadoOResuelto = (food: Food) => {
     if (food.is_custom && userId && food.created_by === userId) {
@@ -331,6 +347,11 @@ export function BuscadorAlimentos({
       await onAlimentoSeleccionado(foodSeleccionado, gramosNumero);
       setFoodSeleccionado(null);
       setGramos('100');
+      if (modoSoloCantidad) {
+        // En modo edición de cantidad cerramos al confirmar, sin permanecer abiertos.
+        onClose();
+        return;
+      }
       setOkMsg('Alimento agregado. Puedes seguir añadiendo más.');
       if (userId) {
         alimentosService.obtenerAlimentosCreados(userId).then(setCreados).catch(() => {});
@@ -449,10 +470,18 @@ export function BuscadorAlimentos({
     };
   }, [foodSeleccionado, gramosSeleccionados]);
 
+  const cerrarModalCantidad = () => {
+    setFoodSeleccionado(null);
+    if (modoSoloCantidad) onClose();
+  };
+
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.backdrop}>
-        <Pressable style={styles.dismissArea} onPress={foodSeleccionado ? undefined : onClose} />
+        {modoSoloCantidad ? null : (
+          <Pressable style={styles.dismissArea} onPress={foodSeleccionado ? undefined : onClose} />
+        )}
+        {modoSoloCantidad ? null : (
         <View style={styles.root}>
           {/* ── Header: título + X ── */}
           <View style={styles.titleRow}>
@@ -593,23 +622,27 @@ export function BuscadorAlimentos({
               <Text style={styles.quickActionText}>Escanear código</Text>
             </Pressable>
           </View>
+        </View>
+        )}
 
-          <Modal visible={!!foodSeleccionado} transparent animationType="fade" onRequestClose={() => setFoodSeleccionado(null)}>
-            <Pressable style={styles.modalBackdrop} onPress={() => setFoodSeleccionado(null)}>
-              <View
-                style={[
-                  styles.modalCard,
-                  inputCantidadEnfocado && styles.modalCardKeyboardVisible,
-                ]}
-                onStartShouldSetResponder={() => true}
-                onResponderRelease={(e) => e.stopPropagation()}
-              >
-                <Pressable style={styles.modalCloseBtn} onPress={() => setFoodSeleccionado(null)}>
-                  <Text style={styles.closeText}>X</Text>
-                </Pressable>
+          <Modal visible={!!foodSeleccionado} transparent animationType="fade" onRequestClose={cerrarModalCantidad}>
+            <KeyboardAvoidingView
+              style={styles.modalKeyboardAvoiding}
+              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            >
+              <Pressable style={styles.modalBackdrop} onPress={cerrarModalCantidad}>
+                <Pressable
+                  style={styles.modalCard}
+                  onPress={(e) => e.stopPropagation()}
+                >
+                  <Pressable style={styles.modalCloseBtn} onPress={cerrarModalCantidad} hitSlop={6}>
+                    <Ionicons name="close" size={16} color={c.textSecondary} />
+                  </Pressable>
 
                 <View style={styles.modalHeaderBlock}>
-                  <Text style={styles.modalTitle}>Agregar alimento</Text>
+                  <Text style={styles.modalTitle}>
+                    {modoSoloCantidad ? 'Editar cantidad' : 'Agregar alimento'}
+                  </Text>
                   <Text style={styles.modalSubtitle}>
                     Ajusta la cantidad para ver los valores nutricionales
                   </Text>
@@ -674,8 +707,6 @@ export function BuscadorAlimentos({
                       placeholderTextColor={c.textMuted}
                       maxLength={5}
                       selectTextOnFocus
-                      onFocus={() => setInputCantidadEnfocado(true)}
-                      onBlur={() => setInputCantidadEnfocado(false)}
                     />
                     <Text style={styles.gramsSuffix}>g</Text>
                   </View>
@@ -685,23 +716,26 @@ export function BuscadorAlimentos({
                 </View>
 
                 <View style={styles.modalActions}>
-                  <Pressable style={styles.cancelBtn} onPress={() => setFoodSeleccionado(null)}>
+                  <Pressable style={styles.cancelBtn} onPress={cerrarModalCantidad}>
                     <Text style={styles.cancelText}>Cancelar</Text>
                   </Pressable>
                   <Pressable
-                    style={styles.confirmBtn}
+                    style={[styles.confirmBtn, guardando && styles.confirmBtnDisabled]}
                     onPress={confirmarAgregar}
                     disabled={guardando}
                   >
                     {guardando ? (
                       <ActivityIndicator color={c.background} />
                     ) : (
-                      <Text style={styles.confirmText}>Agregar y seguir</Text>
+                      <Text style={styles.confirmText}>
+                        {modoSoloCantidad ? 'Guardar' : 'Agregar y seguir'}
+                      </Text>
                     )}
                   </Pressable>
-                </View>
-              </View>
-            </Pressable>
+                  </View>
+                </Pressable>
+              </Pressable>
+            </KeyboardAvoidingView>
           </Modal>
 
           <CrearAlimentoModal
@@ -713,7 +747,6 @@ export function BuscadorAlimentos({
             esFavoritoAlimento={foodEsFavorito}
             onToggleFavorito={toggleFavorito}
           />
-        </View>
       </View>
     </Modal>
   );
@@ -1016,6 +1049,9 @@ function makeStyles(
     },
 
     /* ── Modal de cantidad ── */
+    modalKeyboardAvoiding: {
+      flex: 1,
+    },
     modalBackdrop: {
       flex: 1,
       backgroundColor: 'rgba(0,0,0,0.5)',
@@ -1031,9 +1067,6 @@ function makeStyles(
       paddingTop: s.md,
       paddingBottom: s.md,
       gap: s.md,
-    },
-    modalCardKeyboardVisible: {
-      transform: [{ translateY: -72 }],
     },
     modalCloseBtn: {
       position: 'absolute',
@@ -1191,18 +1224,13 @@ function makeStyles(
       justifyContent: 'center',
       minWidth: 92,
     },
+    confirmBtnDisabled: {
+      opacity: 0.6,
+    },
     confirmText: {
       fontSize: 13,
       fontFamily: f.sansBold,
       color: c.textOnPrimary,
-    },
-
-    /* ── Escáner ── */
-    closeText: {
-      fontSize: 13,
-      lineHeight: 16,
-      fontFamily: f.sansBold,
-      color: c.textSecondary,
     },
   });
 }

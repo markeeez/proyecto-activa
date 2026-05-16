@@ -27,6 +27,12 @@ export interface LineaCopiadaNutricion {
   food: { calorias: number; proteinas: number; carbohidratos: number; grasas: number };
 }
 
+export interface UltimaComidaAnteriorNutricion {
+  fecha: string;
+  nombre: string;
+  lineas: LineaCopiadaNutricion[];
+}
+
 /** Comida del día (fila nutrition_log_meals + items) */
 export interface ComidaConAlimentos {
   mealId: string;

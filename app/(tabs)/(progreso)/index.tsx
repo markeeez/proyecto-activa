@@ -18,6 +18,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Bar, CartesianChart, Line } from 'victory-native';
 
 import ProgressNavIcon from '@/assets/images/progress_nav_icon.svg';
+import { ProgresoNutricionShareModal } from '@/components/progreso/ProgresoNutricionShareModal';
+import { ProgresoPesoShareModal } from '@/components/progreso/ProgresoPesoShareModal';
 import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from '@/hooks/useTheme';
 import {
@@ -151,6 +153,22 @@ function textoTituloSemanaActual(metrica: MetricaNut, valor: number): string {
 }
 
 /** Barras nutrición: x = índice 0..n-1 (único), semanaInicio = lunes ISO para etiqueta. */
+function textoCompartirNutricionProgreso(
+  metrica: MetricaNut,
+  valorPromedio: number,
+  rango: RangoFiltro,
+): string {
+  const unidad = metrica === 'kcal' ? 'kcal' : 'g';
+  return `Consumo calórico\n${Math.round(valorPromedio).toLocaleString('es-ES')} ${unidad} de promedio diario\n${FILTRO_LABELS[rango]}`;
+}
+
+function textoCompartirPesoProgreso(pesoGuardado: number | null, rango: RangoFiltro): string {
+  const peso = pesoGuardado != null
+    ? `${pesoGuardado.toLocaleString('es-ES', { maximumFractionDigits: 1 })} kg`
+    : 'Sin peso registrado hoy';
+  return `Peso corporal\nHoy: ${peso}\n${FILTRO_LABELS[rango]}`;
+}
+
 type FilaNutChart = { x: number; y: number; label: string };
 
 /**
@@ -338,6 +356,9 @@ export default function ProgresoIndex() {
   const [planActual, setPlanActual] = useState<PlanActual | null>(null);
   const [progresoPeso, setProgresoPeso] = useState<ProgresoPeso | null>(null);
   const [cargandoPlan, setCargandoPlan] = useState(false);
+
+  const [shareNutAbierto, setShareNutAbierto] = useState(false);
+  const [sharePesoAbierto, setSharePesoAbierto] = useState(false);
 
   const hoyIso = fechaHoyIsoLocal();
 
@@ -651,7 +672,18 @@ export default function ProgresoIndex() {
           accessibilityLabel={textoTituloSemanaActual(metricaNut, valorPromedioNutricion)}
         >
           <View style={styles.rowTitleFiltro}>
-            <Text style={styles.tituloDestacadoNut} numberOfLines={1}>Consumo calórico</Text>
+            <View style={styles.titleShareGroup}>
+              <Text style={[styles.tituloDestacadoNut, styles.tituloShareText]} numberOfLines={1}>Consumo calórico</Text>
+              <Pressable
+                style={({ pressed }) => [styles.titleShareButton, pressed && { opacity: 0.7 }]}
+                onPress={() => setShareNutAbierto(true)}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Compartir consumo calórico"
+              >
+                <Ionicons name="share-outline" size={15} color={c.primary} />
+              </Pressable>
+            </View>
             <Pressable
               onPress={(event) => abrirMenuFiltro(event, 'nutricion')}
               style={styles.filtroPill}
@@ -724,7 +756,18 @@ export default function ProgresoIndex() {
         {/* —— Peso —— */}
         <View style={[styles.section, styles.blockPeso]}>
           <View style={styles.rowTitleFiltro}>
-            <Text style={styles.tituloDestacadoNut} numberOfLines={1}>Peso corporal</Text>
+            <View style={styles.titleShareGroup}>
+              <Text style={[styles.tituloDestacadoNut, styles.tituloShareText]} numberOfLines={1}>Peso corporal</Text>
+              <Pressable
+                style={({ pressed }) => [styles.titleShareButton, pressed && { opacity: 0.7 }]}
+                onPress={() => setSharePesoAbierto(true)}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Compartir peso corporal"
+              >
+                <Ionicons name="share-outline" size={15} color={c.primary} />
+              </Pressable>
+            </View>
             <Pressable
               onPress={(event) => abrirMenuFiltro(event, 'peso')}
               style={styles.filtroPillPeso}
@@ -1011,6 +1054,29 @@ export default function ProgresoIndex() {
           </View>
         </View>
       ) : null}
+
+      <ProgresoNutricionShareModal
+        visible={shareNutAbierto}
+        onClose={() => setShareNutAbierto(false)}
+        datos={datosBarNut}
+        metrica={metricaNut}
+        rango={rangoNutricion}
+        promedio={valorPromedioNutricion}
+        username={`@${perfilUsername?.trim() || user?.email?.split('@')[0] || 'usuario'}`}
+        initialDark={isDark}
+        fallbackMessage={textoCompartirNutricionProgreso(metricaNut, valorPromedioNutricion, rangoNutricion)}
+      />
+
+      <ProgresoPesoShareModal
+        visible={sharePesoAbierto}
+        onClose={() => setSharePesoAbierto(false)}
+        datos={datosLineaPeso}
+        rango={rangoPeso}
+        pesoHoy={pesoGuardado}
+        username={`@${perfilUsername?.trim() || user?.email?.split('@')[0] || 'usuario'}`}
+        initialDark={isDark}
+        fallbackMessage={textoCompartirPesoProgreso(pesoGuardado, rangoPeso)}
+      />
     </View>
   );
 }
@@ -1368,6 +1434,25 @@ function makeStyles(
       ...ts.subheading,
       fontFamily: f.sansBold,
       color: c.textDisplay,
+    },
+    tituloShareText: {
+      flex: 0,
+      flexShrink: 1,
+    },
+    titleShareGroup: {
+      flex: 1,
+      minWidth: 0,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+    },
+    titleShareButton: {
+      width: 24,
+      height: 24,
+      borderRadius: r.technical,
+      alignItems: 'center',
+      justifyContent: 'center',
+      flexShrink: 0,
     },
     filtroPill: {
       flexDirection: 'row',

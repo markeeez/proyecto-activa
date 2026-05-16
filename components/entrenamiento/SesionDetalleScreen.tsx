@@ -23,6 +23,7 @@ import KmRecordIcon from '@/assets/images/km_record_trophy_icon.svg';
 import PrRecordIcon from '@/assets/images/pr_trophy_icon.svg';
 import TimeRecordIcon from '@/assets/images/time_record_trophy_icon.svg';
 import VolumeRecordIcon from '@/assets/images/volume_record_trophy_icon.svg';
+import { WorkoutShareModal } from '@/components/entrenamiento/WorkoutShareModal';
 import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from '@/hooks/useTheme';
 import {
@@ -55,7 +56,7 @@ function formatFechaCabecera(ymd: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-function formatHora(iso: string | null): string {
+function _formatHora(iso: string | null): string {
   if (!iso) return '—';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '—';
@@ -201,6 +202,21 @@ function formatKm(km: number | null | undefined): string {
   return Number(km).toLocaleString('es-ES', { maximumFractionDigits: 2 });
 }
 
+function textoCompartirSesion(
+  detalle: DetalleSesion,
+  tituloSesion: string,
+  kcalEstimadas: number | null,
+): string {
+  return [
+    tituloSesion,
+    formatFechaCabecera(detalle.fecha),
+    `Horario: ${_formatHora(detalle.hora_inicio)} - ${_formatHora(detalle.hora_fin)}`,
+    `Duración: ${formatDuracionSesion(detalle.hora_inicio, detalle.hora_fin)}`,
+    `Ejercicios: ${detalle.ejercicios.length}`,
+    `Kcal: ${kcalEstimadas != null ? `≈ ${kcalEstimadas}` : '-'}`,
+  ].join('\n');
+}
+
 const TIPOS_SERIE_LEYENDA = [
   { siglas: 'LIN', nombre: 'Lineal', desc: 'Serie estándar progresiva' },
   { siglas: 'WU', nombre: 'Warm Up', desc: 'Serie de calentamiento, no cuenta para el volumen' },
@@ -219,7 +235,7 @@ export default function DetalleSesionPantalla() {
     router.back();
   }, [router]);
   const insets = useSafeAreaInsets();
-  const { c, f, ts, s, r } = useTheme();
+  const { c, f, ts, s, r, isDark } = useTheme();
   const { user } = useAuth();
 
   const [detalle, setDetalle] = useState<DetalleSesion | null>(null);
@@ -227,6 +243,7 @@ export default function DetalleSesionPantalla() {
   const [error, setError] = useState<string | null>(null);
   const [recordEvents, setRecordEvents] = useState<RecordEvent[]>([]);
   const [modalEliminar, setModalEliminar] = useState(false);
+  const [modalCompartir, setModalCompartir] = useState(false);
   const [eliminando, setEliminando] = useState(false);
   const [modalTipos, setModalTipos] = useState(false);
   const [pesoKg, setPesoKg] = useState<number | null>(null);
@@ -315,6 +332,27 @@ export default function DetalleSesionPantalla() {
           fontFamily: f.sansMedium,
           color: c.textDisplay,
           textAlign: 'center',
+        },
+        headerTitleInline: {
+          flex: 0,
+          flexShrink: 1,
+          maxWidth: '82%',
+        },
+        headerTitleWrap: {
+          flex: 1,
+          minWidth: 0,
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 7,
+        },
+        headerShareBtn: {
+          width: 28,
+          height: 28,
+          borderRadius: r.technical,
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexShrink: 0,
         },
         gapHeaderMetrics: {
           height: 14,
@@ -1101,9 +1139,20 @@ export default function DetalleSesionPantalla() {
           >
             <Ionicons name="chevron-back" size={26} color={c.textDisplay} />
           </Pressable>
-          <Text style={styles.headerTitle} numberOfLines={1}>
-            {tituloSesion}
-          </Text>
+          <View style={styles.headerTitleWrap}>
+            <Text style={[styles.headerTitle, styles.headerTitleInline]} numberOfLines={1}>
+              {tituloSesion}
+            </Text>
+            <Pressable
+              style={({ pressed }) => [styles.headerShareBtn, pressed && { opacity: 0.7 }]}
+              onPress={() => setModalCompartir(true)}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Compartir entreno"
+            >
+              <Ionicons name="share-outline" size={17} color={c.primary} />
+            </Pressable>
+          </View>
           <View style={styles.headerSide}>
             {eliminando ? (
               <ActivityIndicator size="small" color={c.danger} />
@@ -1120,6 +1169,17 @@ export default function DetalleSesionPantalla() {
             )}
           </View>
         </View>
+
+        <WorkoutShareModal
+          visible={modalCompartir}
+          onClose={() => setModalCompartir(false)}
+          detalle={detalle}
+          tituloSesion={tituloSesion}
+          kcalEstimadas={kcalEstimadas}
+          user={user}
+          initialDark={isDark}
+          fallbackMessage={textoCompartirSesion(detalle, tituloSesion, kcalEstimadas)}
+        />
 
         <Modal
           visible={modalEliminar}
