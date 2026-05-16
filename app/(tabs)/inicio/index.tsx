@@ -42,7 +42,7 @@ const GAUGE_RADIUS = (GAUGE_SIZE - GAUGE_STROKE) / 2;
 const GAUGE_CIRCUMFERENCE = 2 * Math.PI * GAUGE_RADIUS;
 const GAUGE_ARC_RATIO = 0.78;
 const GAUGE_ARC = GAUGE_CIRCUMFERENCE * GAUGE_ARC_RATIO;
-const GAUGE_START_ANGLE = 135;
+const GAUGE_START_ANGLE = 90 + ((1 - GAUGE_ARC_RATIO) * 360) / 2;
 
 /* ─────────────────────────────────────────────────────────────────────
    Sub-componentes

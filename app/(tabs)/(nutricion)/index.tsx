@@ -98,7 +98,9 @@ function KcalRing({
   const center = size / 2;
   const radius = 36;
   const circumference = 2 * Math.PI * radius;
-  const arc = circumference * 0.78;
+  const arcRatio = 0.78;
+  const arc = circumference * arcRatio;
+  const startAngle = 90 + ((1 - arcRatio) * 360) / 2;
   const progress = pct(actual, objetivo);
 
   return (
@@ -113,7 +115,7 @@ function KcalRing({
           strokeWidth={9}
           strokeLinecap="round"
           strokeDasharray={`${arc} ${circumference}`}
-          transform={`rotate(135 ${center} ${center})`}
+          transform={`rotate(${startAngle} ${center} ${center})`}
         />
         <Circle
           cx={center}
@@ -125,7 +127,7 @@ function KcalRing({
           strokeLinecap="round"
           strokeDasharray={`${arc} ${circumference}`}
           strokeDashoffset={arc * (1 - progress)}
-          transform={`rotate(135 ${center} ${center})`}
+          transform={`rotate(${startAngle} ${center} ${center})`}
         />
       </Svg>
       <View style={styles.goalKcalCenter}>
