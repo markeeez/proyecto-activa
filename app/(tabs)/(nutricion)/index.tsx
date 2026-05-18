@@ -25,8 +25,8 @@ import { MealShareModal } from '@/components/nutricion/MealShareModal';
 import { SortableMealList } from '@/components/SortableMealList';
 import { GlowButton } from '@/components/ui/GlowButton';
 
-import LogoDark from '@/assets/images/logo_sb.svg';
-import LogoLight from '@/assets/images/logo_light_sb.svg';
+import LogoDark from '@/assets/images/logos/logo_sb.svg';
+import LogoLight from '@/assets/images/logos/logo_light_sb.svg';
 import { COMIDAS_PREDETERMINADAS } from '@/constants/comidasPredeterminadas';
 import { useComidaPortapapeles } from '@/context/ComidaPortapapelesContext';
 import { useAuth } from '@/hooks/useAuth';

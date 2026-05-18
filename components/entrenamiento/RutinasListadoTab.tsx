@@ -20,8 +20,8 @@ import {
   View,
 } from 'react-native';
 
-import VLogoLight from '@/assets/images/logo_light_sb.svg';
-import VLogoDark from '@/assets/images/logo_sb.svg';
+import VLogoLight from '@/assets/images/logos/logo_light_sb.svg';
+import VLogoDark from '@/assets/images/logos/logo_sb.svg';
 import { useEntreno } from '@/context/EntrenoContext';
 import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from '@/hooks/useTheme';

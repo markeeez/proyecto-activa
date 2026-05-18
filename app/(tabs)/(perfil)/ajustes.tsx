@@ -17,9 +17,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Stack } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useThemeMode } from '@/context/ThemeContext';
 import type { Theme } from '@/constants/theme';
 import { useTimerDescanso, type ModoDescanso } from '@/hooks/useTimerDescanso';
 import { useTheme } from '@/hooks/useTheme';
@@ -206,6 +207,7 @@ function OpcionRadio({ activa, titulo, descripcion, onPress, styles, c, f }: Opc
 
 export default function Ajustes() {
   const insets = useSafeAreaInsets();
+  const { isDark, setMode } = useThemeMode();
   const { c, f, ts, s, r } = useTheme();
   const styles = useMemo(() => makeStyles(c, f, ts, s, r), [c, f, ts, s, r]);
 
@@ -245,6 +247,27 @@ export default function Ajustes() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[styles.scroll, { paddingTop: s.md, paddingBottom: insets.bottom + 40 }]}
       >
+        {/* ── APARIENCIA ── */}
+        <View style={styles.seccion}>
+          <View style={styles.seccionHeader}>
+            <Ionicons name="color-palette-outline" size={15} color={c.primary} />
+            <Text style={styles.seccionTitulo}>Apariencia</Text>
+          </View>
+
+          <View style={styles.fila}>
+            <View style={styles.filaTextoWrap}>
+              <Text style={styles.filaTitulo}>Modo oscuro</Text>
+              <Text style={styles.filaSubtitulo}>{isDark ? 'Oscuro' : 'Claro'}</Text>
+            </View>
+            <Switch
+              value={isDark}
+              onValueChange={(value) => setMode(value ? 'dark' : 'light')}
+              trackColor={{ false: c.surfaceElevated, true: c.primaryBg }}
+              thumbColor={c.primary}
+            />
+          </View>
+        </View>
+
         {/* ── ENTRENAMIENTO ── */}
         <View style={styles.seccion}>
           <View style={styles.seccionHeader}>
@@ -318,7 +341,6 @@ export default function Ajustes() {
         </View>
 
         {/* ── OTRAS SECCIONES (pendientes) ── */}
-        {/* TODO: Selector de tema (claro/oscuro/sistema) */}
         {/* TODO: Selector de unidades (kg/cm o lb/in) */}
         {/* TODO: Toggle notificación recordatorio diario */}
         {/* TODO: Opción "Cambiar contraseña" */}

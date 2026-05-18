@@ -18,8 +18,8 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import LogoLightSb from '@/assets/images/logo_light_sb.svg';
-import LogoDarkSb from '@/assets/images/logo_sb.svg';
+import LogoLightSb from '@/assets/images/logos/logo_light_sb.svg';
+import LogoDarkSb from '@/assets/images/logos/logo_sb.svg';
 import type { Theme } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from '@/hooks/useTheme';

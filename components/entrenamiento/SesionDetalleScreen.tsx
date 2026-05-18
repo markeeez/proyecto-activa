@@ -19,10 +19,10 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import KmRecordIcon from '@/assets/images/km_record_trophy_icon.svg';
-import PrRecordIcon from '@/assets/images/pr_trophy_icon.svg';
-import TimeRecordIcon from '@/assets/images/time_record_trophy_icon.svg';
-import VolumeRecordIcon from '@/assets/images/volume_record_trophy_icon.svg';
+import KmRecordIcon from '@/assets/images/trophies/km_record_trophy_icon.svg';
+import PrRecordIcon from '@/assets/images/trophies/pr_trophy_icon.svg';
+import TimeRecordIcon from '@/assets/images/trophies/time_record_trophy_icon.svg';
+import VolumeRecordIcon from '@/assets/images/trophies/volume_record_trophy_icon.svg';
 import { WorkoutShareModal } from '@/components/entrenamiento/WorkoutShareModal';
 import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from '@/hooks/useTheme';

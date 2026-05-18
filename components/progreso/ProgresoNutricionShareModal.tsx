@@ -16,10 +16,10 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { captureRef } from 'react-native-view-shot';
 import { Bar, CartesianChart } from 'victory-native';
 
-import LogoDark from '@/assets/images/logo_sb.svg';
-import LogoLight from '@/assets/images/logo_light_sb.svg';
-import VerticeLogo from '@/assets/images/VERTICE.svg';
-import VerticeLogoLight from '@/assets/images/VERTICE_light.svg';
+import LogoDark from '@/assets/images/logos/logo_sb.svg';
+import LogoLight from '@/assets/images/logos/logo_light_sb.svg';
+import VerticeLogo from '@/assets/images/logos/VERTICE.svg';
+import VerticeLogoLight from '@/assets/images/logos/VERTICE_light.svg';
 import { FontFamily } from '@/constants/theme';
 import { useTheme } from '@/hooks/useTheme';
 

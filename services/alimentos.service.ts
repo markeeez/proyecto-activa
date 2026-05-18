@@ -153,7 +153,7 @@ const INCLUIR_BASICOS_EN_BUSQUEDA = false;
 /** Logs visibles en Metro/Expo (`npx expo run:android`); las Edge Functions loguean solo en el dashboard de Supabase. */
 function dbgAlimentos(...args: unknown[]): void {
   if (typeof __DEV__ !== 'undefined' && __DEV__) {
-    console.log('[Activa/alimentos]', ...args);
+    console.log('[Vertice/alimentos]', ...args);
   }
 }
 

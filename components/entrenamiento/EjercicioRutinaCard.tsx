@@ -20,12 +20,12 @@ import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 
-import LogoLight from '@/assets/images/logo_light_sb.svg';
-import LogoDark from '@/assets/images/logo_sb.svg';
-import KmRecordIcon from '@/assets/images/km_record_trophy_icon.svg';
-import PrRecordIcon from '@/assets/images/pr_trophy_icon.svg';
-import TimeRecordIcon from '@/assets/images/time_record_trophy_icon.svg';
-import VolumeRecordIcon from '@/assets/images/volume_record_trophy_icon.svg';
+import LogoLight from '@/assets/images/logos/logo_light_sb.svg';
+import LogoDark from '@/assets/images/logos/logo_sb.svg';
+import KmRecordIcon from '@/assets/images/trophies/km_record_trophy_icon.svg';
+import PrRecordIcon from '@/assets/images/trophies/pr_trophy_icon.svg';
+import TimeRecordIcon from '@/assets/images/trophies/time_record_trophy_icon.svg';
+import VolumeRecordIcon from '@/assets/images/trophies/volume_record_trophy_icon.svg';
 import { useTheme } from '@/hooks/useTheme';
 import type { Theme } from '@/constants/theme';
 import type { BorradorEjercicioLinea, BorradorSerieLinea } from '@/types/entrenamientoBorrador.types';

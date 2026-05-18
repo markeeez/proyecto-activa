@@ -1,6 +1,6 @@
 ## Style Prompt
 
-Promocional vertical para Activa: oscuro, preciso y deportivo, con la pantalla real de la rutina como producto principal. El movimiento debe sentirse como una interfaz premium de entrenamiento: entradas rapidas, foco cian, datos tecnicos y energia contenida. La estetica nace de la pantalla PERF-02: negro profundo, tarjetas gris carbon, cian electrico y tipografia monoespaciada para datos.
+Promocional vertical para Vertice: oscuro, preciso y deportivo, con la pantalla real de la rutina como producto principal. El movimiento debe sentirse como una interfaz premium de entrenamiento: entradas rapidas, foco cian, datos tecnicos y energia contenida. La estetica nace de la pantalla PERF-02: negro profundo, tarjetas gris carbon, cian electrico y tipografia monoespaciada para datos.
 
 ## Colors
 

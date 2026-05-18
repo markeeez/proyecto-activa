@@ -17,7 +17,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Bar, CartesianChart, Line } from 'victory-native';
 
-import ProgressNavIcon from '@/assets/images/progress_nav_icon.svg';
+import ProgressNavIcon from '@/assets/images/nav-icons/progress_nav_icon.svg';
 import { ProgresoNutricionShareModal } from '@/components/progreso/ProgresoNutricionShareModal';
 import { ProgresoPesoShareModal } from '@/components/progreso/ProgresoPesoShareModal';
 import { useAuth } from '@/hooks/useAuth';

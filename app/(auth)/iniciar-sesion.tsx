@@ -21,8 +21,8 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 
-import LogoSVG from '@/assets/images/logo_sb.svg';
-import VerticeSVG from '@/assets/images/VERTICE.svg';
+import LogoSVG from '@/assets/images/logos/logo_sb.svg';
+import VerticeSVG from '@/assets/images/logos/VERTICE.svg';
 import { GlowButton } from '@/components/ui/GlowButton';
 import { GlowBeams } from '@/components/ui/GlowBeams';
 import { useAuth } from '@/hooks/useAuth';

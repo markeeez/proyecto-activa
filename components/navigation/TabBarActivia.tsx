@@ -21,10 +21,10 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Path, Svg } from 'react-native-svg';
 
-import LogoSbBlack from '@/assets/images/logo_sb_black.svg';
-import ProfileNavIcon from '@/assets/images/profile_nav_icon.svg';
-import ProgressNavIcon from '@/assets/images/progress_nav_icon.svg';
-import TrophyIcon from '@/assets/images/trophy_icon.svg';
+import LogoSbBlack from '@/assets/images/logos/logo_sb_black.svg';
+import ProfileNavIcon from '@/assets/images/nav-icons/profile_nav_icon.svg';
+import ProgressNavIcon from '@/assets/images/nav-icons/progress_nav_icon.svg';
+import TrophyIcon from '@/assets/images/trophies/trophy_icon.svg';
 import { useTheme } from '@/hooks/useTheme';
 
 /* ── Colores ──────────────────────────────────────────────────────── */

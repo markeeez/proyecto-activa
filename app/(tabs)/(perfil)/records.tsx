@@ -1,7 +1,7 @@
-import KmRecordIcon from '@/assets/images/km_record_trophy_icon.svg';
-import PrRecordIcon from '@/assets/images/pr_trophy_icon.svg';
-import TimeRecordIcon from '@/assets/images/time_record_trophy_icon.svg';
-import VolumeRecordIcon from '@/assets/images/volume_record_trophy_icon.svg';
+import KmRecordIcon from '@/assets/images/trophies/km_record_trophy_icon.svg';
+import PrRecordIcon from '@/assets/images/trophies/pr_trophy_icon.svg';
+import TimeRecordIcon from '@/assets/images/trophies/time_record_trophy_icon.svg';
+import VolumeRecordIcon from '@/assets/images/trophies/volume_record_trophy_icon.svg';
 import { Ionicons } from '@expo/vector-icons';
 import { Stack } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';

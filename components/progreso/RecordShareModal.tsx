@@ -1,7 +1,7 @@
-import KmRecordIcon from '@/assets/images/km_record_trophy_icon.svg';
-import PrRecordIcon from '@/assets/images/pr_trophy_icon.svg';
-import TimeRecordIcon from '@/assets/images/time_record_trophy_icon.svg';
-import VolumeRecordIcon from '@/assets/images/volume_record_trophy_icon.svg';
+import KmRecordIcon from '@/assets/images/trophies/km_record_trophy_icon.svg';
+import PrRecordIcon from '@/assets/images/trophies/pr_trophy_icon.svg';
+import TimeRecordIcon from '@/assets/images/trophies/time_record_trophy_icon.svg';
+import VolumeRecordIcon from '@/assets/images/trophies/volume_record_trophy_icon.svg';
 import { Ionicons } from '@expo/vector-icons';
 import type { User } from '@supabase/supabase-js';
 import { Image } from 'expo-image';
@@ -22,10 +22,10 @@ import {
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import { captureRef } from 'react-native-view-shot';
 
-import LogoDark from '@/assets/images/logo_sb.svg';
-import LogoLight from '@/assets/images/logo_light_sb.svg';
-import VerticeLogo from '@/assets/images/VERTICE.svg';
-import VerticeLogoLight from '@/assets/images/VERTICE_light.svg';
+import LogoDark from '@/assets/images/logos/logo_sb.svg';
+import LogoLight from '@/assets/images/logos/logo_light_sb.svg';
+import VerticeLogo from '@/assets/images/logos/VERTICE.svg';
+import VerticeLogoLight from '@/assets/images/logos/VERTICE_light.svg';
 import { FontFamily } from '@/constants/theme';
 import { useTheme } from '@/hooks/useTheme';
 import type { RecordType, RecordUsuario } from '@/lib/entrenamientoRecords';

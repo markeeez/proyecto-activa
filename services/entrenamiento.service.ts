@@ -665,6 +665,31 @@ export const entrenamientoService = {
     return (data ?? []).map((row) => mapRoutineJoin(row as RoutineJoinRow));
   },
 
+  async obtenerRutinaInicialUsuario(userId: string): Promise<{ id: string; nombre: string } | null> {
+    const { data, error } = await supabase
+      .from('routines')
+      .select('id, nombre')
+      .eq('created_by', userId)
+      .eq('nombre', 'Rutina inicial')
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      console.error('[obtenerRutinaInicialUsuario]', error.message);
+      return null;
+    }
+    return data as { id: string; nombre: string } | null;
+  },
+
+  async crearRutinaInicialDesdePredeterminada(): Promise<string | null> {
+    const { data, error } = await supabase.rpc('crear_rutina_inicial');
+    if (error) {
+      console.error('[crearRutinaInicialDesdePredeterminada]', error.message);
+      return null;
+    }
+    return (data as string | null) ?? null;
+  },
+
   async obtenerRutinasFavoritas(userId: string): Promise<RutinaListaVista[]> {
     const { data, error } = await supabase
       .from('user_favorite_routines')

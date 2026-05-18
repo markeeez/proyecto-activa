@@ -7,7 +7,6 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Switch,
   Text,
   TextInput,
   View,
@@ -20,8 +19,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { Theme } from '@/constants/theme';
 import { useTheme } from '@/hooks/useTheme';
-import { useThemeMode } from '@/context/ThemeContext';
 import { useAuth } from '@/hooks/useAuth';
+import { subirAvatar } from '@/lib/avatar';
 import { supabase } from '@/lib/supabase';
 import type { Objetivo, Plan } from '@/types/database.types';
 
@@ -153,39 +152,6 @@ function decimal(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(Number(value))) return '--';
   const n = Number(value);
   return Number.isInteger(n) ? String(n) : n.toFixed(1).replace(/\.0$/, '');
-}
-
-async function uploadAvatar(userId: string, uri: string, mimeType: string): Promise<string> {
-  const response = await fetch(uri);
-  const blob = await response.blob();
-
-  const bytes = await new Promise<Uint8Array>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const dataUrl = String(reader.result ?? '');
-        const base64 = dataUrl.split(',')[1] ?? '';
-        const binary = atob(base64);
-        const buffer = new Uint8Array(binary.length);
-        for (let i = 0; i < binary.length; i += 1) buffer[i] = binary.charCodeAt(i);
-        resolve(buffer);
-      } catch (error) {
-        reject(error);
-      }
-    };
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(blob);
-  });
-
-  const path = `${userId}/avatar.jpg`;
-  const { error: uploadError } = await supabase.storage
-    .from('avatars')
-    .upload(path, bytes, { upsert: true, contentType: mimeType });
-
-  if (uploadError) throw uploadError;
-
-  const { data } = supabase.storage.from('avatars').getPublicUrl(path);
-  return `${data.publicUrl}?v=${Date.now()}`;
 }
 
 // ─── Data hook ────────────────────────────────────────────────────────────────
@@ -627,16 +593,24 @@ function makeStyles(
       fontFamily: f.sansBold,
       color: c.danger,
     },
-    // Theme toggle
-    themeToggleWrap: {
-      alignSelf: 'center',
+    devOnboardingButton: {
+      minHeight: 44,
+      marginTop: s.sm,
+      borderRadius: r.sm,
+      borderWidth: 1,
+      borderColor: c.borderVisible,
+      backgroundColor: c.surface,
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'center',
       gap: s.sm,
-      marginTop: s.xs,
-      paddingVertical: s.sm,
-      paddingHorizontal: s.md,
+    },
+    devOnboardingText: {
+      ...ts.label,
+      fontFamily: f.monoBold,
+      color: c.primary,
+      letterSpacing: 0.8,
+      textTransform: 'uppercase',
     },
     // Modal
     modalBackdrop: {
@@ -882,7 +856,6 @@ function ListRow({
 export default function PerfilIndex() {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
-  const { isDark, setMode } = useThemeMode();
   const { c, f, ts, s, r } = useTheme();
   const styles = useMemo(() => makeStyles(c, f, ts, s, r), [c, f, ts, s, r]);
   const th: ThemeRef = useMemo(() => ({ c, f }), [c, f]);
@@ -943,7 +916,7 @@ export default function PerfilIndex() {
     setUploadingAvatar(true);
     try {
       const asset = result.assets[0];
-      const publicUrl = await uploadAvatar(user.id, asset.uri, asset.mimeType ?? 'image/jpeg');
+      const publicUrl = await subirAvatar(user.id, asset.uri, asset.mimeType ?? 'image/jpeg');
       const { error: authError } = await supabase.auth.updateUser({
         data: { avatar_url: publicUrl },
       });
@@ -1026,7 +999,7 @@ export default function PerfilIndex() {
         <View style={styles.centerState}>
           <Text style={styles.errorTitle}>No se pudo cargar el perfil</Text>
           <Text style={styles.errorText}>{error}</Text>
-          <Pressable style={styles.retryButton} onPress={reload}>
+          <Pressable style={styles.retryButton} onPress={() => reload()}>
             <Text style={styles.retryText}>Reintentar</Text>
           </Pressable>
         </View>
@@ -1171,17 +1144,16 @@ export default function PerfilIndex() {
             </Pressable>
           </View>
 
-          {/* Theme toggle */}
-          <View style={styles.themeToggleWrap}>
-            <Ionicons name="sunny-outline" size={17} color={c.textMuted} />
-            <Switch
-              value={isDark}
-              onValueChange={(value) => setMode(value ? 'dark' : 'light')}
-              trackColor={{ false: c.surfaceElevated, true: c.primaryBg }}
-              thumbColor={c.primary}
-            />
-            <Ionicons name="moon-outline" size={17} color={c.textMuted} />
-          </View>
+          {__DEV__ ? (
+            <Pressable
+              style={styles.devOnboardingButton}
+              onPress={() => router.push('/(onboarding)/objetivo')}
+              accessibilityRole="button"
+            >
+              <Ionicons name="construct-outline" size={16} color={c.primary} />
+              <Text style={styles.devOnboardingText}>Abrir onboarding</Text>
+            </Pressable>
+          ) : null}
         </ScrollView>
       )}
 

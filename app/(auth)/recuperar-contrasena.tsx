@@ -15,7 +15,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import LogoSVG from '@/assets/images/logo_sb.svg';
+import LogoSVG from '@/assets/images/logos/logo_sb.svg';
 import { GlowBeams } from '@/components/ui/GlowBeams';
 import { GlowButton } from '@/components/ui/GlowButton';
 import { Colors } from '@/constants/theme';

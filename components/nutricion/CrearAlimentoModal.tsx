@@ -1140,7 +1140,7 @@ function makeStyles(
       width: 48,
       height: 48,
       borderRadius: r.pill,
-      backgroundColor: c.warningBg ?? c.surfaceElevated,
+      backgroundColor: c.warningBg,
       alignItems: 'center',
       justifyContent: 'center',
       marginBottom: s.xs,

@@ -18,15 +18,17 @@ import {
   View,
 } from 'react-native';
 
-import FoodNavIcon from '@/assets/images/food_nav_icon_v2.svg';
-import WorkoutNavIcon from '@/assets/images/workout_nav_dumbbell.svg';
+import FoodNavIcon from '@/assets/images/nav-icons/food_nav_icon_v2.svg';
+import WorkoutNavIcon from '@/assets/images/nav-icons/workout_nav_dumbbell.svg';
 import { FontFamily } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
+import { useActivationState } from '@/hooks/useActivationState';
 import { useNutricion } from '@/hooks/useNutricion';
 import { useTheme } from '@/hooks/useTheme';
 import { supabase } from '@/lib/supabase';
 import { ModalRegistrarComida } from '@/components/ModalRegistrarComida';
 import { ModalRegistrarEntreno } from '@/components/ModalRegistrarEntreno';
+import { ActivationChecklist } from '@/components/onboarding/ActivationChecklist';
 import { BuscadorAlimentos } from '@/components/nutricion/BuscadorAlimentos';
 import { DailyGoalShareModal } from '@/components/nutricion/DailyGoalShareModal';
 import { solicitarEntrenamientoTab } from '@/lib/entrenamientoTabEvents';
@@ -164,6 +166,7 @@ export default function HomeScreen() {
   const { c, s, isDark } = useTheme();
   const insets   = useSafeAreaInsets();
   const { user } = useAuth();
+  const { estado: estadoActivacion, inicializado: activacionInicializada } = useActivationState();
 
   /* ── Datos del header ── */
   const [nombre, setNombre] = useState<string | null>(null);
@@ -544,6 +547,19 @@ export default function HomeScreen() {
       </View>
 
       {/* ── Acciones rápidas ────────────────────────────────────────── */}
+      {activacionInicializada && !estadoActivacion.completada ? (
+        <View style={{ paddingHorizontal: ph, marginBottom: s.md }}>
+          <ActivationChecklist
+            estado={estadoActivacion}
+            onRegistrarComida={() => setModalComidaVisible(true)}
+            onVerRutinas={() => {
+              solicitarEntrenamientoTab('rutinas');
+              router.push({ pathname: '/(tabs)/(entrenamiento)', params: { tab: 'rutinas' } } as any);
+            }}
+          />
+        </View>
+      ) : null}
+
       <View style={[row, { paddingHorizontal: ph, gap: s.sm, marginBottom: s.md }]}>
         {[
           {

@@ -186,7 +186,7 @@ export function CrearEjercicioModal({ visible, onClose, onSubmit }: Props) {
     if (!canCrear) return;
     setLoading(true);
     try {
-      const ex = await onSubmit(nombre.trim(), musculo.trim());
+      const ex = await onSubmit(nombre.trim(), musculo!.trim());
       if (ex) cerrar();
     } finally {
       setLoading(false);

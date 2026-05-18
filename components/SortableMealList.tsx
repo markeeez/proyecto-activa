@@ -19,6 +19,7 @@ import Animated, {
   useAnimatedReaction,
   useAnimatedStyle,
   useSharedValue,
+  type SharedValue,
 } from 'react-native-reanimated';
 
 // ─── Public types ─────────────────────────────────────────────────────────────
@@ -50,9 +51,9 @@ type RowProps<T> = {
   item: T;
   index: number;
   renderItem: (p: DragItemParams<T>) => React.ReactNode;
-  activeSV: Animated.SharedValue<number>;
-  dragYSV: Animated.SharedValue<number>;
-  shiftSV: Animated.SharedValue<number>;
+  activeSV: SharedValue<number>;
+  dragYSV: SharedValue<number>;
+  shiftSV: SharedValue<number>;
   /** Stable ref-forwarding wrappers — never change identity after mount */
   stableActivate: (i: number) => void;
   stableLayout: (i: number, h: number) => void;

@@ -54,7 +54,9 @@ export async function loginConGoogle(): Promise<SocialAuthResult> {
   }
 
   try {
-    await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+    if (Platform.OS === 'android') {
+      await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+    }
 
     const response = await GoogleSignin.signIn();
 

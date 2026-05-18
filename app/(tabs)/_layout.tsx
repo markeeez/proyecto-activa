@@ -17,10 +17,10 @@ import { View } from 'react-native';
 import { Tabs, usePathname } from 'expo-router';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 
-import FoodNavIcon from '@/assets/images/food_nav_icon_v2.svg';
-import HomeNavIcon from '@/assets/images/home_nav_icon.svg';
-import MoreNavIcon from '@/assets/images/more_nav_icon.svg';
-import WorkoutNavIcon from '@/assets/images/workout_nav_dumbbell.svg';
+import FoodNavIcon from '@/assets/images/nav-icons/food_nav_icon_v2.svg';
+import HomeNavIcon from '@/assets/images/nav-icons/home_nav_icon.svg';
+import MoreNavIcon from '@/assets/images/nav-icons/more_nav_icon.svg';
+import WorkoutNavIcon from '@/assets/images/nav-icons/workout_nav_dumbbell.svg';
 import { BarraEntrenoMinimizado } from '@/components/entrenamiento/BarraEntrenoMinimizado';
 import { useEntreno } from '@/context/EntrenoContext';
 

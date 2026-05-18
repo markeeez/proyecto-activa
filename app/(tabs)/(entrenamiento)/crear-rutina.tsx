@@ -20,8 +20,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRouter } from 'expo-router';
 
-import LogoDark from '@/assets/images/logo_sb.svg';
-import LogoLight from '@/assets/images/logo_light_sb.svg';
+import LogoDark from '@/assets/images/logos/logo_sb.svg';
+import LogoLight from '@/assets/images/logos/logo_light_sb.svg';
 
 import { AgregarEjercicioSheet } from '@/components/entrenamiento/AgregarEjercicioSheet';
 import { CrearEjercicioModal } from '@/components/entrenamiento/CrearEjercicioModal';

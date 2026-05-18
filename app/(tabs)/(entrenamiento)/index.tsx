@@ -181,7 +181,7 @@ function ordenarSesionesDia(a: SesionVista, b: SesionVista): number {
 }
 
 function crearPaletaEntrenos(c: ReturnType<typeof useTheme>['c']): WorkoutPalette {
-  const isDark = c.background === '#000000' || c.textDisplay === '#FFFFFF';
+  const isDark = (c.background as string) === '#000000' || (c.textDisplay as string) === '#FFFFFF';
   const accent = c.primary || ACCENT;
 
   if (isDark) {
