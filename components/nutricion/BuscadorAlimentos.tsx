@@ -28,7 +28,6 @@ export type BuscadorAlimentosProps = {
   onClose: () => void;
   onAlimentoSeleccionado: (food: Food, gramos: number) => void | Promise<void>;
   userId?: string;
-  onRegistrarPorFoto?: () => void;
   /**
    * Si se pasa, el buscador omite la lista de búsqueda y abre directamente el
    * modal de cantidad con este alimento preseleccionado. Útil para editar la
@@ -77,7 +76,6 @@ export function BuscadorAlimentos({
   onClose,
   onAlimentoSeleccionado,
   userId,
-  onRegistrarPorFoto,
   alimentoInicial,
 }: BuscadorAlimentosProps) {
   const { c, f, ts, s, r } = useTheme();
@@ -98,7 +96,7 @@ export function BuscadorAlimentos({
   const [gramos, setGramos] = useState('100');
   const [guardando, setGuardando] = useState(false);
   const [okMsg, setOkMsg] = useState<string | null>(null);
-  const [crearAlimentoModo, setCrearAlimentoModo] = useState<'foto' | 'manual' | 'escaner' | null>(null);
+  const [crearAlimentoModo, setCrearAlimentoModo] = useState<'manual' | 'escaner' | null>(null);
   const busquedaVersionRef = useRef(0);
 
   const favStorageKey = userId ? `activa_food_favorites_${userId}` : '';
@@ -509,7 +507,7 @@ export function BuscadorAlimentos({
             </View>
             <Pressable
               style={styles.crearBtn}
-              onPress={() => setCrearAlimentoModo('foto')}
+              onPress={() => setCrearAlimentoModo('manual')}
               accessibilityLabel="Crear alimento"
             >
               <Ionicons name="create-outline" size={20} color={c.textSecondary} />
@@ -605,14 +603,6 @@ export function BuscadorAlimentos({
 
           {/* ── Botones de acción rápida ── */}
           <View style={styles.quickActionsRow}>
-            <Pressable
-              style={styles.quickActionBtn}
-              onPress={onRegistrarPorFoto}
-              accessibilityLabel="Registrar por foto"
-            >
-              <Ionicons name="camera-outline" size={16} color={c.primary} />
-              <Text style={styles.quickActionText}>Registrar por foto</Text>
-            </Pressable>
             <Pressable
               style={styles.quickActionBtn}
               onPress={() => setCrearAlimentoModo('escaner')}
@@ -742,7 +732,7 @@ export function BuscadorAlimentos({
             visible={crearAlimentoModo !== null}
             onClose={() => setCrearAlimentoModo(null)}
             userId={userId}
-            initialMode={crearAlimentoModo ?? 'foto'}
+            initialMode={crearAlimentoModo ?? 'manual'}
             onFoodCreated={alimentoCreadoOResuelto}
             esFavoritoAlimento={foodEsFavorito}
             onToggleFavorito={toggleFavorito}

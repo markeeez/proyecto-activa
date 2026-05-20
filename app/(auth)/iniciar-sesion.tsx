@@ -131,7 +131,7 @@ export default function IniciarSesion() {
         <View style={st.brandingText}>
           <VerticeSVG width={190} height={24} style={st.brand} />
           <Text style={st.tagline1}>TU PUNTO DE EQUILIBRIO</Text>
-          <Text style={st.tagline2}>NUTRICIÓN · ENTRENO · IA</Text>
+          <Text style={st.tagline2}>NUTRICIÓN · ENTRENO</Text>
         </View>
 
         {/* ── Formulario ───────────────────────────────────────────── */}

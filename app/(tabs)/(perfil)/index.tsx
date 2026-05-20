@@ -1,20 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  KeyboardAvoidingView,
   Modal,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { router, Stack, useFocusEffect } from 'expo-router';
+import { router, Stack, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { Theme } from '@/constants/theme';
@@ -51,17 +48,10 @@ type MetricRow = {
   fecha: string | null;
 };
 
-type PlanLimitRow = {
-  plan: Plan | string;
-  acceso_ia: boolean | null;
-  ai_mensajes_mes: number | null;
-};
-
 type ProfileData = {
   profile: ProfileRow | null;
   goals: GoalRow | null;
   latestMetric: MetricRow | null;
-  planLimits: PlanLimitRow | null;
 };
 
 type ModalState = {
@@ -71,14 +61,6 @@ type ModalState = {
   confirmText?: string;
   danger?: boolean;
   onConfirm?: () => Promise<void> | void;
-};
-
-type EditMetricState = {
-  visible: boolean;
-  field: 'altura_cm' | 'edad';
-  label: string;
-  unit: string;
-  current: number | null;
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -165,9 +147,8 @@ async function fetchProfileData(userId: string): Promise<ProfileData> {
 
   if (profileRes.error) throw profileRes.error;
   const profile = (profileRes.data as ProfileRow | null) ?? null;
-  const plan = profile?.plan ?? 'free';
 
-  const [goalsRes, metricRes, limitsRes] = await Promise.all([
+  const [goalsRes, metricRes] = await Promise.all([
     supabase
       .from('user_goals')
       .select('objetivo, calorias_objetivo, proteinas_objetivo, carbos_objetivo, grasas_objetivo')
@@ -180,22 +161,15 @@ async function fetchProfileData(userId: string): Promise<ProfileData> {
       .order('fecha', { ascending: false })
       .limit(1)
       .maybeSingle(),
-    supabase
-      .from('plan_limits')
-      .select('plan, acceso_ia, ai_mensajes_mes')
-      .eq('plan', plan)
-      .maybeSingle(),
   ]);
 
   if (goalsRes.error) throw goalsRes.error;
   if (metricRes.error) throw metricRes.error;
-  if (limitsRes.error) throw limitsRes.error;
 
   return {
     profile,
     goals: (goalsRes.data as GoalRow | null) ?? null,
     latestMetric: (metricRes.data as MetricRow | null) ?? null,
-    planLimits: (limitsRes.data as PlanLimitRow | null) ?? null,
   };
 }
 
@@ -204,7 +178,6 @@ function useProfileData(userId: string | undefined) {
     profile: null,
     goals: null,
     latestMetric: null,
-    planLimits: null,
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -213,7 +186,7 @@ function useProfileData(userId: string | undefined) {
 
   const load = useCallback(async (silent = false) => {
     if (!userId) {
-      setData({ profile: null, goals: null, latestMetric: null, planLimits: null });
+      setData({ profile: null, goals: null, latestMetric: null });
       setError('No hay una sesion activa.');
       setLoading(false);
       return;
@@ -333,11 +306,27 @@ function makeStyles(
       padding: s.md,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: c.border,
+      position: 'relative',
+    },
+    editProfileButton: {
+      position: 'absolute',
+      top: s.sm,
+      right: s.sm,
+      width: 34,
+      height: 34,
+      borderRadius: r.sm,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: c.surfaceElevated,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: c.borderVisible,
+      zIndex: 2,
     },
     userTop: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: s.md,
+      paddingRight: 36,
     },
     avatarWrap: { width: 88, height: 88 },
     avatar: {
@@ -856,24 +845,15 @@ function ListRow({
 export default function PerfilIndex() {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
+  const { profileRefresh } = useLocalSearchParams<{ profileRefresh?: string }>();
   const { c, f, ts, s, r } = useTheme();
   const styles = useMemo(() => makeStyles(c, f, ts, s, r), [c, f, ts, s, r]);
   const th: ThemeRef = useMemo(() => ({ c, f }), [c, f]);
 
-  const { data, loading, error, reload, patch } = useProfileData(user?.id);
+  const { data, loading, error, reload } = useProfileData(user?.id);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(() => getAvatarUrl(user ?? null));
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [modal, setModal] = useState<ModalState>({ visible: false, title: '', message: '' });
-  const [editMetric, setEditMetric] = useState<EditMetricState>({
-    visible: false,
-    field: 'altura_cm',
-    label: 'Altura',
-    unit: 'cm',
-    current: null,
-  });
-  const [editValue, setEditValue] = useState('');
-  const [savingMetric, setSavingMetric] = useState(false);
-  const inputRef = useRef<TextInput>(null);
 
   useEffect(() => {
     setAvatarUrl(getAvatarUrl(user ?? null));
@@ -881,9 +861,9 @@ export default function PerfilIndex() {
 
   useFocusEffect(
     useCallback(() => {
-      // Silent refresh on focus — keeps stale data visible while fetching
-      void reload(true);
-    }, [reload]),
+      // Show a short loader after profile edits so stale identity data is not flashed.
+      void reload(!profileRefresh);
+    }, [reload, profileRefresh]),
   );
 
   const displayName = useMemo(() => fullName(data.profile, user ?? null), [data.profile, user]);
@@ -893,10 +873,8 @@ export default function PerfilIndex() {
     [data.profile, user?.email],
   );
 
-  const altura = data.latestMetric?.altura_cm ?? data.profile?.altura_cm ?? null;
+  const altura = data.profile?.altura_cm ?? data.latestMetric?.altura_cm ?? null;
   const edad = data.profile?.edad ?? null;
-  const plan = data.profile?.plan ?? data.planLimits?.plan ?? 'free';
-  const planBadge = String(plan).toUpperCase();
 
   const closeModal = () => setModal((prev) => ({ ...prev, visible: false }));
   const showInfo = (title: string, message: string) => setModal({ visible: true, title, message });
@@ -927,49 +905,6 @@ export default function PerfilIndex() {
       showInfo('Error', message);
     } finally {
       setUploadingAvatar(false);
-    }
-  };
-
-  const openEditMetric = (field: 'altura_cm' | 'edad', current: number | null) => {
-    const isAltura = field === 'altura_cm';
-    setEditValue(current != null ? String(Math.round(current)) : '');
-    setEditMetric({
-      visible: true,
-      field,
-      label: isAltura ? 'Altura' : 'Edad',
-      unit: isAltura ? 'cm' : 'años',
-      current,
-    });
-    setTimeout(() => inputRef.current?.focus(), 100);
-  };
-
-  const saveMetricField = async () => {
-    if (!user?.id) return;
-    const raw = editValue.trim();
-    const parsed = parseInt(raw, 10);
-    if (!raw || isNaN(parsed) || parsed <= 0) return;
-
-    const field = editMetric.field;
-    const previous = field === 'altura_cm' ? data.profile?.altura_cm : data.profile?.edad;
-
-    // Optimistic update — UI reflects the change instantly
-    patch({ [field]: parsed });
-    setEditMetric((prev) => ({ ...prev, visible: false }));
-    setSavingMetric(true);
-
-    try {
-      const { error: updateError } = await supabase
-        .from('profiles')
-        .update({ [field]: parsed })
-        .eq('id', user.id);
-      if (updateError) throw updateError;
-    } catch (err) {
-      // Rollback optimistic update and surface the error
-      patch({ [field]: previous ?? null });
-      const message = err instanceof Error ? err.message : 'No se pudo guardar.';
-      showInfo('Error', message);
-    } finally {
-      setSavingMetric(false);
     }
   };
 
@@ -1032,6 +967,15 @@ export default function PerfilIndex() {
 
           {/* User card */}
           <View style={styles.userCard}>
+            <Pressable
+              style={styles.editProfileButton}
+              onPress={() => router.push('/(tabs)/(perfil)/editar')}
+              accessibilityRole="button"
+              accessibilityLabel="Editar perfil"
+            >
+              <Ionicons name="pencil-outline" size={16} color={c.textSecondary} />
+            </Pressable>
+
             <View style={styles.userTop}>
               <View style={styles.avatarWrap}>
                 {avatarUrl ? (
@@ -1074,8 +1018,8 @@ export default function PerfilIndex() {
 
             <View style={styles.statsRow}>
               <StatChip styles={styles} th={th} icon="scale-outline" value={`${decimal(data.latestMetric?.peso_kg)} kg`} label="Peso" />
-              <StatChip styles={styles} th={th} icon="body-outline" value={`${decimal(altura)} cm`} label="Altura" editable onPress={() => openEditMetric('altura_cm', altura)} />
-              <StatChip styles={styles} th={th} icon="calendar-outline" value={edad != null ? `${rounded(edad)} años` : '--'} label="Edad" editable onPress={() => openEditMetric('edad', edad)} />
+              <StatChip styles={styles} th={th} icon="body-outline" value={`${decimal(altura)} cm`} label="Altura" />
+              <StatChip styles={styles} th={th} icon="calendar-outline" value={edad != null ? `${rounded(edad)} años` : '--'} label="Edad" />
             </View>
           </View>
 
@@ -1135,8 +1079,7 @@ export default function PerfilIndex() {
           <View style={styles.listCard}>
             <SectionHeader th={th} styles={styles} icon="person-outline" title="Cuenta" />
             <ListRow styles={styles} th={th} icon="mail-outline"        title="Cambiar email"      onPress={() => router.push('/(tabs)/(perfil)/cambiar-email')} />
-            <ListRow styles={styles} th={th} icon="lock-closed-outline" title="Cambiar contraseña" onPress={() => router.push('/(tabs)/(perfil)/cambiar-contrasena')} />
-            <ListRow styles={styles} th={th} icon="shield-checkmark-outline" title="Plan actual" badge={planBadge} last onPress={() => router.push('/(tabs)/(perfil)/plan')} />
+            <ListRow styles={styles} th={th} icon="lock-closed-outline" title="Cambiar contraseña" last onPress={() => router.push('/(tabs)/(perfil)/cambiar-contrasena')} />
 
             <Pressable style={styles.signOutButton} onPress={signOut} accessibilityRole="button">
               <Ionicons name="log-out-outline" size={16} color={c.danger} />
@@ -1185,62 +1128,6 @@ export default function PerfilIndex() {
         </View>
       </Modal>
 
-      {/* Edit metric modal */}
-      <Modal
-        visible={editMetric.visible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setEditMetric((prev) => ({ ...prev, visible: false }))}
-      >
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.modalBackdrop}
-        >
-          <View style={styles.modalCard}>
-            <View style={styles.modalAccent} />
-            <Text style={styles.modalTitle}>{editMetric.label}</Text>
-            <Text style={styles.modalText}>
-              Introduce tu {editMetric.label.toLowerCase()} en {editMetric.unit}.
-            </Text>
-            <View style={[styles.inputRow, { borderColor: c.borderVisible, backgroundColor: c.surfaceElevated }]}>
-              <TextInput
-                ref={inputRef}
-                style={[styles.metricInput, { color: c.textDisplay, fontFamily: f.sansBold }]}
-                value={editValue}
-                onChangeText={(t) => setEditValue(t.replace(/[^0-9]/g, ''))}
-                keyboardType="number-pad"
-                maxLength={3}
-                placeholder="--"
-                placeholderTextColor={c.textMuted}
-                returnKeyType="done"
-                onSubmitEditing={saveMetricField}
-              />
-              <Text style={[styles.metricUnit, { color: c.textSecondary, fontFamily: f.mono }]}>
-                {editMetric.unit}
-              </Text>
-            </View>
-            <View style={styles.modalActions}>
-              <Pressable
-                style={styles.modalGhost}
-                onPress={() => setEditMetric((prev) => ({ ...prev, visible: false }))}
-              >
-                <Text style={styles.modalGhostText}>Cancelar</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.modalPrimary, (!editValue.trim() || savingMetric) && { opacity: 0.5 }]}
-                onPress={saveMetricField}
-                disabled={!editValue.trim() || savingMetric}
-              >
-                {savingMetric ? (
-                  <ActivityIndicator color={c.textOnPrimary} size="small" />
-                ) : (
-                  <Text style={styles.modalPrimaryText}>Guardar</Text>
-                )}
-              </Pressable>
-            </View>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
     </View>
   );
 }

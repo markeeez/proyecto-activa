@@ -20,8 +20,6 @@ import {
   View,
 } from 'react-native';
 
-import VLogoLight from '@/assets/images/logos/logo_light_sb.svg';
-import VLogoDark from '@/assets/images/logos/logo_sb.svg';
 import { useEntreno } from '@/context/EntrenoContext';
 import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from '@/hooks/useTheme';
@@ -698,7 +696,6 @@ export function RutinasListadoTab() {
   const { iniciarEntrenoVacio, iniciarDesdeRutina, entrenoActivo } = useEntreno();
   const theme = useMemo(() => getRoutineTheme(scheme), [scheme]);
   const styles = useMemo(() => makeStyles(theme, f), [theme, f]);
-  const VLogo = scheme === 'dark' ? VLogoDark : VLogoLight;
 
   const [filtroRutinas, setFiltroRutinas] = useState<FiltroRutinas>('mis');
   const [filtroOpen, setFiltroOpen] = useState(false);
@@ -760,12 +757,6 @@ export function RutinasListadoTab() {
     setFiltroRutinas(next);
     setFiltroOpen(false);
   }, []);
-
-  const onConsultarV = useCallback(() => {
-    if (!routineMenu) return;
-    Alert.alert('Consultar a V', `Consulta sobre ${routineMenu.nombre}`);
-    setRoutineMenu(null);
-  }, [routineMenu]);
 
   const onEliminarRutina = useCallback(() => {
     const routine = routineMenu;
@@ -1059,11 +1050,6 @@ export function RutinasListadoTab() {
             <Text style={styles.filterMenuTitle} numberOfLines={1}>
               {routineMenu.nombre}
             </Text>
-            <Pressable style={styles.filterMenuOption} onPress={onConsultarV} accessibilityRole="button">
-              <VLogo width={17} height={17} style={styles.filterMenuLogo} />
-              <Text style={styles.filterMenuOptionText}>Consultar a V</Text>
-            </Pressable>
-            <View style={styles.filterMenuDivider} />
             {routineMenu.is_community ? (
               <Pressable style={styles.filterMenuOption} onPress={onQuitarFavorito} accessibilityRole="button">
                 <Ionicons name="star-outline" size={17} color={theme.textPrimary} />

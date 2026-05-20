@@ -18,8 +18,6 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import LogoLightSb from '@/assets/images/logos/logo_light_sb.svg';
-import LogoDarkSb from '@/assets/images/logos/logo_sb.svg';
 import type { Theme } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from '@/hooks/useTheme';
@@ -786,9 +784,8 @@ export default function PersonalizarPlanPantalla() {
   const insets = useSafeAreaInsets();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const { user } = useAuth();
-  const { c, f, ts, s, r, isDark } = useTheme();
+  const { c, f, ts, s, r } = useTheme();
   const styles = useMemo(() => makeStyles(c, f, ts, s, r), [c, f, ts, s, r]);
-  const Logo = isDark ? LogoDarkSb : LogoLightSb;
 
   const [cargando, setCargando] = useState(true);
   const [ctx, setCtx] = useState<ContextoPlanNutricion | null>(null);
@@ -1000,11 +997,6 @@ export default function PersonalizarPlanPantalla() {
     setGramosPersonalizado({ p: Math.round(p), c: Math.round(carb), f: Math.round(fat) });
     setMacroPerfil(null);
     setModalPlanOpen(false);
-  };
-
-  const abrirCrearConV = () => {
-    setMenuPlanOpen(false);
-    Alert.alert('Crear con V', 'Esta opcion estara disponible pronto.');
   };
 
   const abrirPersonalizarDesdeMenu = () => {
@@ -1262,11 +1254,6 @@ export default function PersonalizarPlanPantalla() {
               <Text style={styles.planMenuTitle} numberOfLines={1}>
                 Plan diario
               </Text>
-              <Pressable style={styles.planMenuOption} onPress={abrirCrearConV} accessibilityRole="button">
-                <Logo width={17} height={17} />
-                <Text style={styles.planMenuOptionText}>Crear con V</Text>
-              </Pressable>
-              <View style={styles.planMenuDivider} />
               <Pressable style={styles.planMenuOption} onPress={abrirPersonalizarDesdeMenu} accessibilityRole="button">
                 <Ionicons name="options-outline" size={17} color={c.textDisplay} />
                 <Text style={styles.planMenuOptionText}>Personalizar</Text>

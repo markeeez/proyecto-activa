@@ -9,5 +9,5 @@ export function useColorScheme(): 'light' | 'dark' {
   if (ctx != null) {
     return ctx.isDark ? 'dark' : 'light';
   }
-  return systemScheme ?? 'light';
+  return systemScheme ?? 'dark';
 }

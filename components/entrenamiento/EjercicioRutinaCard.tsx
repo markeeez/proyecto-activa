@@ -20,8 +20,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 
-import LogoLight from '@/assets/images/logos/logo_light_sb.svg';
-import LogoDark from '@/assets/images/logos/logo_sb.svg';
 import KmRecordIcon from '@/assets/images/trophies/km_record_trophy_icon.svg';
 import PrRecordIcon from '@/assets/images/trophies/pr_trophy_icon.svg';
 import TimeRecordIcon from '@/assets/images/trophies/time_record_trophy_icon.svg';
@@ -490,7 +488,7 @@ export function EjercicioRutinaCard({
   onNotaChange,
 }: Props) {
   const router = useRouter();
-  const { c, f, ts, s, r, isDark } = useTheme();
+  const { c, f, ts, s, r } = useTheme();
   const styles = useMemo(() => makeStyles(c, f, ts, s, r), [c, f, ts, s, r]);
   const esEntreno = modo === 'entreno';
   const esCardioCard = esTrackingCardio(data.tracking_mode);
@@ -628,19 +626,6 @@ export function EjercicioRutinaCard({
             </Text>
           )}
         </View>
-        <Pressable
-          style={styles.chatHit}
-          onPress={() => setModalIaAbierto(true)}
-          hitSlop={8}
-          accessibilityRole="button"
-          accessibilityLabel="Chat sobre el ejercicio"
-        >
-          {isDark ? (
-            <LogoDark width={22} height={22} style={styles.chatLogo} />
-          ) : (
-            <LogoLight width={22} height={22} style={styles.chatLogo} />
-          )}
-        </Pressable>
         <Pressable style={styles.menuHit} onPress={() => setMenuEjercicio(true)} hitSlop={8}>
           <Ionicons name="ellipsis-horizontal" size={22} color={c.textSecondary} />
         </Pressable>

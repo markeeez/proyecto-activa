@@ -21,6 +21,7 @@ import { GlowBeams } from '@/components/ui/GlowBeams';
 import { GlowButton } from '@/components/ui/GlowButton';
 import { Colors } from '@/constants/theme';
 import { supabase } from '@/lib/supabase';
+import { normalizarNombrePerfil } from '@/services/perfil.service';
 import { loginConGoogle } from '@/services/social-auth.service';
 
 type UsernameStatus = 'idle' | 'checking' | 'available' | 'taken' | 'invalid';
@@ -91,7 +92,7 @@ export default function Registrarse() {
       return;
     }
 
-    if (!/^[a-z0-9_]{3,20}$/.test(username)) {
+    if (!/^[a-z0-9]{3,20}$/.test(username)) {
       setUsernameStatus('invalid');
       return;
     }
@@ -146,17 +147,6 @@ export default function Registrarse() {
       return;
     }
 
-    const userId = data.user?.id;
-    if (userId) {
-      await supabase
-        .from('profiles')
-        .update({
-          nombre: nombre.trim(),
-          username: username.trim().toLowerCase(),
-        })
-        .eq('id', userId);
-    }
-
     setCargando(false);
 
     if (!data.session) {
@@ -177,7 +167,7 @@ export default function Registrarse() {
   };
 
   const handleUsernameChange = (value: string) => {
-    setUsername(value.toLowerCase().replace(/[^a-z0-9_]/g, ''));
+    setUsername(value.toLowerCase().replace(/[^a-z0-9]/g, ''));
   };
 
   return (
@@ -216,7 +206,7 @@ export default function Registrarse() {
                   <TextInput
                     style={st.input}
                     value={nombre}
-                    onChangeText={setNombre}
+                    onChangeText={(value) => setNombre(normalizarNombrePerfil(value))}
                     placeholder="Tu nombre"
                     placeholderTextColor={MUTED}
                     returnKeyType="next"
@@ -238,7 +228,7 @@ export default function Registrarse() {
                     style={st.input}
                     value={username}
                     onChangeText={handleUsernameChange}
-                    placeholder="tu_usuario"
+                    placeholder="tuusuario"
                     placeholderTextColor={MUTED}
                     autoCapitalize="none"
                     autoCorrect={false}

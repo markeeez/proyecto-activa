@@ -14,6 +14,7 @@ import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-si
 import * as AppleAuthentication from 'expo-apple-authentication';
 import { supabase } from '@/lib/supabase';
 import { GOOGLE_WEB_CLIENT_ID } from '@/constants/config';
+import { normalizarNombrePerfil } from '@/services/perfil.service';
 
 // ─── Google ───────────────────────────────────────────────────────────────────
 
@@ -42,6 +43,38 @@ export interface SocialAuthResult {
   message?: string;
 }
 
+type AuthUserMetadata = {
+  full_name?: string;
+  name?: string;
+};
+
+function normalizarNombre(nombre: string | null | undefined): string | null {
+  const limpio = normalizarNombrePerfil(nombre ?? '');
+  return limpio ? limpio : null;
+}
+
+function nombreDesdeMetadata(metadata: AuthUserMetadata | null | undefined): string | null {
+  return normalizarNombre(metadata?.full_name) ?? normalizarNombre(metadata?.name);
+}
+
+async function sincronizarNombreSocial(userId: string, nombre: string | null) {
+  if (!nombre) return;
+
+  const { data: perfil } = await supabase
+    .from('profiles')
+    .select('nombre')
+    .eq('id', userId)
+    .maybeSingle();
+
+  const nombreActual = normalizarNombre((perfil as { nombre?: string | null } | null)?.nombre);
+  if (nombreActual && nombreActual !== 'Sin nombre') return;
+
+  await supabase
+    .from('profiles')
+    .update({ nombre })
+    .eq('id', userId);
+}
+
 /**
  * Inicia sesión con Google.
  * 1. Abre el selector de cuenta de Google (nativo).
@@ -64,7 +97,7 @@ export async function loginConGoogle(): Promise<SocialAuthResult> {
       return { ok: false, error: 'UNKNOWN', message: 'No se recibió idToken de Google.' };
     }
 
-    const { error } = await supabase.auth.signInWithIdToken({
+    const { data, error } = await supabase.auth.signInWithIdToken({
       provider: 'google',
       token: response.data.idToken,
     });
@@ -74,6 +107,14 @@ export async function loginConGoogle(): Promise<SocialAuthResult> {
     }
 
     // Éxito: AuthProvider detecta el cambio de sesión automáticamente.
+    const nombreGoogle =
+      normalizarNombre(response.data.user.name) ??
+      nombreDesdeMetadata(data.user?.user_metadata as AuthUserMetadata | null | undefined);
+
+    if (data.user?.id) {
+      await sincronizarNombreSocial(data.user.id, nombreGoogle);
+    }
+
     return { ok: true };
 
   } catch (error: any) {
@@ -127,13 +168,23 @@ export async function loginConApple(): Promise<SocialAuthResult> {
       return { ok: false, error: 'UNKNOWN', message: 'No se recibió identityToken de Apple.' };
     }
 
-    const { error } = await supabase.auth.signInWithIdToken({
+    const { data, error } = await supabase.auth.signInWithIdToken({
       provider: 'apple',
       token: credential.identityToken,
     });
 
     if (error) {
       return { ok: false, error: 'UNKNOWN', message: error.message };
+    }
+
+    const nombreApple = normalizarNombre(
+      [credential.fullName?.givenName, credential.fullName?.familyName]
+        .filter(Boolean)
+        .join(' ')
+    );
+
+    if (data.user?.id) {
+      await sincronizarNombreSocial(data.user.id, nombreApple);
     }
 
     return { ok: true };

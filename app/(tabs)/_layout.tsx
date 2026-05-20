@@ -6,8 +6,7 @@
  *   1. Nutrición     → log diario de comidas
  *   2. Entrenamiento → sesiones de gym
  *   3. Progreso      → métricas corporales y gráficos
- *   4. IA            → chat general con el asistente
- *   5. Perfil        → datos de usuario, plan y ajustes
+ *   4. Perfil        → datos de usuario, plan y ajustes
  *
  * Cada tab tiene su propio Stack interno para gestionar
  * pantallas de detalle sin perder el contexto del tab.
@@ -70,16 +69,17 @@ export default function TabsLayout() {
           ),
         }}
       />
-      {/* Posición 2 — IA (centro oculto bajo el FAB; onFabPress navega aquí) */}
+      {/* IA: ruta conservada, pero oculta en la edición free */}
       <Tabs.Screen
         name="(ia)"
         options={{
           title: 'IA',
           tabBarLabel: 'IA',
           tabBarIcon: () => null,
+          href: null,
         }}
       />
-      {/* Posición 3 — Entreno */}
+      {/* Posición 2 — Entreno */}
       <Tabs.Screen
         name="(entrenamiento)"
         options={{
@@ -90,7 +90,7 @@ export default function TabsLayout() {
           ),
         }}
       />
-      {/* Posición 4 — Más */}
+      {/* Posición 3 — Más */}
       <Tabs.Screen
         name="(perfil)"
         options={{

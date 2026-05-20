@@ -1,8 +1,7 @@
 /**
  * Tab bar inferior — solo presentación (react-native-svg).
  *
- * Diseño: Inicio | Alimentación | [FAB IA centrado] | Entreno | Más
- * El FAB sobresale por encima de la barra y navega a (ia).
+ * Diseño free: Inicio | Alimentación | Entreno | Más
  */
 
 import { Ionicons } from '@expo/vector-icons';
@@ -21,7 +20,6 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Path, Svg } from 'react-native-svg';
 
-import LogoSbBlack from '@/assets/images/logos/logo_sb_black.svg';
 import ProfileNavIcon from '@/assets/images/nav-icons/profile_nav_icon.svg';
 import ProgressNavIcon from '@/assets/images/nav-icons/progress_nav_icon.svg';
 import TrophyIcon from '@/assets/images/trophies/trophy_icon.svg';
@@ -36,8 +34,6 @@ const BORDER_LIGHT  = 'rgba(0,0,0,0.10)';
 
 /* ── Métricas ─────────────────────────────────────────────────────── */
 const TAB_ROW_H  = 49;
-const FAB_SIZE   = 56;
-const FAB_RADIUS = FAB_SIZE / 2;
 const ICON_SIZE  = 24;
 const LABEL_SIZE = 10.5;
 
@@ -46,7 +42,7 @@ const LABEL_SIZE = 10.5;
  * expo-router pasa igualmente todas las rutas al custom tab bar,
  * independientemente de href: null, así que las filtramos aquí.
  */
-const HIDDEN_ROUTES = new Set(['(progreso)', 'index']);
+const HIDDEN_ROUTES = new Set(['(progreso)', '(ia)', 'index']);
 
 /** Path de relleno: rectángulo plano. */
 function fillPath(w: number, h: number): string {
@@ -119,11 +115,6 @@ export function TabBarActivia({
     }
   }, [state.routes, navigation]);
 
-  const onFabPress = useCallback(() => {
-    setMoreExpanded(false);
-    navigateToRoute('(ia)');
-  }, [navigateToRoute]);
-
   const toggleMoreExpanded = useCallback(() => {
     setMoreExpanded(prev => !prev);
   }, []);
@@ -132,9 +123,6 @@ export function TabBarActivia({
     setMoreExpanded(false);
     navigateToRoute(routeName, true);
   }, [navigateToRoute]);
-
-  // El FAB sobresale por encima del borde superior de la barra.
-  const fabBottom = bottomInset + TAB_ROW_H - FAB_RADIUS - 12;
 
   return (
     <View
@@ -173,11 +161,6 @@ export function TabBarActivia({
           const focused     = state.index === index;
           const color       = focused ? c.primary : INACTIVE_GRAY;
           const tabColor    = route.name === '(perfil)' && moreExpanded ? c.primary : color;
-
-          // Espacio vacío bajo el FAB: la ruta (ia) no se renderiza como botón
-          if (route.name === '(ia)') {
-            return <View key={route.key} style={styles.tabCenter} pointerEvents="none" />;
-          }
 
           const onPress = () => {
             if (route.name === '(perfil)') {
@@ -303,30 +286,6 @@ export function TabBarActivia({
         </View>
       </Modal>
 
-      {/* ── Capa 3: FAB IA ────────────────────────────────────────── */}
-      {/*
-        IMPORTANTE: el contenedor (fabWrap) es un View con pointerEvents="box-none",
-        NO un Pressable. Así no intercepta los taps de los tabs que quedan debajo.
-        Solo el círculo interior es Pressable.
-      */}
-      <View
-        style={[styles.fabWrap, { bottom: fabBottom }]}
-        pointerEvents="box-none"
-      >
-        <Pressable
-          onPress={onFabPress}
-          accessibilityRole="button"
-          accessibilityLabel="Abrir asistente IA"
-        >
-          <View style={[styles.fab, { backgroundColor: c.primary, ...Platform.select({
-              ios: { shadowColor: c.primary },
-              default: {},
-            }) }]}>
-            <LogoSbBlack width={26} height={26} />
-          </View>
-        </Pressable>
-      </View>
-
     </View>
   );
 }
@@ -357,10 +316,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     height: TAB_ROW_H,
   },
-  tabCenter: {
-    flex: 1,
-    height: TAB_ROW_H,
-  },
   tabPressed: {
     opacity: 0.85,
   },
@@ -372,32 +327,6 @@ const styles = StyleSheet.create({
     fontSize: LABEL_SIZE,
     fontWeight: '400',
     letterSpacing: 0,
-  },
-
-  fabWrap: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-    height: FAB_SIZE,
-  },
-  fab: {
-    width: FAB_SIZE,
-    height: FAB_SIZE,
-    borderRadius: FAB_RADIUS,
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...Platform.select({
-      ios: {
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.35,
-        shadowRadius: 8,
-      },
-      android: {
-        elevation: 6,
-      },
-      default: {},
-    }),
   },
 
   moreExpandedWrap: {

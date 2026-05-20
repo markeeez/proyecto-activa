@@ -25,8 +25,6 @@ import { MealShareModal } from '@/components/nutricion/MealShareModal';
 import { SortableMealList } from '@/components/SortableMealList';
 import { GlowButton } from '@/components/ui/GlowButton';
 
-import LogoDark from '@/assets/images/logos/logo_sb.svg';
-import LogoLight from '@/assets/images/logos/logo_light_sb.svg';
 import { COMIDAS_PREDETERMINADAS } from '@/constants/comidasPredeterminadas';
 import { useComidaPortapapeles } from '@/context/ComidaPortapapelesContext';
 import { useAuth } from '@/hooks/useAuth';
@@ -248,7 +246,6 @@ function ordenarComidas(comidas: ComidaConAlimentos[], ordenIds: string[] | null
 
 export default function NutricionIndex() {
   const { c, f, ts, s, r, isDark } = useTheme();
-  const MealAiLogo = isDark ? LogoDark : LogoLight;
   const insets = useSafeAreaInsets();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const { user } = useAuth();
@@ -900,9 +897,6 @@ export default function NutricionIndex() {
                 </View>
 
                 <View style={styles.mealActionRow}>
-                  <Pressable style={styles.mealAiBtn} accessibilityRole="button" accessibilityLabel="Asistente IA">
-                    <MealAiLogo width={18} height={18} />
-                  </Pressable>
                   <Pressable
                     style={styles.mealMenuBtn}
                     onPress={(event) => {
@@ -1040,7 +1034,6 @@ export default function NutricionIndex() {
       c.textOnPrimary,
       contentOpacity,
       abrirRegistrarComida,
-      MealAiLogo,
       sugerenciasComidaAnterior,
       sugerenciasDescartadas,
       copiandoComidaAnteriorId,
@@ -1749,16 +1742,6 @@ function makeStyles(
       alignItems: 'center',
       gap: s.xs,
       flexShrink: 0,
-    },
-    mealAiBtn: {
-      width: 36,
-      height: 36,
-      borderRadius: r.md,
-      borderWidth: 1,
-      borderColor: c.primary,
-      backgroundColor: 'transparent',
-      alignItems: 'center',
-      justifyContent: 'center',
     },
     mealMenuBtn: {
       width: 36,

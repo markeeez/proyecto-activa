@@ -55,9 +55,14 @@ export interface Profile {
   username: string;
   nombre: string;
   apellidos: string | null;
+  genero: string | null;
+  edad: number | null;
+  altura_cm: number | null;
+  factor_actividad: number | null;
   plan: Plan;
   email_verified: boolean;
   is_active: boolean;
+  username_last_changed_at: string | null;
   created_at: string;
   updated_at: string;
 }

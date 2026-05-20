@@ -59,7 +59,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const isDark = useMemo(() => {
     if (mode === 'dark') return true;
     if (mode === 'light') return false;
-    return (systemColorScheme ?? 'light') === 'dark';
+    return (systemColorScheme ?? 'dark') === 'dark';
   }, [mode, systemColorScheme]);
 
   const setMode = useCallback((next: ThemeMode) => {

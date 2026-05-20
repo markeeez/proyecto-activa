@@ -20,9 +20,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRouter } from 'expo-router';
 
-import LogoDark from '@/assets/images/logos/logo_sb.svg';
-import LogoLight from '@/assets/images/logos/logo_light_sb.svg';
-
 import { AgregarEjercicioSheet } from '@/components/entrenamiento/AgregarEjercicioSheet';
 import { CrearEjercicioModal } from '@/components/entrenamiento/CrearEjercicioModal';
 import { EjercicioRutinaCard } from '@/components/entrenamiento/EjercicioRutinaCard';
@@ -223,18 +220,6 @@ function makeStyles(t: RoutineTheme, f: ReturnType<typeof useTheme>['f']) {
       paddingVertical: 0,
       paddingHorizontal: 0,
     },
-    aiBtn: {
-      width: 54,
-      minHeight: 46,
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderRadius: 8,
-      borderWidth: 1,
-      borderColor: t.accent,
-      backgroundColor: t.accentSoft,
-      overflow: 'hidden',
-    },
-
     section: { flex: 1, marginTop: 20 },
     sectionHeader: {
       flexDirection: 'row',
@@ -618,17 +603,6 @@ export default function CrearRutinaScreen() {
                 accessibilityLabel="Titulo de la rutina"
               />
             </View>
-            <Pressable
-              style={styles.aiBtn}
-              onPress={() => {}}
-              accessibilityRole="button"
-              accessibilityLabel="Generar con IA"
-            >
-              {isDark
-                ? <LogoDark width={32} height={32} />
-                : <LogoLight width={32} height={32} />
-              }
-            </Pressable>
           </View>
         </View>
 
@@ -645,9 +619,7 @@ export default function CrearRutinaScreen() {
                 <Ionicons name="barbell-outline" size={24} color={t.textSecondary} />
               </View>
               <Text style={styles.emptyTitle}>Aun no hay ejercicios</Text>
-              <Text style={styles.emptyText}>
-                Agrega ejercicios manualmente{String.fromCharCode(10)}o usa la IA para generarlos.
-              </Text>
+              <Text style={styles.emptyText}>Agrega ejercicios manualmente para crear tu rutina.</Text>
               <Pressable
                 style={[styles.addBtn, maxEjerciciosAlcanzado && styles.addBtnDisabled]}
                 onPress={abrirSheetNuevo}

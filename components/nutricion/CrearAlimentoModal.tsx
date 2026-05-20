@@ -3,7 +3,6 @@ import { alimentosService } from '@/services/alimentos.service';
 import type { Food } from '@/types/database.types';
 import { Ionicons } from '@expo/vector-icons';
 import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera';
-import { Image } from 'expo-image';
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
 import {
   ActivityIndicator,
@@ -22,7 +21,7 @@ export type CrearAlimentoModalProps = {
   visible: boolean;
   onClose: () => void;
   userId: string | null | undefined;
-  /** Pestaña inicial al abrir (por defecto 'foto'). */
+  /** Pestaña inicial al abrir (por defecto 'manual'). */
   initialMode?: CrearModo;
   /** Tras crear o resolver por código (OFF). */
   onFoodCreated?: (food: Food) => void;
@@ -39,7 +38,7 @@ export function CrearAlimentoModal({
   visible,
   onClose,
   userId,
-  initialMode = 'foto',
+  initialMode = 'manual',
   onFoodCreated,
   esFavoritoAlimento,
   onToggleFavorito,
@@ -48,14 +47,8 @@ export function CrearAlimentoModal({
   const insets = useSafeAreaInsets();
   const styles = useMemo(() => makeStyles(c, f, ts, s, r, insets.bottom), [c, f, ts, s, r, insets.bottom]);
 
-  const [modo, setModo] = useState<CrearModo>('foto');
+  const [modo, setModo] = useState<CrearModo>('manual');
   const [permission, requestPermission] = useCameraPermissions();
-
-  const [nombreFoto, setNombreFoto] = useState('');
-  const [fotoUri, setFotoUri] = useState<string | null>(null);
-  const [capturando, setCapturando] = useState(false);
-  const [msgFoto, setMsgFoto] = useState<string | null>(null);
-  const [guardandoFoto, setGuardandoFoto] = useState(false);
 
   const [manualNombre, setManualNombre] = useState('');
   const [manualKcal, setManualKcal] = useState('');
@@ -73,8 +66,7 @@ export function CrearAlimentoModal({
   const [foodCodigo, setFoodCodigo] = useState<Food | null>(null);
   const lastScanRef = useRef<{ data: string; t: number }>({ data: '', t: 0 });
 
-  const cameraRef = useRef<CameraView>(null);
-  const prevModoRef = useRef<CrearModo>('foto');
+  const prevModoRef = useRef<CrearModo>('manual');
   /**
    * Fuerza remontaje de cualquier CameraView al cambiar de pestaña.
    * Evita la pantalla negra en Android/iOS cuando la cámara no se
@@ -87,7 +79,7 @@ export function CrearAlimentoModal({
 
   useEffect(() => {
     if (!visible) {
-      prevModoRef.current = 'foto';
+      prevModoRef.current = 'manual';
       return;
     }
     // Cada vez que se entra a una pestaña con cámara desde otra pestaña, forzar remontaje
@@ -101,10 +93,6 @@ export function CrearAlimentoModal({
   useEffect(() => {
     if (!visible) {
       setModo(initialMode);
-      setNombreFoto('');
-      setFotoUri(null);
-      setMsgFoto(null);
-      setGuardandoFoto(false);
       setManualNombre('');
       setManualKcal('');
       setManualP('');
@@ -152,63 +140,6 @@ export function CrearAlimentoModal({
       }
     })();
   }, []);
-
-  const guardarDesdeFoto = async () => {
-    if (!userId) {
-      setMsgFoto('Inicia sesión para crear alimentos.');
-      return;
-    }
-    const nombre = nombreFoto.trim();
-    if (!nombre) {
-      setMsgFoto('Indica el nombre del alimento.');
-      return;
-    }
-    if (!fotoUri) {
-      setMsgFoto('Haz una foto de la etiqueta antes de guardar.');
-      return;
-    }
-    setGuardandoFoto(true);
-    setMsgFoto(null);
-    try {
-      /** Macros en 0 hasta integrar lectura por IA desde la imagen (`fotoUri`). */
-      const food = await alimentosService.crearAlimentoPersonalizado(userId, {
-        nombre,
-        calorias: 0,
-        proteinas: 0,
-        carbohidratos: 0,
-        grasas: 0,
-        fibra: null,
-        azucar: null,
-      });
-      onFoodCreated?.(food);
-      onClose();
-    } catch (e: unknown) {
-      setMsgFoto(e instanceof Error ? e.message : 'No se pudo guardar.');
-    } finally {
-      setGuardandoFoto(false);
-    }
-  };
-
-  const tomarFotoEtiqueta = async () => {
-    if (!cameraRef.current || !camaraNativa || fotoUri) return;
-    setCapturando(true);
-    try {
-      const pic = await cameraRef.current.takePictureAsync({ quality: 0.55 });
-      if (pic?.uri) setFotoUri(pic.uri);
-    } catch {
-      /* noop */
-    } finally {
-      setCapturando(false);
-    }
-  };
-
-  const repetirFoto = () => {
-    setFotoUri(null);
-    setMsgFoto(null);
-  };
-
-  const puedeGuardarFoto =
-    Boolean(userId) && nombreFoto.trim().length > 0 && Boolean(fotoUri);
 
   /** Valida macros vs kcal y guarda o muestra aviso. */
   const guardarManual = async () => {
@@ -284,52 +215,6 @@ export function CrearAlimentoModal({
     setMostrarAvisoKcal(false);
   };
 
-  /** Vista previa de la captura en el mismo recuadro que la cámara, o cámara en vivo. */
-  const renderCuadroFotoEtiqueta = () => {
-    if (fotoUri) {
-      return (
-        <View style={[styles.cameraBox, styles.cameraFlexFill]}>
-          <Image source={{ uri: fotoUri }} style={StyleSheet.absoluteFill} contentFit="cover" />
-          <ScannerCorners styles={styles} />
-        </View>
-      );
-    }
-    if (!camaraNativa) {
-      return (
-        <View style={[styles.cameraPlaceholder, styles.cameraFlexFill]}>
-          <Text style={styles.cameraPlaceholderText}>
-            La cámara no está disponible en web. Usa la app en el móvil para esta función.
-          </Text>
-        </View>
-      );
-    }
-    if (!permission?.granted) {
-      return (
-        <Pressable style={[styles.permBox, styles.cameraFlexFill]} onPress={() => requestPermission()}>
-          <Ionicons name="camera-outline" size={36} color={c.textMuted} />
-          <Text style={styles.permText}>Toca para permitir el acceso a la cámara</Text>
-        </Pressable>
-      );
-    }
-    return (
-      <View style={[styles.cameraBox, styles.cameraFlexFill]}>
-        <CameraView
-          key={`foto-cam-${cameraMountGen}`}
-          ref={cameraRef}
-          style={StyleSheet.absoluteFill}
-          facing="back"
-          active={visible && modo === 'foto' && !fotoUri}
-        />
-        <View style={styles.photoCaptureButton} pointerEvents="none">
-          <View style={styles.photoCaptureInner}>
-            <Ionicons name="camera-outline" size={28} color={c.primary} />
-          </View>
-        </View>
-        <ScannerCorners styles={styles} />
-      </View>
-    );
-  };
-
   const renderCamaraEscaner = () => {
     if (!camaraNativa) {
       return (
@@ -387,77 +272,6 @@ export function CrearAlimentoModal({
             <View style={styles.topBarSpacer} />
           </View>
 
-          {modo === 'foto' && (
-            <View style={styles.bodyFlex}>
-              <View style={styles.fotoHeader}>
-                <View style={styles.modeHeading}>
-                  <Text style={styles.sectionTitle}>1. Crea con una foto</Text>
-                  <View style={styles.modeIcon}>
-                    <Ionicons name="camera-outline" size={17} color={c.primary} />
-                  </View>
-                </View>
-                <Text style={styles.sectionSubtitle}>
-                  Haz una foto a la etiqueta nutricional e indica el nombre. Las calorías y macros se completarán más
-                  adelante con un modelo de IA.
-                </Text>
-                <Text style={styles.fieldLabel}>Nombre del alimento</Text>
-                <TextInput
-                  {...inputProps}
-                  placeholder="Ej. Yogur natural Hacendado"
-                  value={nombreFoto}
-                  onChangeText={setNombreFoto}
-                />
-                <View style={styles.aiNote}>
-                  <Ionicons name="sparkles" size={18} color={c.primary} />
-                  <Text style={styles.aiNoteText}>
-                    Las calorías y macros se guardan en 0 por ahora.{'\n'}Nuestro modelo de IA las calculará próximamente a partir de la imagen.
-                  </Text>
-                </View>
-              </View>
-              <View style={styles.fotoCameraArea}>{renderCuadroFotoEtiqueta()}</View>
-              <View style={styles.fotoFooter}>
-                <View style={styles.photoHintRow}>
-                  <Ionicons name="bulb-outline" size={15} color={c.textMuted} />
-                  <Text style={styles.photoHintText}>Asegúrate de que la imagen esté bien enfocada y con buena iluminación.</Text>
-                </View>
-                <Pressable
-                  style={[
-                    styles.primaryBtn,
-                    (capturando || (!fotoUri && (!permission?.granted || !camaraNativa))) && styles.btnDisabled,
-                  ]}
-                  onPress={fotoUri ? repetirFoto : tomarFotoEtiqueta}
-                  disabled={
-                    capturando || (!fotoUri && (!permission?.granted || !camaraNativa))
-                  }
-                >
-                  {capturando && !fotoUri ? (
-                    <ActivityIndicator color={c.textOnPrimary} />
-                  ) : (
-                    <>
-                      <Ionicons name="camera-outline" size={17} color={c.textOnPrimary} />
-                      <Text style={styles.primaryBtnText}>{fotoUri ? 'Repetir foto' : 'Hacer foto'}</Text>
-                    </>
-                  )}
-                </Pressable>
-                {!!msgFoto && <Text style={styles.msgError}>{msgFoto}</Text>}
-                <Pressable
-                  style={[
-                    styles.secondaryBtn,
-                    (!puedeGuardarFoto || guardandoFoto) && styles.btnDisabled,
-                  ]}
-                  onPress={guardarDesdeFoto}
-                  disabled={!puedeGuardarFoto || guardandoFoto}
-                >
-                  {guardandoFoto ? (
-                    <ActivityIndicator color={c.primary} />
-                  ) : (
-                    <Text style={styles.secondaryBtnText}>Guardar alimento</Text>
-                  )}
-                </Pressable>
-              </View>
-            </View>
-          )}
-
           {modo === 'manual' && (
             <ScrollView
               style={styles.bodyFlex}
@@ -466,7 +280,7 @@ export function CrearAlimentoModal({
               showsVerticalScrollIndicator={false}
             >
               <View style={styles.modeHeading}>
-                <Text style={styles.sectionTitle}>2. Añade un alimento</Text>
+                <Text style={styles.sectionTitle}>Añade un alimento</Text>
                 <View style={styles.modeIcon}>
                   <Ionicons name="create-outline" size={17} color={c.primary} />
                 </View>
@@ -558,7 +372,7 @@ export function CrearAlimentoModal({
             <View style={styles.bodyFlex}>
               <View style={styles.escanerHeader}>
                 <View style={styles.modeHeading}>
-                  <Text style={styles.sectionTitle}>3. Escanea código de barras</Text>
+                  <Text style={styles.sectionTitle}>Escanea código de barras</Text>
                   <View style={styles.modeIcon}>
                     <Ionicons name="barcode-outline" size={17} color={c.primary} />
                   </View>
@@ -637,24 +451,8 @@ export function CrearAlimentoModal({
 
           <View style={styles.segmentWrap}>
             <Pressable
-              style={[styles.segmentItem, modo === 'foto' && styles.segmentItemActive]}
-              onPress={() => setModo('foto')}
-            >
-              <Ionicons
-                name="camera-outline"
-                size={22}
-                color={modo === 'foto' ? c.primary : c.textMuted}
-              />
-              <Text style={[styles.segmentLabel, modo === 'foto' && styles.segmentLabelActive]}>FOTO</Text>
-            </Pressable>
-            <Pressable
               style={[styles.segmentItem, modo === 'manual' && styles.segmentItemActive]}
-              onPress={() => {
-                setModo('manual');
-                if (manualNombre.trim().length === 0 && nombreFoto.trim().length > 0) {
-                  setManualNombre(nombreFoto.trim());
-                }
-              }}
+              onPress={() => setModo('manual')}
             >
               <Ionicons
                 name="create-outline"
