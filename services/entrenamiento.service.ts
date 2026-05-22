@@ -16,6 +16,7 @@ import type { TipoSeriePlantillaDb } from '@/lib/entrenamientoSerie';
 import type { RecordBaseline, RecordEvent, RecordType, RecordUsuario } from '@/lib/entrenamientoRecords';
 import { fechaIsoDesdeDate } from '@/lib/fechaNutricion';
 import type { SesionCompleta } from '@/types/app.types';
+import { logger } from '@/lib/logger';
 
 /** Listado de rutinas con nombres de ejercicios (plantilla). */
 export type RutinaListaVista = {
@@ -391,7 +392,7 @@ async function obtenerMetaRutina(routineId: string): Promise<RoutineMetaRow | nu
     .maybeSingle();
 
   if (error) {
-    console.error('[obtenerMetaRutina]', error.message);
+    logger.error('[obtenerMetaRutina]', error.message);
     return null;
   }
   return (data as RoutineMetaRow | null) ?? null;
@@ -400,26 +401,26 @@ async function obtenerMetaRutina(routineId: string): Promise<RoutineMetaRow | nu
 async function limpiarRutinaClonada(routineId: string): Promise<void> {
   const { data: reRows, error: reErr } = await supabase.from('routine_exercises').select('id').eq('routine_id', routineId);
   if (reErr) {
-    console.error('[limpiarRutinaClonada] routine_exercises select', reErr.message);
+    logger.error('[limpiarRutinaClonada] routine_exercises select', reErr.message);
   } else {
     const routineExerciseIds = (reRows ?? []).map((row: { id: string }) => row.id);
     if (routineExerciseIds.length > 0) {
       const { error: rsErr } = await supabase.from('routine_sets').delete().in('routine_exercise_id', routineExerciseIds);
-      if (rsErr) console.error('[limpiarRutinaClonada] routine_sets delete', rsErr.message);
+      if (rsErr) logger.error('[limpiarRutinaClonada] routine_sets delete', rsErr.message);
     }
     const { error: delReErr } = await supabase.from('routine_exercises').delete().eq('routine_id', routineId);
-    if (delReErr) console.error('[limpiarRutinaClonada] routine_exercises delete', delReErr.message);
+    if (delReErr) logger.error('[limpiarRutinaClonada] routine_exercises delete', delReErr.message);
   }
 
   const { error: delRoutineErr } = await supabase.from('routines').delete().eq('id', routineId);
-  if (delRoutineErr) console.error('[limpiarRutinaClonada] routines delete', delRoutineErr.message);
+  if (delRoutineErr) logger.error('[limpiarRutinaClonada] routines delete', delRoutineErr.message);
 }
 
 async function escribirRutinaEjercicios(routineId: string, ejercicios: BorradorEjercicioRutina[]): Promise<void> {
   // Paso 0 — borrar ejercicios anteriores (cascade borra sus sets)
   const { error: delErr } = await supabase.from('routine_exercises').delete().eq('routine_id', routineId);
   if (delErr) {
-    console.error('[escribirRutinaEjercicios] delete', delErr.message);
+    logger.error('[escribirRutinaEjercicios] delete', delErr.message);
     throw new Error(delErr.message);
   }
 
@@ -439,7 +440,7 @@ async function escribirRutinaEjercicios(routineId: string, ejercicios: BorradorE
     .select('id, exercise_id, orden');
 
   if (errRe || !reRows?.length) {
-    console.error('[escribirRutinaEjercicios] routine_exercises', errRe?.message);
+    logger.error('[escribirRutinaEjercicios] routine_exercises', errRe?.message);
     throw new Error(errRe?.message ?? 'No se pudo guardar la rutina.');
   }
 
@@ -466,7 +467,7 @@ async function escribirRutinaEjercicios(routineId: string, ejercicios: BorradorE
 
   const { error: errSet } = await supabase.from('routine_sets').insert(setRows);
   if (errSet) {
-    console.error('[escribirRutinaEjercicios] routine_sets', errSet.message);
+    logger.error('[escribirRutinaEjercicios] routine_sets', errSet.message);
     throw new Error(errSet.message);
   }
 }
@@ -486,7 +487,7 @@ async function clonarRutinaBase(original: RoutineMetaRow, userId: string): Promi
     .single();
 
   if (errRoutine || !routineRow?.id) {
-    console.error('[clonarRutinaBase] routines', errRoutine?.message);
+    logger.error('[clonarRutinaBase] routines', errRoutine?.message);
     throw new Error(errRoutine?.message ?? 'No se pudo clonar la rutina.');
   }
 
@@ -517,7 +518,7 @@ async function clonarRutinaBase(original: RoutineMetaRow, userId: string): Promi
     .order('orden');
 
   if (exerciseErr) {
-    console.error('[clonarRutinaBase] routine_exercises', exerciseErr.message);
+    logger.error('[clonarRutinaBase] routine_exercises', exerciseErr.message);
     await limpiarRutinaClonada(nuevoRoutineId);
     throw new Error(exerciseErr.message);
   }
@@ -535,7 +536,7 @@ async function clonarRutinaBase(original: RoutineMetaRow, userId: string): Promi
       .single();
 
     if (newReErr || !newReRow?.id) {
-      console.error('[clonarRutinaBase] clone routine_exercises', newReErr?.message);
+      logger.error('[clonarRutinaBase] clone routine_exercises', newReErr?.message);
       await limpiarRutinaClonada(nuevoRoutineId);
       throw new Error(newReErr?.message ?? 'No se pudo clonar la rutina.');
     }
@@ -554,7 +555,7 @@ async function clonarRutinaBase(original: RoutineMetaRow, userId: string): Promi
       });
 
       if (setErr) {
-        console.error('[clonarRutinaBase] clone routine_sets', setErr.message);
+        logger.error('[clonarRutinaBase] clone routine_sets', setErr.message);
         await limpiarRutinaClonada(nuevoRoutineId);
         throw new Error(setErr.message);
       }
@@ -581,6 +582,26 @@ export const entrenamientoService = {
       return { ok: false, error: 'Añade al menos un ejercicio.' };
     }
 
+    const LIMITE_RUTINAS_FREE = 10;
+    const MSG_LIMITE_FREE = `Has alcanzado el máximo de ${LIMITE_RUTINAS_FREE} rutinas del plan Free. Elimina una para crear otra o mejora tu plan.`;
+
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('plan')
+      .eq('id', userId)
+      .single();
+
+    if (profile?.plan === 'free') {
+      const { count } = await supabase
+        .from('routines')
+        .select('id', { count: 'exact', head: true })
+        .eq('created_by', userId);
+
+      if ((count ?? 0) >= LIMITE_RUTINAS_FREE) {
+        return { ok: false, error: MSG_LIMITE_FREE };
+      }
+    }
+
     const { data: routineRow, error: errRoutine } = await supabase
       .from('routines')
       .insert({
@@ -593,8 +614,11 @@ export const entrenamientoService = {
       .single();
 
     if (errRoutine || !routineRow?.id) {
-      console.error('[guardarRutinaDesdeBorrador] routines', errRoutine?.message);
-      return { ok: false, error: errRoutine?.message ?? 'No se pudo crear la rutina.' };
+      logger.error('[guardarRutinaDesdeBorrador] routines', errRoutine?.message);
+      const msg = errRoutine?.message?.includes('ROUTINE_LIMIT_REACHED')
+        ? MSG_LIMITE_FREE
+        : errRoutine?.message ?? 'No se pudo crear la rutina.';
+      return { ok: false, error: msg };
     }
 
     const routineId = routineRow.id as string;
@@ -614,7 +638,7 @@ export const entrenamientoService = {
       .select('id, exercise_id, orden');
 
     if (errRe || !reRows?.length) {
-      console.error('[guardarRutinaDesdeBorrador] routine_exercises', errRe?.message);
+      logger.error('[guardarRutinaDesdeBorrador] routine_exercises', errRe?.message);
       return { ok: false, error: errRe?.message ?? 'Error al guardar ejercicios de la rutina.' };
     }
 
@@ -643,7 +667,7 @@ export const entrenamientoService = {
     if (setRows.length > 0) {
       const { error: errSet } = await supabase.from('routine_sets').insert(setRows);
       if (errSet) {
-        console.error('[guardarRutinaDesdeBorrador] routine_sets', errSet.message);
+        logger.error('[guardarRutinaDesdeBorrador] routine_sets', errSet.message);
         return { ok: false, error: errSet.message };
       }
     }
@@ -659,7 +683,7 @@ export const entrenamientoService = {
       .order('updated_at', { ascending: false });
 
     if (error) {
-      console.error('[obtenerMisRutinas]', error.message);
+      logger.error('[obtenerMisRutinas]', error.message);
       return [];
     }
     return (data ?? []).map((row) => mapRoutineJoin(row as RoutineJoinRow));
@@ -675,7 +699,7 @@ export const entrenamientoService = {
       .maybeSingle();
 
     if (error) {
-      console.error('[obtenerRutinaInicialUsuario]', error.message);
+      logger.error('[obtenerRutinaInicialUsuario]', error.message);
       return null;
     }
     return data as { id: string; nombre: string } | null;
@@ -684,7 +708,7 @@ export const entrenamientoService = {
   async crearRutinaInicialDesdePredeterminada(): Promise<string | null> {
     const { data, error } = await supabase.rpc('crear_rutina_inicial');
     if (error) {
-      console.error('[crearRutinaInicialDesdePredeterminada]', error.message);
+      logger.error('[crearRutinaInicialDesdePredeterminada]', error.message);
       return null;
     }
     return (data as string | null) ?? null;
@@ -697,7 +721,7 @@ export const entrenamientoService = {
       .eq('user_id', userId);
 
     if (error) {
-      console.error('[obtenerRutinasFavoritas]', error.message);
+      logger.error('[obtenerRutinasFavoritas]', error.message);
       return [];
     }
 
@@ -725,7 +749,7 @@ export const entrenamientoService = {
         .delete()
         .eq('user_id', userId)
         .eq('routine_id', routineId);
-      if (error) console.error('[toggleFavoritoRutina] delete', error.message);
+      if (error) logger.error('[toggleFavoritoRutina] delete', error.message);
       return;
     }
 
@@ -733,7 +757,7 @@ export const entrenamientoService = {
       user_id: userId,
       routine_id: routineId,
     });
-    if (error) console.error('[toggleFavoritoRutina] insert', error.message);
+    if (error) logger.error('[toggleFavoritoRutina] insert', error.message);
   },
 
   async obtenerRoutineIdsFavoritas(userId: string): Promise<string[]> {
@@ -743,7 +767,7 @@ export const entrenamientoService = {
       .eq('user_id', userId);
 
     if (error) {
-      console.error('[obtenerRoutineIdsFavoritas]', error.message);
+      logger.error('[obtenerRoutineIdsFavoritas]', error.message);
       return [];
     }
     return (data ?? []).map((r: { routine_id: string }) => r.routine_id);
@@ -764,7 +788,7 @@ export const entrenamientoService = {
       .maybeSingle();
 
     if (error) {
-      console.error('[obtenerDetalleRutina]', error.message);
+      logger.error('[obtenerDetalleRutina]', error.message);
       return null;
     }
     if (!data) return null;
@@ -782,7 +806,7 @@ export const entrenamientoService = {
       .maybeSingle();
 
     if (ultimaSesionError) {
-      console.error('[obtenerDetalleRutina] ultima sesion', ultimaSesionError.message);
+      logger.error('[obtenerDetalleRutina] ultima sesion', ultimaSesionError.message);
     } else if (ultimaSesion?.id) {
       type UltimaWseRow = {
         orden: number;
@@ -803,7 +827,7 @@ export const entrenamientoService = {
         .order('orden');
 
       if (ultimaWseError) {
-        console.error('[obtenerDetalleRutina] ultima sesion sets', ultimaWseError.message);
+        logger.error('[obtenerDetalleRutina] ultima sesion sets', ultimaWseError.message);
       } else {
         for (const wse of (ultimaWse ?? []) as UltimaWseRow[]) {
           for (const set of wse.workout_sets ?? []) {
@@ -975,7 +999,7 @@ export const entrenamientoService = {
       .single();
 
     if (error || !data?.id) {
-      console.error('[crearWorkoutSession]', error?.message);
+      logger.error('[crearWorkoutSession]', error?.message);
       throw new Error(error?.message ?? 'No se pudo crear la sesión');
     }
     return data.id as string;
@@ -986,7 +1010,7 @@ export const entrenamientoService = {
     const horaFin = fin.toISOString();
     const fecha = fechaIsoDesdeDate(fin);
     const { error } = await supabase.from('workout_sessions').update({ fecha, hora_fin: horaFin }).eq('id', sessionId);
-    if (error) console.error('[marcarHoraFinWorkoutSession]', error.message);
+    if (error) logger.error('[marcarHoraFinWorkoutSession]', error.message);
   },
 
   async actualizarWorkoutSession(
@@ -998,7 +1022,7 @@ export const entrenamientoService = {
     if (datos.routine_id !== undefined) payload.routine_id = datos.routine_id;
     if (Object.keys(payload).length === 0) return;
     const { error } = await supabase.from('workout_sessions').update(payload).eq('id', sessionId);
-    if (error) console.error('[actualizarWorkoutSession]', error.message);
+    if (error) logger.error('[actualizarWorkoutSession]', error.message);
   },
 
   async actualizarDuracionSesion(
@@ -1023,7 +1047,7 @@ export const entrenamientoService = {
       .order('orden');
 
     if (error) {
-      console.error('[cargarEjerciciosDesdeRutina]', error.message);
+      logger.error('[cargarEjerciciosDesdeRutina]', error.message);
       return [];
     }
 
@@ -1069,7 +1093,7 @@ export const entrenamientoService = {
     });
 
     if (error) {
-      console.error('[obtenerAnteriorPorEjercicio]', error.message);
+      logger.error('[obtenerAnteriorPorEjercicio]', error.message);
       return null;
     }
 
@@ -1100,7 +1124,7 @@ export const entrenamientoService = {
         .single();
 
       if (errWse || !wseRow?.id) {
-        console.error('[guardarSetsCompletados] workout_session_exercises', errWse?.message);
+        logger.error('[guardarSetsCompletados] workout_session_exercises', errWse?.message);
         continue;
       }
 
@@ -1124,7 +1148,7 @@ export const entrenamientoService = {
           })
           .select('id')
           .single();
-        if (errSet) console.error('[guardarSetsCompletados] workout_sets', errSet.message);
+        if (errSet) logger.error('[guardarSetsCompletados] workout_sets', errSet.message);
         else if (setRow?.id) workoutSetIds.push(setRow.id as string);
       }
     }
@@ -1133,7 +1157,7 @@ export const entrenamientoService = {
       const { error } = await supabase.rpc('registrar_record_events_para_sets', {
         p_set_ids: workoutSetIds,
       });
-      if (error) console.error('[guardarSetsCompletados] registrar_record_events_para_sets', error.message);
+      if (error) logger.error('[guardarSetsCompletados] registrar_record_events_para_sets', error.message);
     }
   },
 
@@ -1146,7 +1170,7 @@ export const entrenamientoService = {
     });
 
     if (error) {
-      console.error('[obtenerRecordsVigentesEjercicios]', error.message);
+      logger.error('[obtenerRecordsVigentesEjercicios]', error.message);
       return [];
     }
 
@@ -1165,7 +1189,7 @@ export const entrenamientoService = {
     });
 
     if (error) {
-      console.error('[obtenerRecordEventsSesion]', error.message);
+      logger.error('[obtenerRecordEventsSesion]', error.message);
       return [];
     }
 
@@ -1191,7 +1215,7 @@ export const entrenamientoService = {
       .order('achieved_at', { ascending: false });
 
     if (error) {
-      console.error('[obtenerTodosLosRecords]', error.message);
+      logger.error('[obtenerTodosLosRecords]', error.message);
       return [];
     }
 
@@ -1226,7 +1250,7 @@ export const entrenamientoService = {
       .eq('session_id', sessionId);
 
     if (errEjercicios) {
-      console.error('[descartarWorkoutSession] workout_session_exercises', errEjercicios.message);
+      logger.error('[descartarWorkoutSession] workout_session_exercises', errEjercicios.message);
       throw new Error(errEjercicios.message);
     }
 
@@ -1234,20 +1258,20 @@ export const entrenamientoService = {
     if (ejercicioIds.length > 0) {
       const { error: errSets } = await supabase.from('workout_sets').delete().in('session_exercise_id', ejercicioIds);
       if (errSets) {
-        console.error('[descartarWorkoutSession] workout_sets', errSets.message);
+        logger.error('[descartarWorkoutSession] workout_sets', errSets.message);
         throw new Error(errSets.message);
       }
 
       const { error: errWse } = await supabase.from('workout_session_exercises').delete().eq('session_id', sessionId);
       if (errWse) {
-        console.error('[descartarWorkoutSession] workout_session_exercises delete', errWse.message);
+        logger.error('[descartarWorkoutSession] workout_session_exercises delete', errWse.message);
         throw new Error(errWse.message);
       }
     }
 
     const { error } = await supabase.from('workout_sessions').delete().eq('id', sessionId);
     if (error) {
-      console.error('[descartarWorkoutSession]', error.message);
+      logger.error('[descartarWorkoutSession]', error.message);
       throw new Error(error.message);
     }
   },
@@ -1260,7 +1284,7 @@ export const entrenamientoService = {
   async eliminarSesion(sessionId: string): Promise<void> {
     const { error } = await supabase.from('workout_sessions').delete().eq('id', sessionId);
     if (error) {
-      console.error('[eliminarSesion]', error.message);
+      logger.error('[eliminarSesion]', error.message);
       throw new Error(error.message);
     }
   },
@@ -1273,7 +1297,7 @@ export const entrenamientoService = {
     const { data: auth, error: authErr } = await supabase.auth.getUser();
     const userId = auth.user?.id ?? null;
     if (authErr || !userId) {
-      console.error('[actualizarRutinaDesdeEntreno] auth', authErr?.message);
+      logger.error('[actualizarRutinaDesdeEntreno] auth', authErr?.message);
       throw new Error('Debes iniciar sesión para guardar la rutina.');
     }
 
@@ -1289,7 +1313,7 @@ export const entrenamientoService = {
       if (tituloLimpio && tituloLimpio !== meta.nombre) {
         const { error: updateErr } = await supabase.from('routines').update({ nombre: tituloLimpio }).eq('id', routineId);
         if (updateErr) {
-          console.error('[actualizarRutinaDesdeEntreno] routines update', updateErr.message);
+          logger.error('[actualizarRutinaDesdeEntreno] routines update', updateErr.message);
           throw new Error(updateErr.message);
         }
       }
@@ -1306,7 +1330,7 @@ export const entrenamientoService = {
           .update({ nombre: tituloLimpio })
           .eq('id', nuevoRoutineId);
         if (updateErr) {
-          console.error('[actualizarRutinaDesdeEntreno] clone routines update', updateErr.message);
+          logger.error('[actualizarRutinaDesdeEntreno] clone routines update', updateErr.message);
           throw new Error(updateErr.message);
         }
       }
@@ -1355,7 +1379,7 @@ export const entrenamientoService = {
       .order('hora_inicio', { ascending: true });
 
     if (error) {
-      console.error('[obtenerSesionesSemana]', error.message);
+      logger.error('[obtenerSesionesSemana]', error.message);
       return [];
     }
     return ((data ?? []) as SesionSemanaRow[]).map((r) => ({
@@ -1387,7 +1411,7 @@ export const entrenamientoService = {
       .order('hora_inicio', { ascending: true });
 
     if (sesionesError) {
-      console.error('[obtenerResumenSesionesSemana] sessions', sesionesError.message);
+      logger.error('[obtenerResumenSesionesSemana] sessions', sesionesError.message);
       return [];
     }
 
@@ -1416,7 +1440,7 @@ export const entrenamientoService = {
       .in('session_id', sessionIds);
 
     if (wseError) {
-      console.error('[obtenerResumenSesionesSemana] wse', wseError.message);
+      logger.error('[obtenerResumenSesionesSemana] wse', wseError.message);
       // Devolver sesiones sin stats antes que fallar completamente
       return sesiones.map((s) => ({ sesion: s, ejercicios: 0, series: 0, volumenKg: 0 }));
     }
@@ -1461,7 +1485,7 @@ export const entrenamientoService = {
     });
 
     if (error) {
-      console.error('[obtenerVolumenSemanaKg]', error.message);
+      logger.error('[obtenerVolumenSemanaKg]', error.message);
       return 0;
     }
 
@@ -1483,7 +1507,7 @@ export const entrenamientoService = {
       .maybeSingle();
 
     if (error) {
-      console.error('[obtenerDetalleSesion]', error.message);
+      logger.error('[obtenerDetalleSesion]', error.message);
       return null;
     }
     if (!data) return null;
@@ -1551,7 +1575,7 @@ export const entrenamientoService = {
       .maybeSingle();
 
     if (errSess) {
-      console.error('[obtenerUltimaSesionRutina] session', errSess.message);
+      logger.error('[obtenerUltimaSesionRutina] session', errSess.message);
       return null;
     }
     if (!sess?.id) return null;
@@ -1581,7 +1605,7 @@ export const entrenamientoService = {
       .order('orden');
 
     if (errWse) {
-      console.error('[obtenerUltimaSesionRutina] wse', errWse.message);
+      logger.error('[obtenerUltimaSesionRutina] wse', errWse.message);
       return { sessionId, ejercicios: [] };
     }
 
@@ -1648,7 +1672,7 @@ export const entrenamientoService = {
       .range(from, to);
 
     if (error) {
-      console.error('[obtenerEntrenosPaginados]', error.message);
+      logger.error('[obtenerEntrenosPaginados]', error.message);
       return [];
     }
 
@@ -1734,13 +1758,13 @@ export const entrenamientoService = {
     ]);
 
     if (rutinaRes.error) {
-      console.error('[obtenerRutinasPredeterminadas]', rutinaRes.error.message);
+      logger.error('[obtenerRutinasPredeterminadas]', rutinaRes.error.message);
       throw new Error(rutinaRes.error.message);
     }
     const data = rutinaRes.data;
 
     if (favRes.error) {
-      console.error('[obtenerRutinasPredeterminadas] favoritos', favRes.error.message);
+      logger.error('[obtenerRutinasPredeterminadas] favoritos', favRes.error.message);
     }
     const favoritos = new Set(
       ((favRes.data ?? []) as { routine_id: string }[]).map((r) => r.routine_id),
@@ -1793,7 +1817,7 @@ export const entrenamientoService = {
 export async function toggleFavoritoRutina(rutinaId: string, esFavorita: boolean): Promise<void> {
   const { data: auth, error: authErr } = await supabase.auth.getUser();
   if (authErr || !auth.user?.id) {
-    console.error('[toggleFavoritoRutina] sin usuario', authErr?.message);
+    logger.error('[toggleFavoritoRutina] sin usuario', authErr?.message);
     return;
   }
   const userId = auth.user.id;
@@ -1803,7 +1827,7 @@ export async function toggleFavoritoRutina(rutinaId: string, esFavorita: boolean
       routine_id: rutinaId,
     });
     if (error && error.code !== '23505') {
-      console.error('[toggleFavoritoRutina] insert', error.message);
+      logger.error('[toggleFavoritoRutina] insert', error.message);
     }
   } else {
     const { error } = await supabase
@@ -1811,7 +1835,7 @@ export async function toggleFavoritoRutina(rutinaId: string, esFavorita: boolean
       .delete()
       .eq('user_id', userId)
       .eq('routine_id', rutinaId);
-    if (error) console.error('[toggleFavoritoRutina] delete', error.message);
+    if (error) logger.error('[toggleFavoritoRutina] delete', error.message);
   }
 }
 
@@ -1821,7 +1845,7 @@ export async function toggleFavoritoRutina(rutinaId: string, esFavorita: boolean
 export async function cambiarNombreRutina(rutinaId: string, nuevoNombre: string): Promise<void> {
   const { data: auth, error: authErr } = await supabase.auth.getUser();
   if (authErr || !auth.user?.id) {
-    console.error('[cambiarNombreRutina] auth', authErr?.message);
+    logger.error('[cambiarNombreRutina] auth', authErr?.message);
     throw new Error('Debes iniciar sesión para cambiar el nombre de la rutina.');
   }
   const userId = auth.user.id;
@@ -1838,7 +1862,7 @@ export async function cambiarNombreRutina(rutinaId: string, nuevoNombre: string)
     .select('id');
 
   if (error) {
-    console.error('[cambiarNombreRutina]', error.message);
+    logger.error('[cambiarNombreRutina]', error.message);
     throw new Error(error.message || 'No se pudo actualizar el nombre de la rutina.');
   }
   if (!data?.length) {
@@ -1852,7 +1876,7 @@ export async function cambiarNombreRutina(rutinaId: string, nuevoNombre: string)
 export async function borrarRutina(rutinaId: string): Promise<void> {
   const { data: auth, error: authErr } = await supabase.auth.getUser();
   if (authErr || !auth.user?.id) {
-    console.error('[borrarRutina] auth', authErr?.message);
+    logger.error('[borrarRutina] auth', authErr?.message);
     throw new Error('Debes iniciar sesión para borrar la rutina.');
   }
   const userId = auth.user.id;
@@ -1865,7 +1889,7 @@ export async function borrarRutina(rutinaId: string): Promise<void> {
     .select('id');
 
   if (error) {
-    console.error('[borrarRutina]', error.message);
+    logger.error('[borrarRutina]', error.message);
     throw new Error(error.message || 'No se pudo borrar la rutina.');
   }
   if (!data?.length) {

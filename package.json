@@ -9,7 +9,11 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "lint": "expo lint",
+    "test": "node --experimental-strip-types --test tests/*.test.ts tests/*.test.mjs",
     "test:records": "node --experimental-strip-types --test tests/entrenamientoRecords.test.ts",
+    "test:logger": "node --experimental-strip-types --test tests/logger.test.ts",
+    "test:avatar": "node --experimental-strip-types --test tests/avatar.test.ts",
+    "test:rls": "node --env-file=.env --test tests/rls.test.mjs",
     "test:fatsecret": "node scripts/test-fatsecret.mjs",
     "test:usda": "node scripts/test-usda.mjs",
     "test:openfoodfacts": "node scripts/test-openfoodfacts.mjs"

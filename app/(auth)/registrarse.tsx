@@ -21,6 +21,7 @@ import { GlowBeams } from '@/components/ui/GlowBeams';
 import { GlowButton } from '@/components/ui/GlowButton';
 import { Colors } from '@/constants/theme';
 import { supabase } from '@/lib/supabase';
+import { traducirErrorAuth } from '@/services/auth.service';
 import { normalizarNombrePerfil } from '@/services/perfil.service';
 import { loginConGoogle } from '@/services/social-auth.service';
 
@@ -100,13 +101,8 @@ export default function Registrarse() {
     setUsernameStatus('checking');
 
     const timer = setTimeout(async () => {
-      const { data } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('username', username)
-        .maybeSingle();
-
-      setUsernameStatus(data ? 'taken' : 'available');
+      const { data } = await supabase.rpc('username_disponible', { p_username: username });
+      setUsernameStatus(data === true ? 'available' : 'taken');
     }, 600);
 
     return () => clearTimeout(timer);
@@ -143,11 +139,18 @@ export default function Registrarse() {
 
     if (signUpError) {
       setCargando(false);
-      setError(signUpError.message);
+      setError(traducirErrorAuth(signUpError));
       return;
     }
 
     setCargando(false);
+
+    // Supabase devuelve identities:[] cuando el email ya existe (user_repeated_signup).
+    // En ese caso no se envía correo — hay que informar al usuario.
+    if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+      setError('Este email ya está registrado. Inicia sesión con el método con el que te diste de alta.');
+      return;
+    }
 
     if (!data.session) {
       router.replace({
@@ -219,8 +222,17 @@ export default function Registrarse() {
             </View>
 
             <View style={st.fieldBlock}>
-              <View style={st.inputRow}>
-                <Ionicons name="at-outline" size={22} color={CYAN} style={st.inputIcon} />
+              <View style={[
+                st.inputRow,
+                (usernameStatus === 'taken' || usernameStatus === 'invalid') && st.inputRowError,
+                usernameStatus === 'available' && st.inputRowOk,
+              ]}>
+                <Ionicons
+                  name="at-outline"
+                  size={22}
+                  color={usernameStatus === 'taken' || usernameStatus === 'invalid' ? AUTH.dangerText : usernameStatus === 'available' ? CYAN : CYAN}
+                  style={st.inputIcon}
+                />
                 <View style={st.inputBody}>
                   <Text style={st.label}>USUARIO</Text>
                   <TextInput
@@ -238,7 +250,22 @@ export default function Registrarse() {
                     maxLength={20}
                   />
                 </View>
+                {usernameStatus === 'checking' && (
+                  <ActivityIndicator size="small" color={MUTED} />
+                )}
+                {usernameStatus === 'available' && (
+                  <Ionicons name="checkmark-circle" size={20} color={CYAN} />
+                )}
+                {(usernameStatus === 'taken' || usernameStatus === 'invalid') && (
+                  <Ionicons name="close-circle" size={20} color={AUTH.dangerText} />
+                )}
               </View>
+              {usernameStatus === 'taken' && (
+                <Text style={st.fieldError}>Este usuario ya está en uso</Text>
+              )}
+              {usernameStatus === 'invalid' && username.length > 0 && (
+                <Text style={st.fieldError}>Solo letras y números, entre 3 y 20 caracteres</Text>
+              )}
             </View>
 
             <View style={st.fieldBlock}>
@@ -430,6 +457,19 @@ const st = StyleSheet.create({
     borderWidth: 1,
     borderColor: BORDER,
     backgroundColor: SURFACE,
+  },
+  inputRowError: {
+    borderColor: AUTH.dangerText,
+  },
+  inputRowOk: {
+    borderColor: CYAN,
+  },
+  fieldError: {
+    marginTop: 4,
+    marginLeft: 4,
+    fontSize: 12,
+    lineHeight: 15,
+    color: AUTH.dangerText,
   },
   inputIcon: {
     width: 24,

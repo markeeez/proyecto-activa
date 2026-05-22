@@ -5,7 +5,6 @@ import { DeviceEventEmitter } from 'react-native';
 import { useAuth } from '@/hooks/useAuth';
 import { NUTRICION_LOG_ACTUALIZADO } from '@/lib/nutricionEvents';
 import { trackOnboardingEvent } from '@/lib/onboardingAnalytics';
-import { solicitarNotificacionesTrasPrimerValor } from '@/lib/onboardingNotifications';
 import { activacionService, type EstadoActivacion } from '@/services/activacion.service';
 
 const ESTADO_INICIAL: EstadoActivacion = {
@@ -71,12 +70,6 @@ export function useActivationState() {
     });
     return () => sub.remove();
   }, [recargar]);
-
-  useEffect(() => {
-    if (estado.haRegistradoComida || estado.haIniciadoEntreno) {
-      void solicitarNotificacionesTrasPrimerValor();
-    }
-  }, [estado.haIniciadoEntreno, estado.haRegistradoComida]);
 
   return { estado, cargando, inicializado, recargar };
 }

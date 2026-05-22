@@ -26,7 +26,7 @@ import {
   type ObjetivoUi,
 } from '@/lib/onboardingParams';
 
-const TOTAL_PASOS = 6;
+const TOTAL_PASOS = 7;
 const AUTH = Colors.dark;
 const BG = AUTH.background;
 const CYAN = AUTH.primary;

@@ -252,6 +252,9 @@ function makeStyles(
       shadowOffset: { width: 0, height: 4 },
       elevation: theme.shadowOpacity > 0 ? 2 : 0,
     },
+    quickCardDisabled: {
+      opacity: 0.5,
+    },
     quickIconBox: {
       width: 42,
       height: 42,
@@ -706,13 +709,16 @@ export function RutinasListadoTab() {
   const [listAreaLayout, setListAreaLayout] = useState<LayoutBox>({ x: 20, y: 0, width: 0, height: 0 });
   const [confirmRoutine, setConfirmRoutine] = useState<Routine | null>(null);
   const [eliminandoRoutineId, setEliminandoRoutineId] = useState<string | null>(null);
+  const [limiteModalVisible, setLimiteModalVisible] = useState(false);
   const [iniciandoVacio, setIniciandoVacio] = useState(false);
   const [rutinaIniciandoId, setRutinaIniciandoId] = useState<string | null>(null);
   const iniciandoVacioRef = useRef(false);
   const rutinaIniciandoRef = useRef<string | null>(null);
   const routineLayoutsRef = useRef<Record<string, LayoutBox>>({});
 
-  const { misRutinas, favoritas, loading, reload, removeRoutine, removeFavorite } = useRoutines(user?.id);
+  const { misRutinas, favoritas, plan, loading, reload, removeRoutine, removeFavorite } = useRoutines(user?.id);
+  const LIMITE_RUTINAS_FREE = 10;
+  const haAlcanzadoLimiteRutinas = plan === 'free' && misRutinas.length >= LIMITE_RUTINAS_FREE;
   const rutinasFiltradas = filtroRutinas === 'mis' ? misRutinas : favoritas;
   const hayEntrenoActivo = entrenoActivo != null;
 
@@ -838,9 +844,16 @@ export function RutinasListadoTab() {
 
       <View style={styles.quickActionsRow}>
         <Pressable
-          style={styles.quickCard}
-          onPress={() => router.push('/(tabs)/(entrenamiento)/crear-rutina')}
+          style={[styles.quickCard, haAlcanzadoLimiteRutinas && styles.quickCardDisabled]}
+          onPress={() => {
+            if (haAlcanzadoLimiteRutinas) {
+              setLimiteModalVisible(true);
+              return;
+            }
+            router.push('/(tabs)/(entrenamiento)/crear-rutina');
+          }}
           accessibilityRole="button"
+          accessibilityState={{ disabled: haAlcanzadoLimiteRutinas }}
         >
           <View style={styles.quickIconBox}>
             <Ionicons name="document-text-outline" size={22} color={theme.textPrimary} />
@@ -853,7 +866,9 @@ export function RutinasListadoTab() {
           </View>
           <View style={styles.quickTextWrap}>
             <Text style={styles.quickTitle} numberOfLines={1}>Nueva rutina</Text>
-            <Text style={styles.quickSubtitle} numberOfLines={2}>Crea una rutina desde cero</Text>
+            <Text style={styles.quickSubtitle} numberOfLines={2}>
+              {haAlcanzadoLimiteRutinas ? `Límite ${LIMITE_RUTINAS_FREE}/${LIMITE_RUTINAS_FREE} alcanzado` : 'Crea una rutina desde cero'}
+            </Text>
           </View>
         </Pressable>
 
@@ -1112,6 +1127,34 @@ export function RutinasListadoTab() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      <Modal
+        visible={limiteModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setLimiteModalVisible(false)}
+      >
+        <Pressable style={styles.modalOverlay} onPress={() => setLimiteModalVisible(false)}>
+          <Pressable style={styles.confirmCard} onPress={(event) => event.stopPropagation()}>
+            <View style={styles.confirmAccent} />
+            <Text style={styles.confirmTitle}>Límite alcanzado</Text>
+            <Text style={styles.confirmBody}>
+              Has alcanzado el máximo de{' '}
+              <Text style={styles.confirmRoutineName}>{LIMITE_RUTINAS_FREE} rutinas</Text>{' '}
+              del plan Free. Elimina una para crear otra o mejora tu plan.
+            </Text>
+            <View style={styles.confirmActions}>
+              <Pressable
+                style={[styles.confirmButton, styles.confirmCancelButton]}
+                onPress={() => setLimiteModalVisible(false)}
+                accessibilityRole="button"
+              >
+                <Text style={styles.confirmCancelText}>Entendido</Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
       {/* --- RUTINAS TAB END --- */}
     </View>
   );
@@ -1121,6 +1164,7 @@ export function RutinasListadoTab() {
 function useRoutines(userId?: string) {
   const [misRutinas, setMisRutinas] = useState<Routine[]>([]);
   const [favoritas, setFavoritas] = useState<Routine[]>([]);
+  const [plan, setPlan] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const load = useCallback(
@@ -1128,6 +1172,7 @@ function useRoutines(userId?: string) {
       if (!userId) {
         setMisRutinas([]);
         setFavoritas([]);
+        setPlan(null);
         setLoading(false);
         return;
       }
@@ -1137,7 +1182,7 @@ function useRoutines(userId?: string) {
         const routineSelect =
           'id, nombre, created_by, routine_exercises ( orden, exercises ( nombre, musculo_primario, musculos_secundarios ) )';
 
-        const [misRes, favRes] = await Promise.all([
+        const [misRes, favRes, profileRes] = await Promise.all([
           supabase
             .from('routines')
             .select(routineSelect)
@@ -1147,6 +1192,7 @@ function useRoutines(userId?: string) {
             .from('user_favorite_routines')
             .select(`routines ( ${routineSelect} )`)
             .eq('user_id', userId),
+          supabase.from('profiles').select('plan').eq('id', userId).single(),
         ]);
 
         if (misRes.error || favRes.error) {
@@ -1172,6 +1218,7 @@ function useRoutines(userId?: string) {
 
         setMisRutinas(nextMis);
         setFavoritas(nextFavoritas);
+        setPlan(profileRes.data?.plan ?? null);
       } finally {
         if (alive()) setLoading(false);
       }
@@ -1202,7 +1249,7 @@ function useRoutines(userId?: string) {
     setFavoritas((rows) => rows.filter((routine) => routine.id !== routineId));
   }, []);
 
-  return { misRutinas, favoritas, loading, reload, removeRoutine, removeFavorite };
+  return { misRutinas, favoritas, plan, loading, reload, removeRoutine, removeFavorite };
 }
 
 function mapRoutine(row: RoutineJoinRow, userId: string, isCommunity: boolean): Routine {

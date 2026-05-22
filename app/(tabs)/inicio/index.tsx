@@ -11,6 +11,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Polyline, Rect } from 'react-native-svg';
 import {
+  DeviceEventEmitter,
   ScrollView,
   StyleSheet,
   Text,
@@ -36,6 +37,7 @@ import { emitNutricionLogActualizado } from '@/lib/nutricionEvents';
 import { calcularEstadoDia } from '@/lib/nutricionEstadoDia';
 import { alimentosService } from '@/services/alimentos.service';
 import { nutricionService } from '@/services/nutricion.service';
+import { NOTIFICACIONES_CAMBIADAS, notificacionesService } from '@/services/notificaciones.service';
 import type { Food } from '@/types/database.types';
 
 const GAUGE_SIZE = 110;
@@ -167,6 +169,23 @@ export default function HomeScreen() {
   const insets   = useSafeAreaInsets();
   const { user } = useAuth();
   const { estado: estadoActivacion, inicializado: activacionInicializada } = useActivationState();
+  const [notificacionesPendientes, setNotificacionesPendientes] = useState(0);
+
+  const cargarResumenNotificaciones = useCallback(async () => {
+    if (!user?.id) {
+      setNotificacionesPendientes(0);
+      return;
+    }
+    const resumen = await notificacionesService.obtenerResumenNoLeidas(user.id).catch(() => ({ unreadCount: 0 }));
+    setNotificacionesPendientes(resumen.unreadCount);
+  }, [user?.id]);
+
+  useEffect(() => {
+    const sub = DeviceEventEmitter.addListener(NOTIFICACIONES_CAMBIADAS, () => {
+      void cargarResumenNotificaciones();
+    });
+    return () => sub.remove();
+  }, [cargarResumenNotificaciones]);
 
   /* ── Datos del header ── */
   const [nombre, setNombre] = useState<string | null>(null);
@@ -314,7 +333,8 @@ export default function HomeScreen() {
   useFocusEffect(useCallback(() => {
     cargarUltimoEntreno();
     void cargarProgreso();
-  }, [cargarUltimoEntreno, cargarProgreso]));
+    void cargarResumenNotificaciones();
+  }, [cargarUltimoEntreno, cargarProgreso, cargarResumenNotificaciones]));
 
   const MENSAJES_MOTIVACION = [
     '¡Hoy es un buen día para empezar! 💪',
@@ -433,13 +453,16 @@ export default function HomeScreen() {
           <Text style={[st.date, { color: c.textSecondary }]}>{fechaHoy}</Text>
         </View>
 
-        {/* Icono estadísticas */}
+        {/* Icono notificaciones */}
         <TouchableOpacity
-          onPress={() => router.push('/(tabs)/(progreso)/estadisticas-ejercicio')}
+          onPress={() => router.push('/(tabs)/inicio/notificaciones')}
           activeOpacity={0.7}
           style={[st.headerIconButton, { backgroundColor: c.surface, borderColor: c.border }]}
         >
           <Ionicons name="notifications-outline" size={24} color={c.textDisplay} />
+          {notificacionesPendientes > 0 ? (
+            <View style={[st.notificationDot, { backgroundColor: c.danger, borderColor: c.surface }]} />
+          ) : null}
         </TouchableOpacity>
       </View>
 
@@ -819,6 +842,15 @@ const st = StyleSheet.create({
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  notificationDot: {
+    position: 'absolute',
+    top: 7,
+    right: 7,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    borderWidth: 1.5,
   },
   greeting: {
     fontFamily: FontFamily.sansBold,

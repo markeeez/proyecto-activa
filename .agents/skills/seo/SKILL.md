@@ -253,7 +253,7 @@ X-Frame-Options: DENY
   "@type": "Organization",
   "name": "Example Company",
   "url": "https://example.com",
-  "logo": "https://example.com/logo.png",
+  "logo": "https://example.com/icon.png",
   "sameAs": [
     "https://twitter.com/example",
     "https://linkedin.com/company/example"
@@ -287,7 +287,7 @@ X-Frame-Options: DENY
     "name": "Example Blog",
     "logo": {
       "@type": "ImageObject",
-      "url": "https://example.com/logo.png"
+      "url": "https://example.com/.png"
     }
   },
   "datePublished": "2024-01-15",

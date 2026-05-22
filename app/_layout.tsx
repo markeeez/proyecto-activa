@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { DarkTheme, DefaultTheme, ThemeProvider as NavigationThemeProvider } from '@react-navigation/native';
-import { Stack } from 'expo-router';
+import * as Notifications from 'expo-notifications';
+import { router, Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
 import * as SplashScreen from 'expo-splash-screen';
@@ -26,7 +27,9 @@ import { AuthProvider } from '@/context/AuthContext';
 import { EntrenoProvider } from '@/context/EntrenoContext';
 import { ThemeProvider } from '@/context/ThemeContext';
 import { TimerDescansoProvider } from '@/context/TimerDescansoContext';
+import { useAuth } from '@/hooks/useAuth';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { notificacionesService } from '@/services/notificaciones.service';
 import { configurarGoogle } from '@/services/social-auth.service';
 
 SplashScreen.preventAutoHideAsync();
@@ -38,6 +41,7 @@ configurarGoogle();
 
 function RootLayoutNav() {
   const colorScheme = useColorScheme();
+  const { user } = useAuth();
 
   const [fontsLoaded, fontError] = useFonts({
     SpaceGrotesk_300Light,
@@ -54,6 +58,47 @@ function RootLayoutNav() {
       SplashScreen.hideAsync();
     }
   }, [fontsLoaded, fontError]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    void notificacionesService.registrarDispositivo(user.id).catch(() => undefined);
+    void notificacionesService.sincronizarRecordatoriosLocales(user.id).catch(() => undefined);
+    void notificacionesService.reconciliarNotificacionesPresentadas().catch(() => undefined);
+  }, [user?.id]);
+
+  useEffect(() => {
+    const abrirDesdeNotificacion = (response: Notifications.NotificationResponse | null | undefined) => {
+      if (response?.notification) {
+        void notificacionesService.marcarNotificacionLocalLeida(response.notification).catch(() => undefined);
+        const data = response.notification.request.content.data;
+        const remoteEventId = typeof data?.notificationEventId === 'string'
+          ? data.notificationEventId
+          : typeof data?.eventId === 'string'
+            ? data.eventId
+            : null;
+        if (remoteEventId) {
+          void notificacionesService.marcarEventoLeido(remoteEventId).then(() => {
+            notificacionesService.emitirCambio();
+          }).catch(() => undefined);
+        }
+      }
+      const url = response?.notification.request.content.data?.url;
+      if (typeof url === 'string' && url.startsWith('/')) {
+        router.push(url as any);
+      }
+    };
+
+    const receivedSub = Notifications.addNotificationReceivedListener((notification) => {
+      void notificacionesService.registrarNotificacionLocal(notification).catch(() => undefined);
+      notificacionesService.emitirCambio();
+    });
+    const responseSub = Notifications.addNotificationResponseReceivedListener(abrirDesdeNotificacion);
+    void Notifications.getLastNotificationResponseAsync().then(abrirDesdeNotificacion).catch(() => undefined);
+    return () => {
+      receivedSub.remove();
+      responseSub.remove();
+    };
+  }, []);
 
   if (!fontsLoaded && !fontError) {
     return null;

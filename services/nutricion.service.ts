@@ -16,6 +16,7 @@ import type {
   UltimaComidaAnteriorNutricion,
 } from '@/types/app.types';
 import type { NutritionLog, UserGoal } from '@/types/database.types';
+import { logger } from '@/lib/logger';
 
 function normalizarNombre(s: string): string {
   return s
@@ -51,7 +52,7 @@ async function consolidarDuplicadosSlotsPredeterminadosLog(logId: string): Promi
     p_log_id: logId,
   });
   if (error) {
-    console.warn('[nutricionService] consolidar: rpc', error.message);
+    logger.warn('[nutricionService] consolidar: rpc', error.message);
   }
 }
 

@@ -32,6 +32,7 @@ import type {
     FoodTier,
 } from '@/types/database.types';
 import { FunctionsHttpError } from '@supabase/supabase-js';
+import { logger } from '@/lib/logger';
 
 // ---------------------------------------------------------------------------
 // DICCIONARIO DE ALIMENTOS BÁSICOS
@@ -153,7 +154,7 @@ const INCLUIR_BASICOS_EN_BUSQUEDA = false;
 /** Logs visibles en Metro/Expo (`npx expo run:android`); las Edge Functions loguean solo en el dashboard de Supabase. */
 function dbgAlimentos(...args: unknown[]): void {
   if (typeof __DEV__ !== 'undefined' && __DEV__) {
-    console.log('[Vertice/alimentos]', ...args);
+    logger.info('alimentos', args.length === 1 ? args[0] : args);
   }
 }
 
@@ -185,10 +186,10 @@ async function logEdgeFunctionError(name: string, err: unknown): Promise<void> {
     } catch {
       body = '';
     }
-    console.warn(`[alimentos] ${name} HTTP ${res.status}`, body || err.message);
+    logger.warn(`[alimentos] ${name} HTTP ${res.status}`, body || err.message);
     return;
   }
-  console.warn(`[alimentos] ${name}:`, err instanceof Error ? err.message : String(err));
+  logger.warn(`[alimentos] ${name}:`, err instanceof Error ? err.message : String(err));
 }
 
 async function refreshSessionIfNeeded(): Promise<void> {
@@ -327,7 +328,7 @@ export const alimentosService = {
       await supabase.rpc('increment_food_popularity', { p_food_id: foodId });
     } catch (e: any) {
       if (typeof __DEV__ !== 'undefined' && __DEV__) {
-        console.warn('[registrarSeleccionPopularity]', e?.message);
+        logger.warn('[registrarSeleccionPopularity]', e?.message);
       }
     }
   },

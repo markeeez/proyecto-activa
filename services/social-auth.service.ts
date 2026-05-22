@@ -14,6 +14,7 @@ import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-si
 import * as AppleAuthentication from 'expo-apple-authentication';
 import { supabase } from '@/lib/supabase';
 import { GOOGLE_WEB_CLIENT_ID } from '@/constants/config';
+import { traducirErrorAuth } from '@/services/auth.service';
 import { normalizarNombrePerfil } from '@/services/perfil.service';
 
 // ─── Google ───────────────────────────────────────────────────────────────────
@@ -103,7 +104,7 @@ export async function loginConGoogle(): Promise<SocialAuthResult> {
     });
 
     if (error) {
-      return { ok: false, error: 'UNKNOWN', message: error.message };
+      return { ok: false, error: 'UNKNOWN', message: traducirErrorAuth(error) };
     }
 
     // Éxito: AuthProvider detecta el cambio de sesión automáticamente.
@@ -174,7 +175,7 @@ export async function loginConApple(): Promise<SocialAuthResult> {
     });
 
     if (error) {
-      return { ok: false, error: 'UNKNOWN', message: error.message };
+      return { ok: false, error: 'UNKNOWN', message: traducirErrorAuth(error) };
     }
 
     const nombreApple = normalizarNombre(

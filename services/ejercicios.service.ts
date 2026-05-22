@@ -13,6 +13,7 @@ import {
 } from '@/lib/texto';
 import { supabase } from '@/lib/supabase';
 import type { CategoriaEjercicio, Exercise } from '@/types/database.types';
+import { logger } from '@/lib/logger';
 
 export type ModoListaEjercicios = 'general' | 'favoritos' | 'creados';
 
@@ -50,7 +51,7 @@ async function obtenerPorPaginas<T>(
     const { data, error } = await buildQuery().range(from, to);
 
     if (error) {
-      console.error(contextoError, error.message);
+      logger.error(contextoError, error.message);
       return out;
     }
 
@@ -95,7 +96,7 @@ export const ejerciciosService = {
     // menos resultados de los esperados si había filtro de equipamiento).
     if (modoLista === 'creados') {
       if (!userId) {
-        console.warn('[ejerciciosService] buscarEjercicios modo creados sin userId');
+        logger.warn('ejerciciosService.buscarEjercicios', 'modo creados sin userId');
         return [];
       }
       const { data, error } = await supabase
@@ -106,7 +107,7 @@ export const ejerciciosService = {
         .order('nombre');
 
       if (error) {
-        console.error('[ejerciciosService.buscarEjercicios] creados', error.message);
+        logger.error('[ejerciciosService.buscarEjercicios] creados', error.message);
         return [];
       }
 
@@ -230,7 +231,7 @@ export const ejerciciosService = {
       .eq('user_id', userId);
 
     if (error) {
-      console.error('[ejerciciosService.obtenerEjerciciosFavoritos]', error.message);
+      logger.error('[ejerciciosService.obtenerEjerciciosFavoritos]', error.message);
       return [];
     }
     return (data ?? []).map((r: { exercise_id: string }) => r.exercise_id);
@@ -250,7 +251,7 @@ export const ejerciciosService = {
         .delete()
         .eq('user_id', userId)
         .eq('exercise_id', exerciseId);
-      if (error) console.error('[toggleFavoritoEjercicio] delete', error.message);
+      if (error) logger.error('[toggleFavoritoEjercicio] delete', error.message);
       return;
     }
 
@@ -258,7 +259,7 @@ export const ejerciciosService = {
       user_id: userId,
       exercise_id: exerciseId,
     });
-    if (error) console.error('[toggleFavoritoEjercicio] insert', error.message);
+    if (error) logger.error('[toggleFavoritoEjercicio] insert', error.message);
   },
 
   async obtenerMusculosDisponibles(): Promise<string[]> {
@@ -335,7 +336,7 @@ export const ejerciciosService = {
     const { data, error } = await supabase.from('exercises').select('*').eq('id', id).maybeSingle();
 
     if (error) {
-      console.error('[ejerciciosService.obtenerEjercicio]', error.message);
+      logger.error('[ejerciciosService.obtenerEjercicio]', error.message);
       return null;
     }
     return data as Exercise | null;
@@ -375,7 +376,7 @@ export const ejerciciosService = {
       .single();
 
     if (error) {
-      console.error('[ejerciciosService.crearEjercicioPersonalizado]', error.message);
+      logger.error('[ejerciciosService.crearEjercicioPersonalizado]', error.message);
       return null;
     }
     return data as Exercise;

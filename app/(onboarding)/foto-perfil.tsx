@@ -13,7 +13,7 @@ import { subirAvatar } from '@/lib/avatar';
 import { leerParam } from '@/lib/onboardingParams';
 import { supabase } from '@/lib/supabase';
 
-const TOTAL_PASOS = 6;
+const TOTAL_PASOS = 7;
 const AUTH = Colors.dark;
 const BG = AUTH.background;
 const CYAN = AUTH.primary;
@@ -89,7 +89,7 @@ export default function OnboardingFotoPerfilPantalla() {
       const value = leerParam(rawParams[key]);
       if (value != null) params[key] = value;
     }
-    router.push({ pathname: '/(onboarding)/descanso', params });
+    router.push({ pathname: '/(onboarding)/notificaciones', params });
   };
 
   return (

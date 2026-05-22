@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/supabase';
 import { trackOnboardingEvent } from '@/lib/onboardingAnalytics';
 import { entrenamientoService } from '@/services/entrenamiento.service';
+import { logger } from '@/lib/logger';
 
 export type EstadoActivacion = {
   tieneObjetivos: boolean;
@@ -21,7 +22,7 @@ const ESTADO_VACIO: EstadoActivacion = {
 async function existeComidaRegistrada(): Promise<boolean> {
   const { data, error } = await supabase.rpc('usuario_tiene_comida_registrada');
   if (error) {
-    if (__DEV__) console.warn('[usuario_tiene_comida_registrada]', error.message);
+    logger.warn('activacion.usuario_tiene_comida_registrada', error);
     return false;
   }
   return Boolean(data);

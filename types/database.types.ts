@@ -48,6 +48,14 @@ export type ContextoIA =
 
 export type RolMensaje = 'user' | 'assistant';
 
+export type NotificationReminderRepeatType = 'once' | 'daily' | 'weekdays';
+
+export type SmartNotificationType =
+  | 'no_food_today'
+  | 'calories_remaining'
+  | 'no_workout_3_days'
+  | 'weigh_in';
+
 // ─── Tablas ───────────────────────────────────────────────────────────────────
 
 export interface Profile {
@@ -60,7 +68,6 @@ export interface Profile {
   altura_cm: number | null;
   factor_actividad: number | null;
   plan: Plan;
-  email_verified: boolean;
   is_active: boolean;
   username_last_changed_at: string | null;
   created_at: string;
@@ -86,6 +93,59 @@ export interface UserBodyMetric {
   grasa_corporal: number | null;
   fecha: string; // date ISO
   created_at: string;
+}
+
+export interface NotificationReminder {
+  id: string;
+  user_id: string;
+  title: string;
+  body: string | null;
+  hour: number;
+  minute: number;
+  repeat_type: NotificationReminderRepeatType;
+  weekdays: number[];
+  enabled: boolean;
+  next_trigger_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface NotificationPreference {
+  id: string;
+  user_id: string;
+  type: SmartNotificationType;
+  enabled: boolean;
+  hour: number;
+  minute: number;
+  timezone: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface NotificationEvent {
+  id: string;
+  user_id: string;
+  type: SmartNotificationType;
+  title: string;
+  body: string;
+  data: Record<string, unknown>;
+  scheduled_for_date: string;
+  read_at: string | null;
+  sent_at: string | null;
+  created_at: string;
+}
+
+export interface NotificationDevice {
+  id: string;
+  user_id: string;
+  expo_push_token: string;
+  platform: 'ios' | 'android' | 'web' | 'unknown';
+  device_name: string | null;
+  timezone: string;
+  enabled: boolean;
+  last_seen_at: string;
+  created_at: string;
+  updated_at: string;
 }
 
 /** Curado local vs referencia genérica vs producto preparado/marca */

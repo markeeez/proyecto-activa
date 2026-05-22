@@ -27,6 +27,7 @@ import { GlowButton } from '@/components/ui/GlowButton';
 import { GlowBeams } from '@/components/ui/GlowBeams';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/lib/supabase';
+import { traducirErrorAuth } from '@/services/auth.service';
 import { loginConGoogle } from '@/services/social-auth.service';
 
 const SW = Dimensions.get('window').width;
@@ -92,7 +93,7 @@ export default function IniciarSesion() {
       password,
     });
     setCargando(false);
-    if (authError) { setError(authError.message); return; }
+    if (authError) { setError(traducirErrorAuth(authError)); return; }
     router.replace('/');
   };
 

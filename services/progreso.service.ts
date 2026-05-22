@@ -4,6 +4,7 @@
 
 import { supabase } from '@/lib/supabase';
 import { agregarDiasIso, fechaHoyIsoLocal, fechaIsoDesdeDate, parseFechaLocal } from '@/lib/fechaNutricion';
+import { logger } from '@/lib/logger';
 
 /** Plan nutricional guardado en `user_goals` (pantalla progreso / personalizar). */
 export type PlanActual = {
@@ -242,7 +243,7 @@ async function obtenerTodasLasFilas<T>(
     const to = from + SUPABASE_PAGE_SIZE - 1;
     const { data, error } = await buildQuery().range(from, to);
     if (error) {
-      console.error(contextoError, error.message);
+      logger.error(contextoError, error.message);
       throw error;
     }
 
@@ -668,7 +669,7 @@ export const progresoService = {
       .limit(1)
       .maybeSingle();
     if (error) {
-      console.error('[obtenerPesoUsuario]', error.message);
+      logger.error('[obtenerPesoUsuario]', error.message);
       return null;
     }
     const raw = data?.peso_kg;
@@ -690,7 +691,7 @@ export const progresoService = {
       .eq('workout_sessions.user_id', userId);
 
     if (error) {
-      console.error('[progresoService.obtenerEjerciciosRealizados]', error.message);
+      logger.error('[progresoService.obtenerEjerciciosRealizados]', error.message);
       return [];
     }
 

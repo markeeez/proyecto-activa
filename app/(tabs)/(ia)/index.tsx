@@ -1,53 +1,96 @@
 /**
- * PANTALLA: Chat general con IA
+ * Pantalla IA en la edicion free: muestra siempre upgrade-screen.
  *
- * Conversación libre con el asistente de ACTIVA.
- * Solo disponible para usuarios con plan plus o premium.
- *
- * Datos que necesita:
- *   - ai_chat_sessions (contexto_tipo: 'general', del usuario actual)
- *   - ai_chat_messages (últimos N según plan: ai_mensajes_historial)
- *   - ai_usage (mensajes_mes_actual vs límite del plan)
- *   - plan_limits (del plan del usuario)
- *
- * Comportamiento según plan:
- *   - free: muestra pantalla de upgrade, sin acceso al chat
- *   - plus: acceso con límite de 100 mensajes/mes, historial de 20
- *   - premium: acceso con límite de 1000 mensajes/mes, historial de 50
- *
- * Componentes:
- *   - <BurbujaMensaje rol="user" /> y <BurbujaMensaje rol="assistant" />
- *   - <InputChat /> con botón de enviar
- *   - <BadgePlan /> con mensajes restantes del mes
- *
- * Acciones:
- *   - ia.service.ts → obtenerSesionGeneral()
- *   - ia.service.ts → enviarMensaje(sessionId, contenido)
- *   - ia.service.ts → verificarLimiteMensajes()
- *
- * Nota sobre historial:
- *   El historial enviado a Claude se limita a los últimos N mensajes
- *   según plan, pero en BD se guardan todos para referencia del usuario.
+ * La ruta esta oculta del tab bar (ver app/(tabs)/_layout.tsx href: null).
+ * Si alguien navega directamente, ve este mensaje, no un stub vacio ni
+ * un chat sin implementar.
  */
 
-import { Text, View, StyleSheet } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-export default function IAIndex() {
-  // TODO: verificar plan → si es free, mostrar pantalla de upgrade
+import { FontFamily } from '@/constants/theme';
+import { useTheme } from '@/hooks/useTheme';
+
+export default function IAUpgradeScreen() {
+  const { c } = useTheme();
+  const insets = useSafeAreaInsets();
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.titulo}>Asistente</Text>
+    <View style={[styles.root, { backgroundColor: c.background, paddingTop: insets.top + 16 }]}>
+      <View style={styles.iconWrap}>
+        <Ionicons name="sparkles-outline" size={40} color={c.primary} />
+      </View>
+      <Text style={[styles.kicker, { color: c.primary, fontFamily: FontFamily.mono }]}>
+        ASISTENTE
+      </Text>
+      <Text style={[styles.title, { color: c.textDisplay, fontFamily: FontFamily.sansBold }]}>
+        Disponible proximamente
+      </Text>
+      <Text style={[styles.subtitle, { color: c.textSecondary, fontFamily: FontFamily.sans }]}>
+        El asistente personal de Vertice todavia no esta abierto. Si quieres ser
+        de los primeros en probarlo, escribenos desde tu perfil.
+      </Text>
 
-      {/* TODO: <BadgePlan /> con mensajes restantes */}
-      {/* TODO: ScrollView con <BurbujaMensaje /> */}
-      {/* TODO: <InputChat /> anclado al fondo */}
-      {/* TODO: Estado vacío para primera conversación */}
+      <Pressable
+        onPress={() => router.replace('/(tabs)/inicio')}
+        style={[styles.cta, { borderColor: c.borderVisible }]}
+        accessibilityRole="button"
+      >
+        <Text style={[styles.ctaText, { color: c.text, fontFamily: FontFamily.sansBold }]}>
+          Volver a inicio
+        </Text>
+      </Pressable>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  titulo: { fontSize: 24, fontWeight: 'bold', padding: 16 },
+  root: {
+    flex: 1,
+    paddingHorizontal: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  iconWrap: {
+    width: 84,
+    height: 84,
+    borderRadius: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 28,
+    borderWidth: 1,
+    borderColor: 'rgba(0,212,255,0.25)',
+  },
+  kicker: {
+    fontSize: 11,
+    letterSpacing: 2.4,
+    marginBottom: 8,
+  },
+  title: {
+    fontSize: 24,
+    lineHeight: 30,
+    letterSpacing: -0.4,
+    textAlign: 'center',
+  },
+  subtitle: {
+    marginTop: 12,
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: 'center',
+    maxWidth: 320,
+  },
+  cta: {
+    marginTop: 32,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  ctaText: {
+    fontSize: 12,
+    letterSpacing: 1.8,
+  },
 });

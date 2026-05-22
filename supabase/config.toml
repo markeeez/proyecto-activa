@@ -10,3 +10,7 @@ verify_jwt = false
 
 [functions.fatsecret-search]
 verify_jwt = false
+
+# Invocada por Supabase Cron con secreto server-side.
+[functions.smart-notifications]
+verify_jwt = false

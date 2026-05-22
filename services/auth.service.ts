@@ -1,75 +1,47 @@
 /**
- * SERVICIO DE AUTENTICACIÓN
+ * Servicios de autenticación que NO son llamadas directas a supabase.auth.
  *
- * Gestiona todo lo relacionado con la sesión del usuario via Supabase Auth.
- * El perfil se crea automáticamente mediante el trigger de Supabase.
+ * Las pantallas de auth usan `supabase.auth.signInWithPassword/signUp/...`
+ * directamente; este modulo solo expone utilidades adicionales (recuperación
+ * de contraseña vía deeplink, traducción de errores).
  */
 
 import { supabase } from '@/lib/supabase';
 
 export const PASSWORD_RECOVERY_REDIRECT_TO = 'proyectoactiva://restablecer-contrasena';
 
-export const authService = {
-  /**
-   * Inicia sesión con email y contraseña.
-   * @returns session del usuario o error
-   */
-  async iniciarSesion(email: string, contrasena: string) {
-    // TODO: implementar
-    // return supabase.auth.signInWithPassword({ email, password: contrasena });
-  },
+type ErrorLike = { message?: string; code?: string; name?: string } | null | undefined;
 
-  /**
-   * Registra un nuevo usuario.
-   * El trigger on_auth_user_created crea automáticamente profiles.
-   * @param email
-   * @param contrasena
-   * @param datosExtra - nombre y username para el perfil
-   */
-  async registrarse(
-    email: string,
-    contrasena: string,
-    datosExtra: { nombre: string; username: string }
+export function traducirErrorAuth(error: ErrorLike): string {
+  if (!error) return 'Ha ocurrido un error. Inténtalo de nuevo.';
+  const code = (error.code ?? '').toLowerCase();
+  const message = (error.message ?? '').toLowerCase();
+
+  if (
+    code === 'user_already_exists' ||
+    code === 'identity_already_exists' ||
+    message.includes('already registered') ||
+    message.includes('user already registered') ||
+    message.includes('identity already linked')
   ) {
-    // TODO: implementar
-    // 1. supabase.auth.signUp({ email, password: contrasena, options: { data: datosExtra } })
-    // 2. El trigger crea el perfil con nombre y username de options.data
-  },
+    return 'Este email ya está registrado. Inicia sesión con el método con el que te diste de alta.';
+  }
 
-  /**
-   * Cierra la sesión del usuario actual.
-   */
-  async cerrarSesion() {
-    // TODO: implementar
-    // return supabase.auth.signOut();
-  },
+  if (message.includes('invalid login credentials')) {
+    return 'Email o contraseña incorrectos.';
+  }
 
-  /**
-   * Envía el email de recuperación de contraseña.
-   */
+  if (message.includes('email not confirmed')) {
+    return 'Confirma tu email antes de iniciar sesión. Revisa tu bandeja de entrada.';
+  }
+
+  return error.message ?? 'Ha ocurrido un error. Inténtalo de nuevo.';
+}
+
+export const authService = {
   async recuperarContrasena(email: string, options?: { redirectTo?: string }) {
     return supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
       redirectTo: options?.redirectTo ?? PASSWORD_RECOVERY_REDIRECT_TO,
     });
-  },
-
-  /**
-   * Devuelve la sesión activa o null.
-   */
-  async obtenerSesion() {
-    // TODO: implementar
-    // const { data } = await supabase.auth.getSession();
-    // return data.session;
-  },
-
-  /**
-   * Suscribe a cambios de estado de autenticación.
-   * Usar en el AuthProvider para actualizar el estado global.
-   */
-  onAuthStateChange(callback: (sesion: any) => void) {
-    // TODO: implementar
-    // return supabase.auth.onAuthStateChange((_event, session) => {
-    //   callback(session);
-    // });
   },
 };

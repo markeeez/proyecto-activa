@@ -15,7 +15,7 @@ import { supabase } from '@/lib/supabase';
 import { activacionService } from '@/services/activacion.service';
 import type { Objetivo } from '@/types/database.types';
 
-const TOTAL_PASOS = 6;
+const TOTAL_PASOS = 7;
 const AUTH = Colors.dark;
 const BG = AUTH.background;
 const CYAN = AUTH.primary;
@@ -123,7 +123,7 @@ export default function OnboardingDescansoPantalla() {
         <View style={st.progressTrack}>
           <View style={[st.progressFill, { width: '100%' }]} />
         </View>
-        <Text style={st.headerStep}>PASO 6 DE {TOTAL_PASOS}</Text>
+        <Text style={st.headerStep}>PASO 7 DE {TOTAL_PASOS}</Text>
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={st.scroll}>
