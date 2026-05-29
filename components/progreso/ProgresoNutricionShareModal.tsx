@@ -3,6 +3,7 @@ import { useFont } from '@shopify/react-native-skia';
 import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Modal,
   Pressable,
   Share,
@@ -13,6 +14,7 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import * as MediaLibrary from 'expo-media-library';
 import { captureRef } from 'react-native-view-shot';
 import { Bar, CartesianChart } from 'victory-native';
 
@@ -108,11 +110,40 @@ export function ProgresoNutricionShareModal({
   const previewHeight = previewWidth / cardRatio;
   const previewScale = (previewWidth - 14) / CARD_WIDTH;
 
+  const capturarUri = async (): Promise<string | null> => {
+    try {
+      return await captureRef(shareCardRef, { format: 'png', quality: 1, result: 'tmpfile' });
+    } catch (e) {
+      console.warn('[ProgresoNutricionShareModal] capture failed', e);
+      return null;
+    }
+  };
+
+  const guardarEnGaleria = async () => {
+    if (compartiendo) return;
+    setCompartiendo(true);
+    try {
+      const uri = await capturarUri();
+      if (!uri) { Alert.alert('Error', 'No se pudo capturar la imagen.'); return; }
+      const { status } = await MediaLibrary.requestPermissionsAsync();
+      if (status !== 'granted') { Alert.alert('Permiso denegado', 'Necesitamos acceso a tu galería para guardar la imagen.'); return; }
+      await MediaLibrary.saveToLibraryAsync(uri);
+      Alert.alert('Guardado', 'Imagen guardada en tu galería.');
+      onClose();
+    } catch (e) {
+      console.warn('[ProgresoNutricionShareModal] save failed', e);
+      Alert.alert('Error', 'No se pudo guardar la imagen.');
+    } finally {
+      setCompartiendo(false);
+    }
+  };
+
   const compartir = async () => {
     if (compartiendo) return;
     setCompartiendo(true);
     try {
-      const uri = await captureRef(shareCardRef, { format: 'png', quality: 1, result: 'tmpfile' });
+      const uri = await capturarUri();
+      if (!uri) { await Share.share({ message: fallbackMessage }); onClose(); return; }
       try {
         const Sharing = await import('expo-sharing');
         if (await Sharing.isAvailableAsync()) {
@@ -235,6 +266,14 @@ export function ProgresoNutricionShareModal({
 
               <View style={[styles.actionRow, { gap: s.sm }]}>
                 <Pressable
+                  style={[styles.actionBtn, styles.actionSecondary, { borderColor: c.borderVisible }]}
+                  onPress={() => void guardarEnGaleria()}
+                  disabled={compartiendo}
+                >
+                  <Ionicons name="download-outline" size={16} color={c.textDisplay} />
+                  <Text style={[styles.actionSecondaryText, { color: c.textDisplay }]}>Guardar</Text>
+                </Pressable>
+                <Pressable
                   style={[styles.actionBtn, { backgroundColor: c.primary }]}
                   onPress={() => void compartir()}
                   disabled={compartiendo}
@@ -346,6 +385,8 @@ const styles = StyleSheet.create({
   switchRow: { minHeight: 42, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   controlText: { fontFamily: FontFamily.sansMedium, fontSize: 14 },
   actionRow: { flexDirection: 'row' },
-  actionBtn: { flex: 1, minHeight: 44, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  actionBtn: { flex: 1, minHeight: 44, borderRadius: 14, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 5 },
+  actionSecondary: { borderWidth: 1 },
   actionPrimaryText: { fontFamily: FontFamily.sansBold, fontSize: 13 },
+  actionSecondaryText: { fontFamily: FontFamily.sansMedium, fontSize: 13 },
 });

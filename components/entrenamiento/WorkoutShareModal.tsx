@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 import type { User } from '@supabase/supabase-js';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
+import * as MediaLibrary from 'expo-media-library';
 import { captureRef } from 'react-native-view-shot';
 
 import LogoDark from '@/assets/images/logos/logo_sb.svg';
@@ -227,20 +228,38 @@ export function WorkoutShareModal({
     setOverlayOffset({ x: 0, y: 0 });
   };
 
+  const capturarUri = async (): Promise<string | null> => {
+    try {
+      return await captureRef(shareCardRef, { format: 'png', quality: 1, result: 'tmpfile' });
+    } catch (e) {
+      console.warn('[WorkoutShareModal] capture failed', e);
+      return null;
+    }
+  };
+
+  const guardarEnGaleria = async () => {
+    if (compartiendo) return;
+    setCompartiendo(true);
+    try {
+      const uri = await capturarUri();
+      if (!uri) { Alert.alert('Error', 'No se pudo capturar la imagen.'); return; }
+      const { status } = await MediaLibrary.requestPermissionsAsync();
+      if (status !== 'granted') { Alert.alert('Permiso denegado', 'Necesitamos acceso a tu galería para guardar la imagen.'); return; }
+      await MediaLibrary.saveToLibraryAsync(uri);
+      Alert.alert('Guardado', 'Imagen guardada en tu galería.');
+      onClose();
+    } catch (e) {
+      console.warn('[WorkoutShareModal] save failed', e);
+      Alert.alert('Error', 'No se pudo guardar la imagen.');
+    } finally {
+      setCompartiendo(false);
+    }
+  };
+
   const compartir = async () => {
     if (compartiendo) return;
     setCompartiendo(true);
-    let uri: string | null = null;
-    try {
-      uri = await captureRef(shareCardRef, {
-        format: 'png',
-        quality: 1,
-        result: 'tmpfile',
-      });
-    } catch (captureError) {
-      console.warn('[WorkoutShareModal] capture failed', captureError);
-    }
-
+    const uri = await capturarUri();
     try {
       if (uri) {
         const Sharing = await import('expo-sharing');
@@ -518,6 +537,14 @@ export function WorkoutShareModal({
                   <Text style={[styles.actionSecondaryText, { color: c.textDisplay }]}>
                     {personalizando ? 'Plantilla' : 'Personalizar'}
                   </Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.actionBtn, styles.actionSecondary, { borderColor: c.borderVisible }]}
+                  onPress={() => void guardarEnGaleria()}
+                  disabled={compartiendo}
+                >
+                  <Ionicons name="download-outline" size={16} color={c.textDisplay} />
+                  <Text style={[styles.actionSecondaryText, { color: c.textDisplay }]}>Guardar</Text>
                 </Pressable>
                 <Pressable
                   style={[styles.actionBtn, { backgroundColor: c.primary }]}
@@ -831,6 +858,8 @@ const styles = StyleSheet.create({
   },
   actionSecondary: {
     borderWidth: 1,
+    flexDirection: 'row',
+    gap: 5,
   },
   actionSecondaryText: {
     fontFamily: FontFamily.sansBold,

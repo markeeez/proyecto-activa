@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "56214430892",
+    "project_id": "vertice-6aec8",
+    "storage_bucket": "vertice-6aec8.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:56214430892:android:609f2f8b5671df032f6b09",
+        "android_client_info": {
+          "package_name": "com.vertice.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB4kbBMP6qWOiU_WUUDqmdVLu170IrNtx4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

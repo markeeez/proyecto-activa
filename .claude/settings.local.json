@@ -5,7 +5,17 @@
       "Bash(Select-Object Name, FullName)",
       "Bash(ls -la \"c:\\\\Users\\\\markeeezz\\\\Documents\\\\proyecto-activa\\\\\" 2>&1 | grep -E \"^d\")",
       "Read(//c/Users/markeeezz/Documents/**)",
-      "mcp__claude_ai_Supabase__execute_sql"
+      "mcp__claude_ai_Supabase__execute_sql",
+      "Bash(git -C \"C:\\\\Users\\\\markeeezz\\\\Documents\\\\proyecto-activa\" log --oneline -10)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\markeeezz\\\\Documents\\\\proyecto-activa\" -Recurse -Filter \"app.json\")",
+      "Bash(Select-Object -ExpandProperty FullName)",
+      "Bash(findstr /i \"vertice\")",
+      "Bash(findstr /i vertice)",
+      "PowerShell(Get-ChildItem \"C:\\\\Users\\\\markeeezz\\\\Documents\\\\proyecto-activa\\\\assets\" -Recurse -Directory | Where-Object { $_.Name -match \"captur|screenshot|mockup\" } | Select-Object FullName)",
+      "PowerShell(netstat -ano)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000)",
+      "Bash(npx skills *)",
+      "Bash(ls \"C:\\\\Users\\\\markeeezz\\\\.agents\\\\skills\\\\tiktok-marketing\" 2>&1 | head -20 && echo \"---SYMLINK CHECK---\" && ls \"C:\\\\Users\\\\markeeezz\\\\.claude\\\\skills\" 2>&1)"
     ]
   }
 }

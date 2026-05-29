@@ -33,6 +33,7 @@ import { useTheme } from '@/hooks/useTheme';
 import {
   agregarDiasIso,
   esDiaPasadoVsHoy,
+  fechaHoyIsoLocal,
   formatRangoSemanaCortoES,
   getSemanaMovil,
 } from '@/lib/fechaNutricion';
@@ -282,6 +283,25 @@ export default function NutricionIndex() {
     [c, isDark],
   );
 
+  const [toastFuturo, setToastFuturo] = useState(false);
+  const toastFuturoOpacity = useRef(new Animated.Value(0)).current;
+  const toastFuturoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const mostrarToastFuturo = useCallback(() => {
+    if (toastFuturoTimer.current) clearTimeout(toastFuturoTimer.current);
+    setToastFuturo(true);
+    toastFuturoOpacity.setValue(1);
+    toastFuturoTimer.current = setTimeout(() => {
+      Animated.timing(toastFuturoOpacity, {
+        toValue: 0,
+        duration: 300,
+        useNativeDriver: true,
+      }).start(({ finished }) => {
+        if (finished) setToastFuturo(false);
+      });
+    }, 2700);
+  }, [toastFuturoOpacity]);
+
   const [ordenIds, setOrdenIds] = useState<string[] | null>(null);
   // dragOverride: orden optimista durante/después de un drag. Se limpia cuando llegan datos frescos.
   const [dragOverride, setDragOverride] = useState<ComidaConAlimentos[] | null>(null);
@@ -516,8 +536,13 @@ export default function NutricionIndex() {
   );
 
   const avanzarDia = useCallback(() => {
-    cambiarFecha(agregarDiasIso(fecha, 1));
-  }, [fecha, cambiarFecha]);
+    const siguiente = agregarDiasIso(fecha, 1);
+    if (siguiente > fechaHoyIsoLocal()) {
+      mostrarToastFuturo();
+      return;
+    }
+    cambiarFecha(siguiente);
+  }, [fecha, cambiarFecha, mostrarToastFuturo]);
 
   const retrocederDia = useCallback(() => {
     cambiarFecha(agregarDiasIso(fecha, -1));
@@ -799,7 +824,13 @@ export default function NutricionIndex() {
                   <View key={`${d.key}-${d.fechaIso}-${index}`} style={styles.weekDayColumn}>
                     <Pressable
                       style={styles.weekDayPress}
-                      onPress={() => cambiarFecha(d.fechaIso)}
+                      onPress={() => {
+                        if (d.fechaIso > fechaHoyIsoLocal()) {
+                          mostrarToastFuturo();
+                        } else {
+                          cambiarFecha(d.fechaIso);
+                        }
+                      }}
                       hitSlop={{ top: 4, bottom: 4, left: 1, right: 1 }}
                     >
                       <View style={[styles.weekDayCell, d.activo && styles.weekDayCellActive]}>
@@ -1179,6 +1210,13 @@ export default function NutricionIndex() {
         onAlimentoSeleccionado={registrarAlimentoSeleccionado}
         userId={user?.id}
       />
+
+      {toastFuturo && (
+        <Animated.View style={[styles.toastFuturo, { opacity: toastFuturoOpacity }]} pointerEvents="none">
+          <Ionicons name="time-outline" size={15} color={c.textOnPrimary} />
+          <Text style={styles.toastFuturoText}>No puedes registrar días futuros</Text>
+        </Animated.View>
+      )}
 
       {itemAReemplazar !== null && (
         <BuscadorAlimentos
@@ -2109,6 +2147,25 @@ function makeStyles(
       fontFamily: f.sansBold,
       color: c.textOnPrimary,
       letterSpacing: 0,
+    },
+    toastFuturo: {
+      position: 'absolute',
+      bottom: 100,
+      alignSelf: 'center',
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 7,
+      backgroundColor: 'rgba(20, 20, 28, 0.88)',
+      borderRadius: r.pill,
+      paddingVertical: 9,
+      paddingHorizontal: s.md,
+      zIndex: 100,
+    },
+    toastFuturoText: {
+      fontSize: 13,
+      lineHeight: 17,
+      fontFamily: f.sansMedium,
+      color: '#FFFFFF',
     },
   });
 }

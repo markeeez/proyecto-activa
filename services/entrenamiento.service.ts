@@ -1106,6 +1106,30 @@ export const entrenamientoService = {
     return formatearAnteriorSet(row.peso_kg, row.repeticiones, row.tipo_peso);
   },
 
+  /** Devuelve el texto "anterior" por serie del último entreno para un ejercicio.
+   *  El array está ordenado por numero_serie asc; puede tener menos entradas que las series actuales. */
+  async obtenerAnteriorSetsPorEjercicio(_userId: string, exerciseId: string): Promise<string[]> {
+    const { data, error } = await supabase.rpc('obtener_anterior_ejercicio_sets', {
+      p_exercise_id: exerciseId,
+    });
+
+    if (error) {
+      logger.error('[obtenerAnteriorSetsPorEjercicio]', error.message);
+      return [];
+    }
+
+    const rows = (data as any[]) ?? [];
+    if (!rows.length) return [];
+
+    return rows.map((row) => {
+      const tracking = trackingModeSeguro(row.tracking_mode);
+      if (tracking !== 'strength') {
+        return formatearAnteriorCardio(row.duracion_seg ?? null, row.distancia_km ?? null);
+      }
+      return formatearAnteriorSet(row.peso_kg, row.repeticiones, row.tipo_peso);
+    });
+  },
+
   async guardarSetsCompletados(sessionId: string, ejercicios: EntrenoEjercicioPersistido[]): Promise<void> {
     const workoutSetIds: string[] = [];
 

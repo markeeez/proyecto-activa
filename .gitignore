@@ -36,7 +36,6 @@ yarn-error.*
 .env.test
 
 # Firebase / Google credentials (configurar en cada entorno)
-google-services.json
 GoogleService-Info.plist
 
 # typescript

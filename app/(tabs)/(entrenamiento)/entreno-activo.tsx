@@ -253,7 +253,7 @@ function textoAnteriorDesdeValores(
 function textosAnteriorPorLinea(
   line: BorradorEjercicioLinea,
   ultima: UltimaSesionRutina | null,
-  anteriorGlobalPorExercise: Record<string, string>,
+  anteriorGlobalPorExercise: Record<string, string[]>,
 ): (string | null)[] {
   if (ultima) {
     const block =
@@ -274,8 +274,10 @@ function textosAnteriorPorLinea(
     }
     // Exercise not in ultimaSesionRutina (e.g. added mid-workout): fall through to global
   }
-  const g = anteriorGlobalPorExercise[line.exerciseId];
-  return line.sets.map(() => (g ?? null));
+  const prevSets = anteriorGlobalPorExercise[line.exerciseId] ?? [];
+  // Mapeo posicional: serie j → prevSets[j] (primer set anterior al primer set actual, etc.).
+  // Si hoy hay más series que el anterior, las extra quedan en null.
+  return line.sets.map((_, j) => prevSets[j] ?? null);
 }
 
 function makeStyles(c: Theme, f: ReturnType<typeof useTheme>['f'], ts: ReturnType<typeof useTheme>['ts'], s: ReturnType<typeof useTheme>['s'], r: ReturnType<typeof useTheme>['r']) {
@@ -494,7 +496,7 @@ export default function EntrenoActivoScreen() {
   const [sheetAbierto, setSheetAbierto] = useState(false);
   const [crearEjercicioAbierto, setCrearEjercicioAbierto] = useState(false);
   const [replaceLineId, setReplaceLineId] = useState<string | null>(null);
-  const [anteriorPorEjercicio, setAnteriorPorEjercicio] = useState<Record<string, string>>({});
+  const [anteriorPorEjercicio, setAnteriorPorEjercicio] = useState<Record<string, string[]>>({});
   const [recordBaselines, setRecordBaselines] = useState<RecordBaselineMap>({});
   const [modalIncompletas, setModalIncompletas] = useState(false);
   const [modalConfirmarTerminar, setModalConfirmarTerminar] = useState(false);
@@ -600,14 +602,14 @@ export default function EntrenoActivoScreen() {
     void (async () => {
       const entries = await Promise.all(
         lineasSinCobertura.map(async (l) => {
-          const t = await entrenamientoService.obtenerAnteriorPorEjercicio(user.id, l.exerciseId);
-          return [l.exerciseId, t ?? ''] as const;
+          const sets = await entrenamientoService.obtenerAnteriorSetsPorEjercicio(user.id, l.exerciseId);
+          return [l.exerciseId, sets] as const;
         }),
       );
       if (cancel) return;
-      const next: Record<string, string> = {};
-      for (const [id, t] of entries) {
-        if (t) next[id] = t;
+      const next: Record<string, string[]> = {};
+      for (const [id, sets] of entries) {
+        if (sets.length) next[id] = sets;
       }
       setAnteriorPorEjercicio(next);
     })();

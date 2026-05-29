@@ -2,6 +2,7 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import type { User } from '@supabase/supabase-js';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
+import * as MediaLibrary from 'expo-media-library';
 import * as Sharing from 'expo-sharing';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -252,20 +253,38 @@ export function DailyGoalShareModal({
     setOverlayOffset({ x: 0, y: 0 });
   }, []);
 
+  const capturarUri = useCallback(async (): Promise<string | null> => {
+    try {
+      return await captureRef(shareCardRef, { format: 'png', quality: 1, result: 'tmpfile' });
+    } catch (e) {
+      console.warn('[DailyGoalShareModal] capture failed', e);
+      return null;
+    }
+  }, []);
+
+  const guardarEnGaleria = useCallback(async () => {
+    if (compartiendo) return;
+    setCompartiendo(true);
+    try {
+      const uri = await capturarUri();
+      if (!uri) { Alert.alert('Error', 'No se pudo capturar la imagen.'); return; }
+      const { status } = await MediaLibrary.requestPermissionsAsync();
+      if (status !== 'granted') { Alert.alert('Permiso denegado', 'Necesitamos acceso a tu galería para guardar la imagen.'); return; }
+      await MediaLibrary.saveToLibraryAsync(uri);
+      Alert.alert('Guardado', 'Imagen guardada en tu galería.');
+      onClose();
+    } catch (e) {
+      console.warn('[DailyGoalShareModal] save failed', e);
+      Alert.alert('Error', 'No se pudo guardar la imagen.');
+    } finally {
+      setCompartiendo(false);
+    }
+  }, [compartiendo, capturarUri, onClose]);
+
   const compartir = useCallback(async () => {
     if (compartiendo) return;
     setCompartiendo(true);
-    let uri: string | null = null;
-    try {
-      uri = await captureRef(shareCardRef, {
-        format: 'png',
-        quality: 1,
-        result: 'tmpfile',
-      });
-    } catch (captureError) {
-      console.warn('[DailyGoalShareModal] capture failed', captureError);
-    }
-
+    const uri = await capturarUri();
     try {
       if (uri) {
         if (await Sharing.isAvailableAsync()) {
@@ -288,7 +307,7 @@ export function DailyGoalShareModal({
     } finally {
       setCompartiendo(false);
     }
-  }, [compartiendo, fallbackMessage, onClose]);
+  }, [compartiendo, capturarUri, fallbackMessage, onClose]);
 
   const kcalTotalRounded = Math.round(kcalTotal);
   const dateLabel = useMemo(() => {
@@ -489,6 +508,14 @@ export function DailyGoalShareModal({
                   <Text style={[styles.actionSecondaryText, { color: c.textDisplay }]}>
                     {personalizando ? 'Plantilla' : 'Personalizar'}
                   </Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.actionBtn, styles.actionSecondary, { borderColor: c.borderVisible }]}
+                  onPress={() => void guardarEnGaleria()}
+                  disabled={compartiendo}
+                >
+                  <Ionicons name="download-outline" size={16} color={c.textDisplay} />
+                  <Text style={[styles.actionSecondaryText, { color: c.textDisplay }]}>Guardar</Text>
                 </Pressable>
                 <Pressable
                   style={[styles.actionBtn, { backgroundColor: c.primary }]}
@@ -755,6 +782,8 @@ const styles = StyleSheet.create({
   },
   actionSecondary: {
     borderWidth: 1,
+    flexDirection: 'row',
+    gap: 5,
   },
   actionSecondaryText: {
     fontFamily: FontFamily.sansBold,

@@ -191,17 +191,19 @@ export default function HomeScreen() {
   const [nombre, setNombre] = useState<string | null>(null);
   const avatarUrl = (user?.user_metadata as { avatar_url?: string } | undefined)?.avatar_url ?? null;
 
-  useEffect(() => {
-    if (!user?.id) return;
-    supabase
-      .from('profiles')
-      .select('nombre, username')
-      .eq('id', user.id)
-      .maybeSingle()
-      .then(({ data }) => {
-        setNombre(data?.nombre ?? data?.username ?? null);
-      });
-  }, [user?.id]);
+  useFocusEffect(
+    useCallback(() => {
+      if (!user?.id) return;
+      supabase
+        .from('profiles')
+        .select('nombre, username')
+        .eq('id', user.id)
+        .maybeSingle()
+        .then(({ data }) => {
+          setNombre(data?.nombre ?? data?.username ?? null);
+        });
+    }, [user?.id]),
+  );
 
   const displayName = nombre ?? user?.email?.split('@')[0] ?? 'tú';
 
