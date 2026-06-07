@@ -125,7 +125,8 @@ export function ProgresoNutricionShareModal({
     try {
       const uri = await capturarUri();
       if (!uri) { Alert.alert('Error', 'No se pudo capturar la imagen.'); return; }
-      const { status } = await MediaLibrary.requestPermissionsAsync();
+      const existingPerm = await MediaLibrary.getPermissionsAsync();
+      const { status } = existingPerm.granted ? existingPerm : await MediaLibrary.requestPermissionsAsync();
       if (status !== 'granted') { Alert.alert('Permiso denegado', 'Necesitamos acceso a tu galería para guardar la imagen.'); return; }
       await MediaLibrary.saveToLibraryAsync(uri);
       Alert.alert('Guardado', 'Imagen guardada en tu galería.');

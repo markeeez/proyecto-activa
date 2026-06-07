@@ -8,6 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   Modal,
   Pressable,
   Share,
@@ -55,6 +56,8 @@ const MIN_CARD_RATIO = 0.5;
 const MAX_CARD_RATIO = 2.2;
 const INNER_CARD_WIDTH = DEFAULT_CARD_WIDTH - 32;
 const INNER_CARD_HEIGHT = DEFAULT_CARD_HEIGHT - 32;
+const OVERLAY_WIDTH = 280;
+const OVERLAY_HEIGHT = 160;
 
 type ShareTheme = 'light' | 'dark';
 
@@ -63,14 +66,14 @@ function formatMacro(n: number): string {
   return String(Math.round(n));
 }
 
-function macroIconFor(key: string, color: string) {
+function macroIconFor(key: string, size: number, color: string) {
   if (key === 'proteinas') {
-    return <MaterialCommunityIcons name="food-drumstick-outline" size={18} color={color} />;
+    return <MaterialCommunityIcons name="food-drumstick-outline" size={size} color={color} />;
   }
   if (key === 'carbos') {
-    return <MaterialCommunityIcons name="barley" size={18} color={color} />;
+    return <MaterialCommunityIcons name="barley" size={size} color={color} />;
   }
-  return <Ionicons name="water-outline" size={18} color={color} />;
+  return <Ionicons name="water-outline" size={size} color={color} />;
 }
 
 export function DailyGoalShareModal({
@@ -96,6 +99,9 @@ export function DailyGoalShareModal({
   const [overlayOffset, setOverlayOffset] = useState({ x: 0, y: 0 });
   const overlayOffsetRef = useRef(overlayOffset);
   const panStartRef = useRef(overlayOffset);
+  const toastOpacity = useRef(new Animated.Value(0)).current;
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [toastMsg, setToastMsg] = useState('');
   const overlayScaleRef = useRef(overlayScale);
   const pinchStartRef = useRef(overlayScale);
   const shareCardRef = useRef<View>(null);
@@ -148,6 +154,17 @@ export function DailyGoalShareModal({
     };
   }, [visible, user?.id]);
 
+  const showToast = useCallback((msg: string) => {
+    setToastMsg(msg);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    Animated.sequence([
+      Animated.timing(toastOpacity, { toValue: 1, duration: 200, useNativeDriver: true }),
+      Animated.delay(2000),
+      Animated.timing(toastOpacity, { toValue: 0, duration: 300, useNativeDriver: true }),
+    ]).start();
+    toastTimer.current = setTimeout(() => setToastMsg(''), 2600);
+  }, [toastOpacity]);
+
   const usernameLabel = useMemo(() => {
     const metadata = user?.user_metadata as { username?: string } | undefined;
     const username =
@@ -189,10 +206,10 @@ export function DailyGoalShareModal({
   const maxPreviewHeight = Math.max(120, windowHeight - 280);
   const previewWidth = Math.min(horizontalLimit, maxPreviewHeight * cardRatio, 360);
   const previewHeight = previewWidth / cardRatio;
-  const previewScale = Math.max(0.01, (previewWidth - 14) / cardWidth);
+  const previewScale = Math.max(0.01, previewWidth / cardWidth);
 
-  const panLimitX = Math.max(40, (cardWidth - INNER_CARD_WIDTH) / 2 + INNER_CARD_WIDTH / 2);
-  const panLimitY = Math.max(40, (cardHeight - INNER_CARD_HEIGHT) / 2 + INNER_CARD_HEIGHT / 2);
+  const panLimitX = Math.max(40, (cardWidth - OVERLAY_WIDTH) / 2 + OVERLAY_WIDTH / 2);
+  const panLimitY = Math.max(40, (cardHeight - OVERLAY_HEIGHT) / 2 + OVERLAY_HEIGHT / 2);
 
   const overlayGesture = useMemo(
     () =>
@@ -226,13 +243,18 @@ export function DailyGoalShareModal({
   );
 
   const elegirFoto = useCallback(async (source: 'gallery' | 'camera') => {
-    const permission = source === 'camera'
-      ? await ImagePicker.requestCameraPermissionsAsync()
-      : await ImagePicker.requestMediaLibraryPermissionsAsync();
+    const existing = source === 'camera'
+      ? await ImagePicker.getCameraPermissionsAsync()
+      : await ImagePicker.getMediaLibraryPermissionsAsync();
+    const permission = existing.granted
+      ? existing
+      : source === 'camera'
+        ? await ImagePicker.requestCameraPermissionsAsync()
+        : await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
       Alert.alert(
         'Permiso necesario',
-        source === 'camera' ? 'Activa la cámara para tomar una foto.' : 'Activa la galería para elegir una foto.',
+        source === 'camera' ? 'Activa la cámara en Ajustes.' : 'Activa la galería en Ajustes.',
       );
       return;
     }
@@ -268,11 +290,12 @@ export function DailyGoalShareModal({
     try {
       const uri = await capturarUri();
       if (!uri) { Alert.alert('Error', 'No se pudo capturar la imagen.'); return; }
-      const { status } = await MediaLibrary.requestPermissionsAsync();
-      if (status !== 'granted') { Alert.alert('Permiso denegado', 'Necesitamos acceso a tu galería para guardar la imagen.'); return; }
+      const existing = await MediaLibrary.getPermissionsAsync();
+      const { status } = existing.granted ? existing : await MediaLibrary.requestPermissionsAsync();
+      if (status !== 'granted') { Alert.alert('Permiso denegado', 'Activa el acceso a la galería en Ajustes.'); return; }
       await MediaLibrary.saveToLibraryAsync(uri);
-      Alert.alert('Guardado', 'Imagen guardada en tu galería.');
-      onClose();
+      showToast('Guardado en tu galería');
+      setTimeout(onClose, 1200);
     } catch (e) {
       console.warn('[DailyGoalShareModal] save failed', e);
       Alert.alert('Error', 'No se pudo guardar la imagen.');
@@ -354,7 +377,16 @@ export function DailyGoalShareModal({
               ]}
             >
               <GestureDetector gesture={overlayGesture}>
-                <View style={[styles.previewScaler, { transform: [{ scale: previewScale }] }]}>
+                <View
+                  style={[
+                    styles.previewScaler,
+                    {
+                      width: cardWidth,
+                      height: cardHeight,
+                      transform: [{ scale: previewScale }],
+                    },
+                  ]}
+                >
                   <View
                     ref={shareCardRef}
                     collapsable={false}
@@ -378,10 +410,10 @@ export function DailyGoalShareModal({
                           ? [
                               styles.innerCardPersonalizado,
                               {
-                                width: INNER_CARD_WIDTH,
-                                height: INNER_CARD_HEIGHT,
-                                left: (cardWidth - INNER_CARD_WIDTH) / 2,
-                                top: (cardHeight - INNER_CARD_HEIGHT) / 2,
+                                width: OVERLAY_WIDTH,
+                                height: OVERLAY_HEIGHT,
+                                left: (cardWidth - OVERLAY_WIDTH) / 2,
+                                top: (cardHeight - OVERLAY_HEIGHT) / 2,
                                 transform: [
                                   { translateX: overlayOffset.x },
                                   { translateY: overlayOffset.y },
@@ -392,9 +424,9 @@ export function DailyGoalShareModal({
                           : [styles.innerCard, { backgroundColor: panelBg }],
                       ]}
                     >
-                      <View style={[styles.topRow, personalizando && styles.topRowCentered]}>
-                        <Logo width={42} height={42} />
-                        {!personalizando ? (
+                      {!personalizando ? (
+                        <View style={styles.topRow}>
+                          <Logo width={42} height={42} />
                           <View style={styles.dotsCluster}>
                             {Array.from({ length: 16 }).map((_, i) => (
                               <View
@@ -403,15 +435,19 @@ export function DailyGoalShareModal({
                               />
                             ))}
                           </View>
-                        ) : null}
-                      </View>
+                        </View>
+                      ) : null}
 
-                      <View style={styles.contentRow}>
-                        <View style={styles.leftCol}>
+                      <View style={[styles.contentRow, personalizando && styles.contentRowOverlay]}>
+                        <View style={[styles.leftCol, personalizando && styles.leftColOverlay]}>
                           <Text style={[styles.dateLabel, { color: iconColor }]} numberOfLines={1}>
                             {dateLabel}
                           </Text>
-                          <Text style={[styles.kcalValue, { color: valueColor }]} numberOfLines={1} adjustsFontSizeToFit>
+                          <Text
+                            style={[styles.kcalValue, personalizando && styles.kcalValueOverlay, { color: valueColor }]}
+                            numberOfLines={1}
+                            adjustsFontSizeToFit
+                          >
                             {Math.round(kcalConsumed)}
                           </Text>
                           <Text style={[styles.kcalUnit, { color: cardMuted }]}>
@@ -421,23 +457,24 @@ export function DailyGoalShareModal({
 
                         <View style={[styles.verticalDivider, { backgroundColor: cardLine }]} />
 
-                        <View style={styles.rightCol}>
+                        <View style={[styles.rightCol, personalizando && styles.rightColOverlay]}>
                           {macros.map((m) => (
                             <MacroRow
                               key={m.key}
-                              icon={macroIconFor(m.key, iconColor)}
+                              icon={macroIconFor(m.key, personalizando ? 14 : 18, iconColor)}
                               value={`${formatMacro(m.current)} / ${formatMacro(m.total)} g`}
                               label={m.label.toUpperCase()}
                               text={valueColor}
                               muted={cardMuted}
+                              compact={personalizando}
                             />
                           ))}
                         </View>
                       </View>
 
-                      <View style={styles.footerBrand}>
+                      <View style={[styles.footerBrand, personalizando && styles.footerBrandOverlay]}>
                         <View style={[styles.footerLine, { backgroundColor: cardLine }]} />
-                        <FooterLogo width={78} height={12} />
+                        <FooterLogo width={personalizando ? 56 : 78} height={personalizando ? 9 : 12} />
                         <View style={[styles.footerLine, { backgroundColor: cardLine }]} />
                       </View>
 
@@ -530,6 +567,16 @@ export function DailyGoalShareModal({
                 </Pressable>
               </View>
             </View>
+
+            {toastMsg ? (
+              <Animated.View
+                style={[styles.toast, { backgroundColor: c.surfaceElevated, borderColor: c.borderVisible, opacity: toastOpacity }]}
+                pointerEvents="none"
+              >
+                <Ionicons name="checkmark-circle" size={16} color={c.primary} />
+                <Text style={[styles.toastText, { color: c.textDisplay }]}>{toastMsg}</Text>
+              </Animated.View>
+            ) : null}
           </View>
         </View>
       </GestureHandlerRootView>
@@ -543,18 +590,20 @@ function MacroRow({
   label,
   text,
   muted,
+  compact,
 }: {
   icon: React.ReactNode;
   value: string;
   label: string;
   text: string;
   muted: string;
+  compact?: boolean;
 }) {
   return (
-    <View style={styles.macroRow}>
+    <View style={[styles.macroRow, compact && styles.macroRowCompact]}>
       {icon}
       <View style={styles.macroTextCol}>
-        <Text style={[styles.macroValue, { color: text }]}>{value}</Text>
+        <Text style={[styles.macroValue, compact && styles.macroValueCompact, { color: text }]}>{value}</Text>
         <Text style={[styles.macroLabel, { color: muted }]}>{label}</Text>
       </View>
     </View>
@@ -600,12 +649,12 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     borderRadius: 22,
     borderWidth: 1,
-    padding: 7,
     overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   previewScaler: {
-    flex: 1,
-    transformOrigin: 'top left',
+    transformOrigin: 'center',
   },
   shareCard: {
     borderRadius: 18,
@@ -625,10 +674,11 @@ const styles = StyleSheet.create({
   },
   innerCardPersonalizado: {
     position: 'absolute',
-    borderRadius: 18,
-    paddingHorizontal: 22,
-    paddingTop: 18,
-    paddingBottom: 14,
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingTop: 10,
+    paddingBottom: 10,
+    backgroundColor: 'transparent',
   },
   topRow: {
     flexDirection: 'row',
@@ -657,10 +707,18 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginTop: 16,
   },
+  contentRowOverlay: {
+    marginTop: 8,
+    flex: 0,
+  },
   leftCol: {
     width: 220,
     paddingRight: 24,
     justifyContent: 'center',
+  },
+  leftColOverlay: {
+    width: 120,
+    paddingRight: 12,
   },
   dateLabel: {
     marginBottom: 8,
@@ -674,6 +732,11 @@ const styles = StyleSheet.create({
     lineHeight: 68,
     letterSpacing: -1.4,
   },
+  kcalValueOverlay: {
+    fontSize: 38,
+    lineHeight: 42,
+    letterSpacing: -0.8,
+  },
   kcalUnit: {
     marginTop: 2,
     fontFamily: FontFamily.mono,
@@ -686,6 +749,10 @@ const styles = StyleSheet.create({
     gap: 10,
     marginBottom: 10,
   },
+  macroRowCompact: {
+    gap: 6,
+    marginBottom: 6,
+  },
   macroTextCol: {
     flex: 1,
     minWidth: 0,
@@ -694,6 +761,10 @@ const styles = StyleSheet.create({
     fontFamily: FontFamily.sansBold,
     fontSize: 14,
     lineHeight: 16,
+  },
+  macroValueCompact: {
+    fontSize: 12,
+    lineHeight: 14,
   },
   macroLabel: {
     marginTop: 2,
@@ -711,11 +782,18 @@ const styles = StyleSheet.create({
     paddingLeft: 24,
     justifyContent: 'center',
   },
+  rightColOverlay: {
+    width: 128,
+    paddingLeft: 12,
+  },
   footerBrand: {
     marginTop: 14,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+  },
+  footerBrandOverlay: {
+    marginTop: 8,
   },
   footerLine: {
     flex: 1,
@@ -791,6 +869,22 @@ const styles = StyleSheet.create({
   },
   actionPrimaryText: {
     fontFamily: FontFamily.sansBold,
+    fontSize: 13,
+  },
+  toast: {
+    position: 'absolute',
+    bottom: 16,
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 14,
+    borderWidth: 1,
+  },
+  toastText: {
+    fontFamily: FontFamily.sansMedium,
     fontSize: 13,
   },
 });

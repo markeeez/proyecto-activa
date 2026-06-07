@@ -41,6 +41,7 @@ const MIN_CARD_RATIO = 0.5;
 const MAX_CARD_RATIO = 2.2;
 const INNER_CARD_WIDTH = WORKOUT_SHARE_CARD_WIDTH - 32;
 const INNER_CARD_HEIGHT = WORKOUT_SHARE_CARD_HEIGHT - 32;
+const OVERLAY_WIDTH = 320;
 
 type Props = {
   visible: boolean;
@@ -74,6 +75,7 @@ export function WorkoutShareModal({
   const [profileUsername, setProfileUsername] = useState<string | null>(null);
   const [overlayScale, setOverlayScale] = useState(1);
   const [overlayOffset, setOverlayOffset] = useState({ x: 0, y: 0 });
+  const [overlayHeight, setOverlayHeight] = useState(0);
   const overlayOffsetRef = useRef(overlayOffset);
   const panStartRef = useRef(overlayOffset);
   const overlayScaleRef = useRef(overlayScale);
@@ -89,7 +91,12 @@ export function WorkoutShareModal({
     setPhotoAspect(null);
     setOverlayScale(1);
     setOverlayOffset({ x: 0, y: 0 });
+    setOverlayHeight(0);
   }, [visible, initialDark]);
+
+  useEffect(() => {
+    setOverlayHeight(0);
+  }, [personalizando]);
 
   useEffect(() => {
     overlayOffsetRef.current = overlayOffset;
@@ -201,9 +208,14 @@ export function WorkoutShareModal({
   );
 
   const elegirFoto = async (source: 'gallery' | 'camera') => {
-    const permission = source === 'camera'
-      ? await ImagePicker.requestCameraPermissionsAsync()
-      : await ImagePicker.requestMediaLibraryPermissionsAsync();
+    const existing = source === 'camera'
+      ? await ImagePicker.getCameraPermissionsAsync()
+      : await ImagePicker.getMediaLibraryPermissionsAsync();
+    const permission = existing.granted
+      ? existing
+      : source === 'camera'
+        ? await ImagePicker.requestCameraPermissionsAsync()
+        : await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
       Alert.alert(
         'Permiso necesario',
@@ -243,7 +255,8 @@ export function WorkoutShareModal({
     try {
       const uri = await capturarUri();
       if (!uri) { Alert.alert('Error', 'No se pudo capturar la imagen.'); return; }
-      const { status } = await MediaLibrary.requestPermissionsAsync();
+      const existingPerm = await MediaLibrary.getPermissionsAsync();
+      const { status } = existingPerm.granted ? existingPerm : await MediaLibrary.requestPermissionsAsync();
       if (status !== 'granted') { Alert.alert('Permiso denegado', 'Necesitamos acceso a tu galería para guardar la imagen.'); return; }
       await MediaLibrary.saveToLibraryAsync(uri);
       Alert.alert('Guardado', 'Imagen guardada en tu galería.');
@@ -344,29 +357,91 @@ export function WorkoutShareModal({
                     ) : null}
                     {personalizando ? <View style={styles.photoShade} /> : null}
 
-                    <View
-                      style={[
-                        personalizando
-                          ? [
-                              styles.innerCardPersonalizado,
-                              {
-                                width: INNER_CARD_WIDTH,
-                                height: INNER_CARD_HEIGHT,
-                                left: (cardWidth - INNER_CARD_WIDTH) / 2,
-                                top: (cardHeight - INNER_CARD_HEIGHT) / 2,
-                                transform: [
-                                  { translateX: overlayOffset.x },
-                                  { translateY: overlayOffset.y },
-                                  { scale: overlayScale },
-                                ],
-                              },
-                            ]
-                          : [styles.innerCard, { backgroundColor: panelBg }],
-                      ]}
-                    >
-                      <View style={styles.topRow}>
-                        <Logo width={42} height={42} />
-                        {!personalizando ? (
+                    {personalizando ? (
+                      <View
+                        onLayout={(e) => setOverlayHeight(e.nativeEvent.layout.height)}
+                        style={[
+                          styles.innerCardPersonalizado,
+                          {
+                            width: OVERLAY_WIDTH,
+                            left: (cardWidth - OVERLAY_WIDTH) / 2,
+                            top: overlayHeight > 0 ? Math.max(8, (cardHeight - overlayHeight) / 2) : 0,
+                            opacity: overlayHeight > 0 ? 1 : 0,
+                            transform: [
+                              { translateX: overlayOffset.x },
+                              { translateY: overlayOffset.y },
+                              { scale: overlayScale },
+                            ],
+                          },
+                        ]}
+                      >
+                        <View style={styles.overlayHead}>
+                          <Logo width={28} height={28} />
+                          <View style={styles.overlayHeadText}>
+                            <Text style={[styles.overlayTitle, { color: valueColor }]} numberOfLines={1}>
+                              {data.title}
+                            </Text>
+                            <Text style={[styles.overlayDate, { color: cardMuted }]} numberOfLines={1}>
+                              {data.dateLabel}
+                            </Text>
+                          </View>
+                        </View>
+
+                        <View style={[styles.overlayDivider, { backgroundColor: cardLine }]} />
+
+                        <View style={styles.overlayStatsRow}>
+                          <View style={styles.overlayStatCell}>
+                            <Ionicons name="time-outline" size={14} color={iconColor} />
+                            <Text style={[styles.overlayStatValue, { color: valueColor }]} numberOfLines={1}>
+                              {data.durationLabel}{data.durationUnit ? data.durationUnit : ''}
+                            </Text>
+                            <Text style={[styles.overlayStatLabel, { color: cardMuted }]}>DURACIÓN</Text>
+                          </View>
+                          <View style={styles.overlayStatCell}>
+                            <Ionicons name="barbell-outline" size={14} color={iconColor} />
+                            <Text style={[styles.overlayStatValue, { color: valueColor }]} numberOfLines={1}>
+                              {data.exerciseCount}
+                            </Text>
+                            <Text style={[styles.overlayStatLabel, { color: cardMuted }]}>EJERCICIOS</Text>
+                          </View>
+                          <View style={styles.overlayStatCell}>
+                            <MaterialCommunityIcons name="weight-kilogram" size={14} color={iconColor} />
+                            <Text style={[styles.overlayStatValue, { color: valueColor }]} numberOfLines={1}>
+                              {data.volumeLabel === '-' ? '—' : `${data.volumeLabel}kg`}
+                            </Text>
+                            <Text style={[styles.overlayStatLabel, { color: cardMuted }]}>VOLUMEN</Text>
+                          </View>
+                          <View style={styles.overlayStatCell}>
+                            <Ionicons name="flame-outline" size={14} color={iconColor} />
+                            <Text style={[styles.overlayStatValue, { color: valueColor }]} numberOfLines={1}>
+                              {data.kcalLabel === '-' ? '—' : data.kcalLabel}
+                            </Text>
+                            <Text style={[styles.overlayStatLabel, { color: cardMuted }]}>KCAL</Text>
+                          </View>
+                        </View>
+
+                        {musculosVisibles.length > 0 ? (
+                          <>
+                            <View style={[styles.overlayDivider, { backgroundColor: cardLine }]} />
+                            <View style={styles.overlayMuscleRow}>
+                              <Text style={[styles.overlayMuscleHeader, { color: iconColor }]}>MÚSCULOS</Text>
+                              <Text style={[styles.overlayMuscleList, { color: valueColor }]} numberOfLines={1}>
+                                {musculosVisibles.join(' · ')}{musculosRestantes > 0 ? ` +${musculosRestantes}` : ''}
+                              </Text>
+                            </View>
+                          </>
+                        ) : null}
+
+                        <View style={styles.overlayFooter}>
+                          <View style={[styles.footerLine, { backgroundColor: cardLine }]} />
+                          <FooterLogo width={56} height={9} />
+                          <View style={[styles.footerLine, { backgroundColor: cardLine }]} />
+                        </View>
+                      </View>
+                    ) : (
+                      <View style={[styles.innerCard, { backgroundColor: panelBg }]}>
+                        <View style={styles.topRow}>
+                          <Logo width={42} height={42} />
                           <View style={styles.dotsCluster}>
                             {Array.from({ length: 16 }).map((_, i) => (
                               <View
@@ -375,105 +450,105 @@ export function WorkoutShareModal({
                               />
                             ))}
                           </View>
-                        ) : null}
-                      </View>
-
-                      <View style={styles.contentRow}>
-                        <View style={styles.leftCol}>
-                          <Text
-                            style={[styles.kcalValue, { color: valueColor }]}
-                            numberOfLines={1}
-                            adjustsFontSizeToFit
-                            minimumFontScale={0.5}
-                          >
-                            {data.durationLabel}
-                          </Text>
-                          <Text style={[styles.kcalUnit, { color: cardMuted }]}>
-                            {data.durationUnit ? data.durationUnit : 'duración'}
-                          </Text>
-
-                          <View style={[styles.macroSeparator, { backgroundColor: cardLine }]} />
-
-                          <Text style={[styles.itemsHeaderLeft, { color: iconColor }]}>MÚSCULOS</Text>
-
-                          {musculosVisibles.length === 0 ? (
-                            <Text style={[styles.emptyItems, { color: cardMuted }]}>
-                              Sin músculos registrados
-                            </Text>
-                          ) : (
-                            <View style={styles.itemsList}>
-                              {musculosVisibles.map((muscle) => (
-                                <View key={muscle} style={styles.itemRow}>
-                                  <View style={[styles.itemBullet, { backgroundColor: iconColor }]} />
-                                  <Text
-                                    style={[styles.itemName, { color: valueColor }]}
-                                    numberOfLines={1}
-                                  >
-                                    {muscle}
-                                  </Text>
-                                </View>
-                              ))}
-                              {musculosRestantes > 0 ? (
-                                <Text style={[styles.itemsMore, { color: cardMuted }]}>
-                                  + {musculosRestantes} más
-                                </Text>
-                              ) : null}
-                            </View>
-                          )}
                         </View>
 
-                        <View style={[styles.verticalDivider, { backgroundColor: cardLine }]} />
+                        <View style={styles.contentRow}>
+                          <View style={styles.leftCol}>
+                            <Text
+                              style={[styles.kcalValue, { color: valueColor }]}
+                              numberOfLines={1}
+                              adjustsFontSizeToFit
+                              minimumFontScale={0.5}
+                            >
+                              {data.durationLabel}
+                            </Text>
+                            <Text style={[styles.kcalUnit, { color: cardMuted }]}>
+                              {data.durationUnit ? data.durationUnit : 'duración'}
+                            </Text>
 
-                        <View style={styles.rightCol}>
-                          <Text style={[styles.workoutName, { color: valueColor }]} numberOfLines={2}>
-                            {data.title}
-                          </Text>
-                          <Text style={[styles.dateText, { color: cardMuted }]} numberOfLines={1}>
-                            {data.dateLabel}
-                          </Text>
+                            <View style={[styles.macroSeparator, { backgroundColor: cardLine }]} />
 
-                          <View style={styles.statsBlock}>
-                            <StatRow
-                              icon={<Ionicons name="barbell-outline" size={18} color={iconColor} />}
-                              value={String(data.exerciseCount)}
-                              label="EJERCICIOS"
-                              text={valueColor}
-                              muted={cardMuted}
-                            />
-                            <StatRow
-                              icon={
-                                <MaterialCommunityIcons
-                                  name="weight-kilogram"
-                                  size={18}
-                                  color={iconColor}
-                                />
-                              }
-                              value={data.volumeLabel === '-' ? '—' : `${data.volumeLabel} kg`}
-                              label="VOLUMEN"
-                              text={valueColor}
-                              muted={cardMuted}
-                            />
-                            <StatRow
-                              icon={<Ionicons name="flame-outline" size={18} color={iconColor} />}
-                              value={data.kcalLabel === '-' ? '—' : `${data.kcalLabel} kcal`}
-                              label="CALORÍAS"
-                              text={valueColor}
-                              muted={cardMuted}
-                            />
+                            <Text style={[styles.itemsHeaderLeft, { color: iconColor }]}>MÚSCULOS</Text>
+
+                            {musculosVisibles.length === 0 ? (
+                              <Text style={[styles.emptyItems, { color: cardMuted }]}>
+                                Sin músculos registrados
+                              </Text>
+                            ) : (
+                              <View style={styles.itemsList}>
+                                {musculosVisibles.map((muscle) => (
+                                  <View key={muscle} style={styles.itemRow}>
+                                    <View style={[styles.itemBullet, { backgroundColor: iconColor }]} />
+                                    <Text
+                                      style={[styles.itemName, { color: valueColor }]}
+                                      numberOfLines={1}
+                                    >
+                                      {muscle}
+                                    </Text>
+                                  </View>
+                                ))}
+                                {musculosRestantes > 0 ? (
+                                  <Text style={[styles.itemsMore, { color: cardMuted }]}>
+                                    + {musculosRestantes} más
+                                  </Text>
+                                ) : null}
+                              </View>
+                            )}
+                          </View>
+
+                          <View style={[styles.verticalDivider, { backgroundColor: cardLine }]} />
+
+                          <View style={styles.rightCol}>
+                            <Text style={[styles.workoutName, { color: valueColor }]} numberOfLines={2}>
+                              {data.title}
+                            </Text>
+                            <Text style={[styles.dateText, { color: cardMuted }]} numberOfLines={1}>
+                              {data.dateLabel}
+                            </Text>
+
+                            <View style={styles.statsBlock}>
+                              <StatRow
+                                icon={<Ionicons name="barbell-outline" size={18} color={iconColor} />}
+                                value={String(data.exerciseCount)}
+                                label="EJERCICIOS"
+                                text={valueColor}
+                                muted={cardMuted}
+                              />
+                              <StatRow
+                                icon={
+                                  <MaterialCommunityIcons
+                                    name="weight-kilogram"
+                                    size={18}
+                                    color={iconColor}
+                                  />
+                                }
+                                value={data.volumeLabel === '-' ? '—' : `${data.volumeLabel} kg`}
+                                label="VOLUMEN"
+                                text={valueColor}
+                                muted={cardMuted}
+                              />
+                              <StatRow
+                                icon={<Ionicons name="flame-outline" size={18} color={iconColor} />}
+                                value={data.kcalLabel === '-' ? '—' : `${data.kcalLabel} kcal`}
+                                label="CALORÍAS"
+                                text={valueColor}
+                                muted={cardMuted}
+                              />
+                            </View>
                           </View>
                         </View>
-                      </View>
 
-                      <View style={styles.footerBrand}>
-                        <View style={[styles.footerLine, { backgroundColor: cardLine }]} />
-                        <FooterLogo width={78} height={12} />
-                        <View style={[styles.footerLine, { backgroundColor: cardLine }]} />
-                      </View>
+                        <View style={styles.footerBrand}>
+                          <View style={[styles.footerLine, { backgroundColor: cardLine }]} />
+                          <FooterLogo width={78} height={12} />
+                          <View style={[styles.footerLine, { backgroundColor: cardLine }]} />
+                        </View>
 
-                      <Text style={[styles.usernameFooter, { color: cardMuted }]} numberOfLines={1}>
-                        {data.usernameLabel}
-                      </Text>
-                    </View>
+                        <Text style={[styles.usernameFooter, { color: cardMuted }]} numberOfLines={1}>
+                          {data.usernameLabel}
+                        </Text>
+                      </View>
+                    )}
                   </View>
                 </View>
               </GestureDetector>
@@ -654,15 +729,87 @@ const styles = StyleSheet.create({
   },
   innerCardPersonalizado: {
     position: 'absolute',
-    borderRadius: 18,
-    paddingHorizontal: 22,
-    paddingTop: 18,
-    paddingBottom: 14,
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingTop: 12,
+    paddingBottom: 10,
+  },
+  overlayHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  overlayHeadText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  overlayTitle: {
+    fontFamily: FontFamily.sansBold,
+    fontSize: 16,
+    lineHeight: 18,
+    letterSpacing: -0.2,
+  },
+  overlayDate: {
+    marginTop: 2,
+    fontFamily: FontFamily.mono,
+    fontSize: 10,
+    letterSpacing: 0.4,
+  },
+  overlayDivider: {
+    height: StyleSheet.hairlineWidth,
+    marginTop: 10,
+    marginBottom: 10,
+  },
+  overlayStatsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 6,
+  },
+  overlayStatCell: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 2,
+  },
+  overlayStatValue: {
+    fontFamily: FontFamily.sansBold,
+    fontSize: 13,
+    lineHeight: 15,
+  },
+  overlayStatLabel: {
+    fontFamily: FontFamily.monoBold,
+    fontSize: 7,
+    lineHeight: 9,
+    letterSpacing: 0.6,
+  },
+  overlayMuscleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  overlayMuscleHeader: {
+    fontFamily: FontFamily.monoBold,
+    fontSize: 8,
+    letterSpacing: 1,
+  },
+  overlayMuscleList: {
+    flex: 1,
+    fontFamily: FontFamily.sans,
+    fontSize: 10,
+    lineHeight: 13,
+  },
+  overlayFooter: {
+    marginTop: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   topRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+  },
+  topRowOverlay: {
+    justifyContent: 'center',
   },
   dotsCluster: {
     width: 72,
@@ -680,6 +827,10 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     marginTop: 16,
+  },
+  contentRowOverlay: {
+    flex: 0,
+    marginTop: 8,
   },
   leftCol: {
     flex: 1,
@@ -702,6 +853,10 @@ const styles = StyleSheet.create({
     height: StyleSheet.hairlineWidth,
     marginTop: 14,
     marginBottom: 12,
+  },
+  macroSeparatorOverlay: {
+    marginTop: 8,
+    marginBottom: 6,
   },
   macroRow: {
     flexDirection: 'row',
@@ -736,6 +891,9 @@ const styles = StyleSheet.create({
   },
   statsBlock: {
     marginTop: 14,
+  },
+  statsBlockOverlay: {
+    marginTop: 8,
   },
   itemsHeaderLeft: {
     fontFamily: FontFamily.monoBold,
@@ -792,6 +950,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+  },
+  footerBrandOverlay: {
+    marginTop: 0,
   },
   footerLine: {
     flex: 1,

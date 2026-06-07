@@ -161,9 +161,14 @@ export function MealShareModal({ visible, onClose, comida, initialDark, fallback
   );
 
   const elegirFoto = async (source: 'gallery' | 'camera') => {
-    const permission = source === 'camera'
-      ? await ImagePicker.requestCameraPermissionsAsync()
-      : await ImagePicker.requestMediaLibraryPermissionsAsync();
+    const existing = source === 'camera'
+      ? await ImagePicker.getCameraPermissionsAsync()
+      : await ImagePicker.getMediaLibraryPermissionsAsync();
+    const permission = existing.granted
+      ? existing
+      : source === 'camera'
+        ? await ImagePicker.requestCameraPermissionsAsync()
+        : await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
       Alert.alert(
         'Permiso necesario',
@@ -203,7 +208,8 @@ export function MealShareModal({ visible, onClose, comida, initialDark, fallback
     try {
       const uri = await capturarUri();
       if (!uri) { Alert.alert('Error', 'No se pudo capturar la imagen.'); return; }
-      const { status } = await MediaLibrary.requestPermissionsAsync();
+      const existingPerm = await MediaLibrary.getPermissionsAsync();
+      const { status } = existingPerm.granted ? existingPerm : await MediaLibrary.requestPermissionsAsync();
       if (status !== 'granted') { Alert.alert('Permiso denegado', 'Necesitamos acceso a tu galería para guardar la imagen.'); return; }
       await MediaLibrary.saveToLibraryAsync(uri);
       Alert.alert('Guardado', 'Imagen guardada en tu galería.');
@@ -324,7 +330,7 @@ export function MealShareModal({ visible, onClose, comida, initialDark, fallback
                           : [styles.innerCard, { backgroundColor: panelBg }],
                       ]}
                     >
-                      <View style={styles.topRow}>
+                      <View style={[styles.topRow, personalizando && styles.topRowOverlay]}>
                         <Logo width={42} height={42} />
                         <View style={styles.dotsCluster}>
                           {Array.from({ length: 16 }).map((_, i) => (
@@ -336,14 +342,14 @@ export function MealShareModal({ visible, onClose, comida, initialDark, fallback
                         </View>
                       </View>
 
-                      <View style={styles.contentRow}>
+                      <View style={[styles.contentRow, personalizando && styles.contentRowOverlay]}>
                         <View style={styles.leftCol}>
                           <Text style={[styles.kcalValue, { color: valueColor }]} numberOfLines={1} adjustsFontSizeToFit>
                             {Math.round(comida.totalCalorias)}
                           </Text>
                           <Text style={[styles.kcalUnit, { color: cardMuted }]}>kcal</Text>
 
-                          <View style={[styles.macroSeparator, { backgroundColor: cardLine }]} />
+                          <View style={[styles.macroSeparator, personalizando && styles.macroSeparatorOverlay, { backgroundColor: cardLine }]} />
 
                           <MacroRow
                             icon={
@@ -413,7 +419,7 @@ export function MealShareModal({ visible, onClose, comida, initialDark, fallback
                         </View>
                       </View>
 
-                      <View style={styles.footerBrand}>
+                      <View style={[styles.footerBrand, personalizando && styles.footerBrandOverlay]}>
                         <View style={[styles.footerLine, { backgroundColor: cardLine }]} />
                         <FooterLogo width={78} height={12} />
                         <View style={[styles.footerLine, { backgroundColor: cardLine }]} />
@@ -600,14 +606,18 @@ const styles = StyleSheet.create({
   innerCardPersonalizado: {
     position: 'absolute',
     borderRadius: 18,
-    paddingHorizontal: 22,
-    paddingTop: 18,
-    paddingBottom: 14,
+    paddingHorizontal: 18,
+    paddingTop: 12,
+    paddingBottom: 10,
+    justifyContent: 'space-around',
   },
   topRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+  },
+  topRowOverlay: {
+    marginBottom: 0,
   },
   dotsCluster: {
     width: 72,
@@ -625,6 +635,10 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     marginTop: 16,
+  },
+  contentRowOverlay: {
+    flex: 0,
+    marginTop: 8,
   },
   leftCol: {
     width: 160,
@@ -646,6 +660,10 @@ const styles = StyleSheet.create({
     height: StyleSheet.hairlineWidth,
     marginTop: 14,
     marginBottom: 12,
+  },
+  macroSeparatorOverlay: {
+    marginTop: 8,
+    marginBottom: 6,
   },
   macroRow: {
     flexDirection: 'row',
@@ -733,6 +751,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+  },
+  footerBrandOverlay: {
+    marginTop: 0,
   },
   footerLine: {
     flex: 1,

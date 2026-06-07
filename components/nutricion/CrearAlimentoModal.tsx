@@ -120,6 +120,8 @@ export function CrearAlimentoModal({
   const handleBarcodeScanned = useCallback((result: BarcodeScanningResult) => {
     const data = String(result.data ?? '').trim();
     if (!data) return;
+    // Bloquea cualquier nuevo escaneo mientras se procesa el actual o ya se encontró un producto.
+    if (cargandoCodigo || foodCodigo) return;
     const now = Date.now();
     if (data === lastScanRef.current.data && now - lastScanRef.current.t < 2200) return;
     lastScanRef.current = { data, t: now };
@@ -132,6 +134,10 @@ export function CrearAlimentoModal({
         const food = await alimentosService.resolverProductoPorCodigoBarras(data);
         if (food) {
           setFoodCodigo(food);
+          // Cierra el modal de escáner y entrega el alimento al padre, que abrirá
+          // el modal de cantidad. Así apagamos la cámara en cuanto hay match.
+          onFoodCreated?.(food);
+          onClose();
         } else {
           setErrorCodigo('No encontramos este producto en Open Food Facts o faltan datos nutricionales.');
         }
@@ -139,7 +145,7 @@ export function CrearAlimentoModal({
         setCargandoCodigo(false);
       }
     })();
-  }, []);
+  }, [cargandoCodigo, foodCodigo, onFoodCreated, onClose]);
 
   /** Valida macros vs kcal y guarda o muestra aviso. */
   const guardarManual = async () => {
@@ -239,12 +245,12 @@ export function CrearAlimentoModal({
           key={`barcode-${cameraMountGen}`}
           style={StyleSheet.absoluteFill}
           facing="back"
-          active={visible && modo === 'escaner'}
-          barcodeScannerEnabled
+          active={visible && modo === 'escaner' && !cargandoCodigo && !foodCodigo}
+          barcodeScannerEnabled={!cargandoCodigo && !foodCodigo}
           barcodeScannerSettings={{
             barcodeTypes: ['ean13', 'ean8', 'upc_a', 'upc_e', 'code128', 'code39'],
           }}
-          onBarcodeScanned={handleBarcodeScanned}
+          onBarcodeScanned={cargandoCodigo || foodCodigo ? undefined : handleBarcodeScanned}
         />
         <View style={styles.scanOverlay} pointerEvents="none">
           <ScannerCorners styles={styles} />

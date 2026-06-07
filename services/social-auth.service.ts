@@ -76,6 +76,25 @@ async function sincronizarNombreSocial(userId: string, nombre: string | null) {
     .eq('id', userId);
 }
 
+async function restaurarAvatarStorage(userId: string) {
+  const { data: archivos } = await supabase.storage
+    .from('avatars')
+    .list(userId, { limit: 1, search: 'avatar' });
+
+  if (!archivos || archivos.length === 0) return;
+
+  const archivo = archivos[0];
+  const { data } = supabase.storage
+    .from('avatars')
+    .getPublicUrl(`${userId}/${archivo.name}`);
+
+  if (data?.publicUrl) {
+    await supabase.auth.updateUser({
+      data: { avatar_url: `${data.publicUrl}?v=${Date.now()}` },
+    });
+  }
+}
+
 /**
  * Inicia sesión con Google.
  * 1. Abre el selector de cuenta de Google (nativo).
@@ -114,6 +133,10 @@ export async function loginConGoogle(): Promise<SocialAuthResult> {
 
     if (data.user?.id) {
       await sincronizarNombreSocial(data.user.id, nombreGoogle);
+
+      // Si el usuario ya tenía avatar propio en Storage, Supabase lo sobreescribe con el de Google.
+      // Buscamos si existe un archivo subido por el usuario y lo restauramos en los metadatos.
+      await restaurarAvatarStorage(data.user.id);
     }
 
     return { ok: true };

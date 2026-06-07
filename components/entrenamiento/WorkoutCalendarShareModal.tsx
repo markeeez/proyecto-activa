@@ -243,9 +243,14 @@ export function WorkoutCalendarShareModal({
   );
 
   const elegirFoto = async (source: 'gallery' | 'camera') => {
-    const permission = source === 'camera'
-      ? await ImagePicker.requestCameraPermissionsAsync()
-      : await ImagePicker.requestMediaLibraryPermissionsAsync();
+    const existing = source === 'camera'
+      ? await ImagePicker.getCameraPermissionsAsync()
+      : await ImagePicker.getMediaLibraryPermissionsAsync();
+    const permission = existing.granted
+      ? existing
+      : source === 'camera'
+        ? await ImagePicker.requestCameraPermissionsAsync()
+        : await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
       Alert.alert(
         'Permiso necesario',
@@ -285,7 +290,8 @@ export function WorkoutCalendarShareModal({
     try {
       const uri = await capturarUri();
       if (!uri) { Alert.alert('Error', 'No se pudo capturar la imagen.'); return; }
-      const { status } = await MediaLibrary.requestPermissionsAsync();
+      const existingPerm = await MediaLibrary.getPermissionsAsync();
+      const { status } = existingPerm.granted ? existingPerm : await MediaLibrary.requestPermissionsAsync();
       if (status !== 'granted') { Alert.alert('Permiso denegado', 'Necesitamos acceso a tu galería para guardar la imagen.'); return; }
       await MediaLibrary.saveToLibraryAsync(uri);
       Alert.alert('Guardado', 'Imagen guardada en tu galería.');
@@ -413,7 +419,7 @@ export function WorkoutCalendarShareModal({
                     >
                       <View style={styles.contentCol}>
                         {/* Header centrado: logo + username */}
-                        <View style={styles.brandHeader}>
+                        <View style={[styles.brandHeader, personalizando && styles.brandHeaderOverlay]}>
                           <Logo width={32} height={32} />
                           <Text style={[styles.username, { color: valueColor }]} numberOfLines={1}>
                             {usernameLabel}
@@ -473,7 +479,7 @@ export function WorkoutCalendarShareModal({
                             ))}
                           </View>
 
-                          <View style={styles.monthSummary}>
+                          <View style={[styles.monthSummary, personalizando && styles.monthSummaryOverlay]}>
                             <View style={styles.summaryTitleRow}>
                               <View style={[styles.summaryLine, { backgroundColor: cardLine }]} />
                               <Text style={[styles.summaryTitle, { color: accent }]}>RESUMEN MENSUAL</Text>
@@ -672,7 +678,15 @@ const styles = StyleSheet.create({
   innerCardPersonalizado: {
     position: 'absolute',
     borderRadius: 18,
-    padding: 18,
+    paddingHorizontal: 14,
+    paddingTop: 12,
+    paddingBottom: 12,
+  },
+  brandHeaderOverlay: {
+    marginBottom: 8,
+  },
+  monthSummaryOverlay: {
+    marginTop: 6,
   },
   contentCol: {
     flex: 1,
